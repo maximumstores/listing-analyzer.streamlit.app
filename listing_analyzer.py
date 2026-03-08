@@ -12,7 +12,7 @@ st.set_page_config(page_title="Listing Analyzer", page_icon="🔍", layout="wide
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-3-haiku-20240307"
 
-SCHEMA = '{"summary":"...","title_score":7,"title_gaps":["gap1"],"title_rec":"rec","bullets_score":7,"bullets_gaps":["gap1"],"bullets_rec":"rec","desc_score":7,"desc_gaps":["gap1"],"desc_rec":"rec","photos_score":7,"photos_gaps":["gap1"],"photos_rec":"rec","aplus_score":7,"aplus_gaps":["gap1"],"aplus_rec":"rec","cosmo_score":65,"cosmo_semantic":[{"relationship":"Used For (Function)","status":"WELL-DEVELOPED","evidence":"...","opportunity":"..."},{"relationship":"Used For (Situation)","status":"GOOD","evidence":"...","opportunity":"..."},{"relationship":"Target Audience","status":"ADEQUATE","evidence":"...","opportunity":"..."},{"relationship":"Solves Problem","status":"GOOD","evidence":"...","opportunity":"..."},{"relationship":"Compared To (Alternative)","status":"PARTIAL","evidence":"...","opportunity":"..."},{"relationship":"Used In (Location)","status":"MINIMAL","evidence":"...","opportunity":"..."},{"relationship":"Used With (Complementary)","status":"MINIMAL","evidence":"...","opportunity":"..."}],"rufus_answered":[{"question":"q","answer":"..."}],"rufus_partial":[{"question":"q","gap":"..."}],"rufus_missing":[{"question":"q","missing":"..."}],"missing_chars":[{"name":"char","how_competitors_use":"use","priority":"HIGH"}],"tech_params":[{"param":"p","competitor_value":"v","our_gap":"g"}],"actions":[{"action":"act","impact":"HIGH","effort":"LOW","details":"det"}]}'
+SCHEMA = '{"health_score":72,"health_breakdown":{"title":8,"bullets":8,"description":7,"photos":7,"aplus":6,"reviews":9,"bsr":8,"price":7,"variants":8,"prime":9},"summary":"...","title_score":7,"title_gaps":["gap1"],"title_rec":"rec","bullets_score":7,"bullets_gaps":["gap1"],"bullets_rec":"rec","desc_score":7,"desc_gaps":["gap1"],"desc_rec":"rec","photos_score":7,"photos_gaps":["gap1"],"photos_rec":"rec","aplus_score":7,"aplus_gaps":["gap1"],"aplus_rec":"rec","cosmo_score":65,"cosmo_semantic":[{"relationship":"Used For (Function)","status":"WELL-DEVELOPED","evidence":"...","opportunity":"..."},{"relationship":"Used For (Situation)","status":"GOOD","evidence":"...","opportunity":"..."},{"relationship":"Target Audience","status":"ADEQUATE","evidence":"...","opportunity":"..."},{"relationship":"Solves Problem","status":"GOOD","evidence":"...","opportunity":"..."},{"relationship":"Compared To (Alternative)","status":"PARTIAL","evidence":"...","opportunity":"..."},{"relationship":"Used In (Location)","status":"MINIMAL","evidence":"...","opportunity":"..."},{"relationship":"Used With (Complementary)","status":"MINIMAL","evidence":"...","opportunity":"..."}],"rufus_answered":[{"question":"q","answer":"..."}],"rufus_partial":[{"question":"q","gap":"..."}],"rufus_missing":[{"question":"q","missing":"..."}],"missing_chars":[{"name":"char","how_competitors_use":"use","priority":"HIGH"}],"tech_params":[{"param":"p","competitor_value":"v","our_gap":"g"}],"actions":[{"action":"act","impact":"HIGH","effort":"LOW","details":"det"}]}'
 
 def get_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
@@ -21,10 +21,16 @@ def get_asin(url):
 def sc(s): return "🟢" if s>=8 else ("🟡" if s>=6 else "🔴")
 def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"}.get(p,p)
 
-def section(label, score, gaps, rec):
+def section(label, score, gaps, rec, raw_text="", char_limit=0):
     c1,c2 = st.columns([4,1])
     c1.markdown(f"**{label}**"); c2.markdown(f"{sc(score)} **{score}/10**")
     st.progress(score/10)
+    if raw_text:
+        char_count = len(raw_text)
+        color = "red" if (char_limit and char_count > char_limit) else "gray"
+        st.markdown(f"<small style='color:{color}'>📝 {char_count} симв{f' / {char_limit} лимит' if char_limit else ''}</small>", unsafe_allow_html=True)
+        with st.expander("Показать текст"):
+            st.markdown(f"> {raw_text}")
     if gaps:
         with st.expander(f"⚠️ Пробелы ({len(gaps)})"):
             for g in gaps: st.markdown(f"- {g}")
@@ -230,6 +236,15 @@ RUFUS — типичные вопросы покупателей для этой
 
 Верни ТОЛЬКО JSON на русском. Все поля — реальные данные из листинга, не "x".
 cosmo_score = среднее по всем связям × 10.
+health_score (0-100) = взвешенное среднее:
+  title×10% + bullets×10% + description×10% + photos×10% + aplus×10% + reviews×15% + bsr×15% + price×10% + variants×5% + prime×5%
+  где каждый компонент нормализован к 0-10.
+  reviews: ≥4.4 и ≥50 отз=10, ≥4.0=7, <4.0=4
+  bsr: ≤1000=10, ≤5000=8, >5000=5, нет=5
+  price: конкурентная=10, выше рынка=6
+  variants: ≥5 цветов И размеры=10, только размеры=7, один вариант=4
+  prime: prime exclusive=10, prime=8, нет=5
+health_breakdown содержит все 10 компонентов со значениями 0-10.
 {SCHEMA}"""
 
     raw = anthropic_call("Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble.", prompt, max_tokens=3000)
@@ -275,6 +290,8 @@ def run_analysis(our_url, competitor_urls, log):
             comp_data_list.append(cdata)
 
     result = analyze_text(our_data, comp_data_list, vision_result, asin, log)
+    st.session_state['our_data'] = our_data
+    st.session_state['comp_data_list'] = comp_data_list
     return result, vision_result
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -318,6 +335,73 @@ if "result" in st.session_state:
     v = st.session_state.get("vision","")
     st.divider()
 
+    # ── Health Score Dashboard ──────────────────────────────────────────────
+    health = r.get("health_score", 0)
+    hb = r.get("health_breakdown", {})
+    h_color = "#22c55e" if health >= 75 else ("#f59e0b" if health >= 50 else "#ef4444")
+    h_label = "Отличный листинг" if health >= 75 else ("Есть над чем работать" if health >= 50 else "Требует срочных улучшений")
+    h_emoji = "🟢" if health >= 75 else ("🟡" if health >= 50 else "🔴")
+
+    our_data_h = st.session_state.get("our_data", {})
+    pi_h = our_data_h.get("product_information", {})
+    asin_h = our_data_h.get("parent_asin", "") or pi_h.get("ASIN","")
+    brand_h = our_data_h.get("brand","")
+    price_h = our_data_h.get("price","")
+    rating_h = our_data_h.get("average_rating","")
+    reviews_h = pi_h.get("Customer Reviews",{}).get("ratings_count","")
+    bsr_h = str(pi_h.get("Best Sellers_rank", pi_h.get("Best Sellers Rank","")))[:60]
+    title_h = our_data_h.get("title","")
+    title_len = len(title_h)
+
+    st.markdown(f"""
+<div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;margin-bottom:20px;color:white">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+    <div>
+      <div style="font-size:0.85rem;opacity:0.7;margin-bottom:4px">{brand_h} · {asin_h}</div>
+      <div style="font-size:1rem;font-weight:600;max-width:500px;line-height:1.3">{title_h[:80]}{"..." if len(title_h)>80 else ""}</div>
+      <div style="display:flex;gap:16px;margin-top:8px;font-size:0.85rem;opacity:0.8">
+        <span>💰 {price_h}</span>
+        <span>⭐ {rating_h} ({reviews_h} отз.)</span>
+        <span>📊 {bsr_h[:40]}</span>
+        <span style="color:{'#fca5a5' if title_len>125 else '#86efac'}">📝 Title: {title_len} симв.</span>
+      </div>
+    </div>
+    <div style="text-align:center;min-width:120px">
+      <div style="font-size:3.5rem;font-weight:800;color:{h_color};line-height:1">{health}%</div>
+      <div style="font-size:0.9rem;color:{h_color};margin-top:4px">{h_emoji} {h_label}</div>
+    </div>
+  </div>
+  <div style="margin-top:16px;background:rgba(255,255,255,0.1);border-radius:8px;height:12px">
+    <div style="background:{h_color};width:{health}%;height:12px;border-radius:8px;transition:width 0.5s"></div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
+""", unsafe_allow_html=True)
+
+    score_items = [
+        ("Title", hb.get("title",0), 10),
+        ("Bullets", hb.get("bullets",0), 10),
+        ("Описание", hb.get("description",0), 10),
+        ("Фото", hb.get("photos",0), 10),
+        ("A+", hb.get("aplus",0), 10),
+        ("Отзывы", hb.get("reviews",0), 10),
+        ("BSR", hb.get("bsr",0), 10),
+        ("Цена", hb.get("price",0), 10),
+        ("Варианты", hb.get("variants",0), 10),
+        ("Prime", hb.get("prime",0), 10),
+    ]
+    cols = st.columns(len(score_items))
+    for col, (label, val, mx) in zip(cols, score_items):
+        pct = int(val/mx*100) if mx else 0
+        c2 = "#22c55e" if pct>=75 else ("#f59e0b" if pct>=50 else "#ef4444")
+        col.markdown(f"""<div style="background:rgba(255,255,255,0.08);border-radius:8px;padding:8px;text-align:center">
+<div style="font-size:1.3rem;font-weight:700;color:{c2}">{pct}%</div>
+<div style="font-size:0.7rem;opacity:0.7;margin-top:2px">{label}</div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("</div></div>", unsafe_allow_html=True)
+    st.divider()
+    # ── End Health Score ─────────────────────────────────────────────────────
+
     if v:
         st.subheader("📸 Vision анализ фотографий")
         images_stored = st.session_state.get("images", [])
@@ -330,22 +414,39 @@ if "result" in st.session_state:
             text = blocks[i] if i < len(blocks) else ""
             score_match = re.search(r"(\d+)/10", text)
             score = int(score_match.group(1)) if score_match else 0
-            score_icon = "🟢" if score >= 8 else ("🟡" if score >= 6 else "🔴")
-            lines = text.split("\n")
-            photo_type = lines[0].strip() if lines else f"Фото #{i+1}"
-            rest = "\n".join(lines[1:]).strip()
+            bar_color = "#22c55e" if score >= 8 else ("#f59e0b" if score >= 6 else "#ef4444")
+            score_label = "Отлично" if score >= 8 else ("Хорошо" if score >= 6 else "Слабо")
 
+            # Parse fields
+            typ = re.search(r"[Тт]ип:\s*(.+)", text)
+            strong = re.search(r"[Сс]ильная сторона:\s*(.+)", text)
+            weak = re.search(r"[Сс]лабость:\s*(.+)", text)
+            photo_type = typ.group(1).strip() if typ else f"Фото #{i+1}"
+            strong_text = strong.group(1).strip() if strong else ""
+            weak_text = weak.group(1).strip() if weak else ""
+
+            img_bytes = __import__("base64").b64decode(img["b64"])
             with st.container(border=True):
                 c1, c2 = st.columns([1, 2])
                 with c1:
-                    img_bytes = __import__("base64").b64decode(img["b64"])
                     st.image(img_bytes, use_container_width=True)
-                    if score:
-                        st.markdown(f"**{score_icon} {score}/10**")
-                        st.progress(score / 10)
                 with c2:
-                    st.markdown(f"**{photo_type}**")
-                    st.markdown(rest[:500] if rest else text[:500])
+                    st.markdown(f"**Фото #{i+1} — {photo_type}**")
+                    st.markdown(f"""
+<div style="display:flex;align-items:center;gap:12px;margin:8px 0">
+  <div style="font-size:2rem;font-weight:700;color:{bar_color}">{score}/10</div>
+  <div style="flex:1">
+    <div style="background:#e5e7eb;border-radius:6px;height:10px">
+      <div style="background:{bar_color};width:{score*10}%;height:10px;border-radius:6px"></div>
+    </div>
+    <div style="color:{bar_color};font-size:0.8rem;margin-top:2px">{score_label}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+                    if strong_text:
+                        st.success(f"✅ {strong_text}")
+                    if weak_text:
+                        st.warning(f"⚠️ {weak_text}")
 
         if not images_stored:
             st.markdown(v)
@@ -364,18 +465,80 @@ if "result" in st.session_state:
                 c3.caption(f"Усилия: {a.get('effort','')}")
                 if a.get("details"): st.caption(a["details"])
 
+    our_data_stored = st.session_state.get("our_data", {})
+    comp_data_stored = st.session_state.get("comp_data_list", [])
+    our_title = our_data_stored.get("title", "")
+    our_bullets = our_data_stored.get("feature_bullets", [])
+    our_desc = our_data_stored.get("description", "")
+
     st.subheader("📝 Оценки")
-    t1,t2 = st.tabs(["Текст","Визуал"])
+    t1, t2, t3 = st.tabs(["Текст", "Визуал", "🏆 Сравнение с конкурентами"])
     with t1:
-        section("Title",       r.get("title_score",0),   r.get("title_gaps",[]),   r.get("title_rec",""))
+        section("Title", r.get("title_score",0), r.get("title_gaps",[]), r.get("title_rec",""),
+                raw_text=our_title, char_limit=125)
         st.divider()
-        section("Bullets",     r.get("bullets_score",0), r.get("bullets_gaps",[]), r.get("bullets_rec",""))
+        bullets_text = "\n".join([f"• {b}" for b in our_bullets]) if our_bullets else ""
+        section("Bullets", r.get("bullets_score",0), r.get("bullets_gaps",[]), r.get("bullets_rec",""),
+                raw_text=bullets_text)
         st.divider()
-        section("Description", r.get("desc_score",0),    r.get("desc_gaps",[]),    r.get("desc_rec",""))
+        section("Description", r.get("desc_score",0), r.get("desc_gaps",[]), r.get("desc_rec",""),
+                raw_text=str(our_desc)[:300] if our_desc else "")
     with t2:
         section("Фото", r.get("photos_score",0), r.get("photos_gaps",[]), r.get("photos_rec",""))
         st.divider()
-        section("A+",   r.get("aplus_score",0),  r.get("aplus_gaps",[]),  r.get("aplus_rec",""))
+        section("A+", r.get("aplus_score",0), r.get("aplus_gaps",[]), r.get("aplus_rec",""))
+    with t3:
+        if not comp_data_stored:
+            st.info("Добавь конкурентов в поле выше и запусти анализ повторно")
+        else:
+            # Build comparison table
+            metrics = [
+                ("Название", lambda d: d.get("title","")[:60]+"..." if len(d.get("title",""))>60 else d.get("title","")),
+                ("Цена", lambda d: d.get("price","")),
+                ("Рейтинг ⭐", lambda d: d.get("average_rating","")),
+                ("Отзывов", lambda d: d.get("product_information",{}).get("Customer Reviews",{}).get("ratings_count","")),
+                ("BSR", lambda d: str(d.get("product_information",{}).get("Best Sellers Rank",""))[:50]),
+                ("Материал", lambda d: d.get("product_information",{}).get("Material Type","")),
+                ("A+", lambda d: "✅" if d.get("aplus") else "❌"),
+                ("Видео", lambda d: str(d.get("number_of_videos","0"))),
+                ("Фото", lambda d: str(len(d.get("images",[])))),
+                ("Prime", lambda d: "✅" if d.get("is_prime_exclusive") else "—"),
+            ]
+            all_products = [our_data_stored] + comp_data_stored
+            labels = ["🔵 НАШ"] + [f"Конкурент {i+1}" for i in range(len(comp_data_stored))]
+
+            header_cols = st.columns(len(all_products)+1)
+            header_cols[0].markdown("**Метрика**")
+            for j, label in enumerate(labels):
+                header_cols[j+1].markdown(f"**{label}**")
+            st.divider()
+
+            for metric_name, get_val in metrics:
+                row_cols = st.columns(len(all_products)+1)
+                row_cols[0].caption(metric_name)
+                vals = [get_val(p) for p in all_products]
+                for j, val in enumerate(vals):
+                    if j == 0:
+                        row_cols[j+1].markdown(f"**{val}**")
+                    else:
+                        row_cols[j+1].caption(str(val))
+            
+            # Score comparison
+            st.divider()
+            st.markdown("**📊 Оценки листинга**")
+            score_metrics = [
+                ("Title", "title_score"),
+                ("Bullets", "bullets_score"),
+                ("Description", "desc_score"),
+                ("Фото", "photos_score"),
+                ("A+", "aplus_score"),
+                ("COSMO", "cosmo_score"),
+            ]
+            score_cols = st.columns(len(score_metrics))
+            for col, (label, key) in zip(score_cols, score_metrics):
+                val = r.get(key, 0)
+                max_val = 100 if key == "cosmo_score" else 10
+                col.metric(label, f"{val}/{max_val}", delta=None)
 
     if r.get("missing_chars"):
         st.subheader("🔍 Отсутствующие характеристики")
