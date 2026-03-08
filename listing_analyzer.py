@@ -129,43 +129,39 @@ def analyze_vision(images, product_data, asin, log, lang=None):
     bsr    = product_data.get("bestseller_rank","")
 
     if lang == "en":
-        intro = f"""You are an Amazon listing expert. Analyze the product photos.
+        intro = f"""You are an Amazon photo conversion expert. Score each product photo using this RUBRIC.
 
-Product info:
-- ASIN: {asin}
-- Title: {title}
-- Price: {price}
-- Rating: {rating} ({reviews} reviews)
-- BSR: {bsr}
+Product: {title} | ASIN: {asin} | Price: {price} | Rating: {rating}
 
-For EACH photo analyze:
-1. Type (main/lifestyle/infographic/A+ banner/details/size chart)
-2. What is visible — background, model, text and numbers on photo
-3. Conversion score 1-10
-4. Strength and weakness
+SCORING RUBRIC (each photo scored 1-10):
++2 pts — Subject clarity: product clearly visible, sharp focus, no blur
++2 pts — Background: main=pure white required; lifestyle=relevant setting; infographic=clean layout
++2 pts — Information value: shows features/benefits/use case relevant to buyer decision
++2 pts — Amazon compliance: no watermarks, no promotional text on main, correct aspect ratio
++1 pt  — Emotional/lifestyle appeal: buyer can visualize using the product
++1 pt  — Uniqueness vs generic stock photo
 
-At the end — top 3 specific photo improvements to boost conversion.
-Be specific and concrete."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nAnswer STRICTLY in this format (4 lines only):\nType: ...\nScore: X/10\nStrength: ...\nWeakness: ..."
+SCORE MEANINGS: 9-10=excellent, 7-8=good, 5-6=needs improvement, 1-4=poor/replace
+
+PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | comparison | packaging"""
+        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 4 lines, no more:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific thing done well]\nWeakness: [1 specific actionable fix]"
     else:
-        intro = f"""Ты эксперт по Amazon листингам. Проанализируй фотографии продукта.
+        intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
 
-Информация о продукте:
-- ASIN: {asin}
-- Title: {title}
-- Цена: {price}
-- Рейтинг: {rating} ({reviews} отзывов)
-- BSR: {bsr}
+Товар: {title} | ASIN: {asin} | Цена: {price} | Рейтинг: {rating}
 
-Для КАЖДОГО фото:
-1. Тип (главное/lifestyle/инфографика/A+ баннер/детали/размерная сетка)
-2. Что видно — фон, модель, текст и цифры на фото
-3. Оценка конверсии 1-10
-4. Сильная сторона и слабость
+РУБРИК ОЦЕНКИ (каждое фото 1-10 баллов):
++2 балла — Чёткость объекта: товар хорошо виден, резкий фокус, нет размытия
++2 балла — Фон: главное фото=чисто белый; lifestyle=релевантная обстановка; инфографика=чистый макет
++2 балла — Информационная ценность: показывает характеристики/пользу/сценарий важный для покупателя
++2 балла — Соответствие Amazon: нет водяных знаков, нет промотекста на главном фото, правильное соотношение
++1 балл  — Эмоциональный/lifestyle appeal: покупатель представляет себя с товаром
++1 балл  — Уникальность: не выглядит как стоковое фото
 
-В конце — топ 3 конкретных улучшения фото для роста конверсии.
-Будь конкретен."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nОтветь СТРОГО в формате (4 строки, не больше):\nТип: ...\nОценка: X/10\nСильная сторона: ...\nСлабость: ..."
+ЗНАЧЕНИЯ: 9-10=отлично, 7-8=хорошо, 5-6=требует улучшения, 1-4=слабо/заменить
+
+ТИПЫ ФОТ: главное | lifestyle | инфографика | размерная-сетка | детали | A+-баннер | сравнение | упаковка"""
+        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки, не больше:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретное достоинство]\nСлабость: [1 конкретное улучшение с примером]"
 
     blocks = [{"type":"text","text": intro}]
     for i,img in enumerate(images):
