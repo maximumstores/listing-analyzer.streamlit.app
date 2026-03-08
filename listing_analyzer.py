@@ -130,7 +130,7 @@ def analyze_images_vision(images, asin, log):
             "content-type": "application/json"
         },
         json={
-            "model": "claude-sonnet-4-5-20250929",
+            "model": "claude-3-haiku-20240307",
             "max_tokens": 4000,
             "messages": [{"role": "user", "content": content}]
         },
@@ -166,7 +166,7 @@ Search each by ASIN and summarize what you find."""
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-sonnet-4-5-20250929", "max_tokens": 6000,
+            json={"model": "claude-3-haiku-20240307", "max_tokens": 6000,
                   "tools": [{"type": "web_search_20250305", "name": "web_search"}],
                   "messages": messages},
             timeout=120
@@ -218,7 +218,7 @@ Search each by ASIN and summarize what you find."""
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
         json={
-            "model": "claude-sonnet-4-5-20250929",
+            "model": "claude-3-haiku-20240307",
             "max_tokens": 8000,
             "system": "Amazon listing optimization expert. Respond ONLY with valid JSON. No markdown. No explanation.",
             "messages": [{"role": "user", "content": f"""Analyze this Amazon listing. OUR product: {asin}
@@ -296,7 +296,7 @@ with st.sidebar:
             key = st.secrets["ANTHROPIC_API_KEY"]
             r = requests.post("https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": "claude-sonnet-4-5-20250929", "max_tokens": 10, "messages": [{"role":"user","content":"hi"}]},
+                json={"model": "claude-3-haiku-20240307", "max_tokens": 10, "messages": [{"role":"user","content":"hi"}]},
                 timeout=30)
             if r.ok:
                 st.success(f"✅ API работает! Key: ...{key[-8:]}")
