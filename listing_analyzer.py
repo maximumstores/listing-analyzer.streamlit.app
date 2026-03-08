@@ -88,12 +88,26 @@ Schema: {SCHEMA}"""
         raise ValueError(f"Gemini API error {resp.status_code}: {resp.text[:300]}")
 
     data = resp.json()
+
+    # Full diagnostics
+    candidates = data.get("candidates", [])
+    finish_reason = candidates[0].get("finishReason", "unknown") if candidates else "no_candidates"
+    parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+    part_types = [list(p.keys()) for p in parts]
+    log(f"  candidates: {len(candidates)}, finishReason: {finish_reason}")
+    log(f"  parts: {len(parts)}, types: {part_types}")
+    if data.get("promptFeedback"):
+        log(f"  promptFeedback: {data['promptFeedback']}")
+
     raw = ""
-    for part in data.get("candidates", [{}])[0].get("content", {}).get("parts", []):
+    for part in parts:
         if "text" in part:
             raw += part["text"]
 
     log(f"✅ Получено {len(raw)} символов")
+    if not raw and parts:
+        # show what parts contain if no text
+        log(f"  Non-text parts: {str(parts)[:300]}")
 
     s = raw.strip().replace("```json", "").replace("```", "").strip()
     start, end = s.find("{"), s.rfind("}")
