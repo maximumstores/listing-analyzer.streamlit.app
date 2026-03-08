@@ -144,7 +144,7 @@ def analyze_vision(images, product_data, asin, log):
     }]
 
     for i,img in enumerate(images):
-        blocks.append({"type":"text","text":f"\n--- Фото №{i+1} ---"})
+        blocks.append({"type":"text","text":f"\n--- Фото №{i+1} ---\nОтветь: Тип фото | Оценка X/10 | Сильная сторона | Слабость"})
         blocks.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
 
     result = anthropic_vision(blocks, max_tokens=2000)
@@ -235,6 +235,10 @@ def run_analysis(our_url, competitor_urls, log):
         images = download_images(img_urls, log)
     vision_result = analyze_vision(images, our_data, asin, log) if images else ""
     if not images: log("⚠️ Фото не загружены")
+    st.session_state["images"] = images
+    # Store images for display
+    import streamlit as _st
+    _st.session_state["images"] = images
 
     # Competitors
     active = [u.strip() for u in competitor_urls if u.strip()]
@@ -291,7 +295,35 @@ if "result" in st.session_state:
     st.divider()
 
     if v:
-        with st.expander("👁️ Vision анализ фотографий", expanded=True):
+        st.subheader("📸 Vision анализ фотографий")
+        images_stored = st.session_state.get("images", [])
+
+        # Split by photo blocks using separator we put in prompt
+        blocks = re.split(r"---\s*Фото\s*№?\s*\d+\s*---", v)
+        blocks = [b.strip() for b in blocks if b.strip()]
+
+        for i, img in enumerate(images_stored):
+            text = blocks[i] if i < len(blocks) else ""
+            score_match = re.search(r"(\d+)/10", text)
+            score = int(score_match.group(1)) if score_match else 0
+            score_icon = "🟢" if score >= 8 else ("🟡" if score >= 6 else "🔴")
+            lines = text.split("\n")
+            photo_type = lines[0].strip() if lines else f"Фото #{i+1}"
+            rest = "\n".join(lines[1:]).strip()
+
+            with st.container(border=True):
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    img_bytes = __import__("base64").b64decode(img["b64"])
+                    st.image(img_bytes, use_container_width=True)
+                    if score:
+                        st.markdown(f"**{score_icon} {score}/10**")
+                        st.progress(score / 10)
+                with c2:
+                    st.markdown(f"**{photo_type}**")
+                    st.markdown(rest[:500] if rest else text[:500])
+
+        if not images_stored:
             st.markdown(v)
         st.divider()
 
