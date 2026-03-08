@@ -144,7 +144,7 @@ def analyze_vision(images, product_data, asin, log):
     }]
 
     for i,img in enumerate(images):
-        blocks.append({"type":"text","text":f"\n--- Фото №{i+1} ---\nОтветь: Тип фото | Оценка X/10 | Сильная сторона | Слабость"})
+        blocks.append({"type":"text","text":f"\nPHOTO_BLOCK_{i+1}\nОтветь СТРОГО в формате (4 строки, не больше):\nТип: ...\nОценка: X/10\nСильная сторона: ...\nСлабость: ..."})
         blocks.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
 
     result = anthropic_vision(blocks, max_tokens=2000)
@@ -178,10 +178,7 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log):
     comp_text = "\n\n".join([f"КОНКУРЕНТ {i+1}:\n{fmt(d)}" for i,d in enumerate(competitor_data_list) if d])
     vision_section = f"\nVISION АНАЛИЗ ФОТО:\n{vision_result[:1500]}" if vision_result else ""
 
-    prompt = f"""Ты эксперт по Amazon листингам. Проанализируй листинг по трём направлениям:
-1. Классический анализ (title, bullets, description, фото, A+)
-2. COSMO семантический анализ (11 связей)
-3. Rufus Q&A анализ (какие вопросы отвечает/не отвечает листинг)
+    prompt = f"""Ты эксперт по Amazon листингам. Оцени листинг строго по рубрику ниже.
 
 НАШ ЛИСТИНГ (ASIN {asin}):
 {our_text}
@@ -189,23 +186,50 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log):
 {comp_text}
 {vision_section}
 
-COSMO анализирует 11 семантических связей:
-- Used For (Function) — для чего используется
-- Used For (Situation) — в каких ситуациях
-- Target Audience — кто покупатель (возраст, пол, стиль жизни)
-- Solves Problem (xIntent) — какую проблему решает
-- Product Type — что это за продукт
-- Capable Of — на что способен
-- Compared To (Alternative) — vs конкуренты/материалы
-- Develops Skills (xEffect) — какой эффект для пользователя
-- Used In (Location) — где используется
-- Used On (Time/Season) — когда/в какой сезон
-- Used With (Complementary) — с чем используется
+═══ РУБРИК ОЦЕНКИ ═══
 
-RUFUS задаёт типичные вопросы покупателей — оцени насколько листинг на них отвечает.
+TITLE (0-10):
+- Длина ≤125 символов: +1.5 балла
+- Бренд + тип товара + материал + характеристики: +3.5 балла
+- Чёткость назначения (для спорта / на каждый день): +3 балла
+- Нет спецсимволов (! $ ? ¬): +1 балл
+- Нет повторов слов ≥3 раз: +1 балл
 
-Верни ТОЛЬКО JSON на русском. Все поля заполни реальными данными — не "x".
-cosmo_score = общий балл COSMO от 0 до 100.
+BULLETS (0-10):
+- ≤5 буллетов: +1.5 балла
+- Формат "Свойство: Детали. Польза": +2.5 балла
+- Покрытие: материал + комфорт + функциональность + уход: +4 балла
+- Длина каждого ≤255 байт: +1 балл
+- Нет эмодзи: +1 балл
+
+DESCRIPTION (0-10):
+- Отсутствует = 0 баллов автоматически
+- Структура (заголовки, списки, абзацы): +3 балла
+- Преимущества + характеристики + сценарии: +5 баллов
+- Ответы на возражения из отзывов: +2 балла
+
+PHOTOS (0-10):
+- 6+ изображений + видео = 10; 6+ без видео = 8; <6 = штраф
+- Чёткость и высокое разрешение: +4 балла
+- Разнообразие: модель + крупный план + lifestyle + инфографика: +3 балла
+
+APLUS (0-10):
+- Отсутствует = 0 автоматически
+- Структурированный текст (заголовки, логика): +2 балла
+- Текст ≤80 символов в каждом модуле: +1.5 балла
+- Brand Story присутствует: +1.5 балла
+- Изображения с текстовыми описаниями: +1 балл
+
+COSMO (0-100) — 11 семантических связей Amazon:
+Used For Function, Used For Situation, Target Audience, Solves Problem,
+Product Type, Capable Of, Compared To Alternative, Develops Skills,
+Used In Location, Used On Season, Used With Complementary.
+Каждая связь: WELL-DEVELOPED=9-10, GOOD=7-8, ADEQUATE=5-6, PARTIAL=3-4, MINIMAL=1-2.
+
+RUFUS — типичные вопросы покупателей для этой категории.
+
+Верни ТОЛЬКО JSON на русском. Все поля — реальные данные из листинга, не "x".
+cosmo_score = среднее по всем связям × 10.
 {SCHEMA}"""
 
     raw = anthropic_call("Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble.", prompt, max_tokens=3000)
@@ -298,8 +322,8 @@ if "result" in st.session_state:
         st.subheader("📸 Vision анализ фотографий")
         images_stored = st.session_state.get("images", [])
 
-        # Split by photo blocks using separator we put in prompt
-        blocks = re.split(r"---\s*Фото\s*№?\s*\d+\s*---", v)
+        # Split by photo blocks
+        blocks = re.split(r"PHOTO_BLOCK_\d+", v)
         blocks = [b.strip() for b in blocks if b.strip()]
 
         for i, img in enumerate(images_stored):
