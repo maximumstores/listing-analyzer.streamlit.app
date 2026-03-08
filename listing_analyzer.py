@@ -43,7 +43,7 @@ def fetch_images_scrapingdog(asin, log):
     try:
         r = requests.get(
             "https://api.scrapingdog.com/amazon/product",
-            params={"api_key": sd_key, "asin": asin, "country": "us"},
+            params={"api_key": sd_key, "asin": asin, "domain": "com"},
             timeout=60
         )
         if not r.ok:
@@ -286,20 +286,7 @@ with st.expander("➕ Конкуренты (до 5)", expanded=False):
         for i in range(5)
     ]
 
-st.subheader("📸 Фото листинга")
-st.caption("Загрузи вручную если нет ScrapingDog ключа. Или оставь пустым — попробуем загрузить автоматически.")
-uploaded_files = st.file_uploader(
-    "Скрины фото с Amazon", 
-    type=["jpg","jpeg","png","webp"],
-    accept_multiple_files=True,
-    help="Правая кнопка на фото в Amazon → Сохранить изображение как..."
-)
-
-if uploaded_files:
-    cols = st.columns(min(len(uploaded_files), 6))
-    for i, f in enumerate(uploaded_files):
-        with cols[i % 6]:
-            st.image(f, caption=f"#{i+1}", width=80)
+uploaded_files = []
 
 st.divider()
 if st.button("🚀 Запустить анализ", type="primary", disabled=not our_url.strip()):
