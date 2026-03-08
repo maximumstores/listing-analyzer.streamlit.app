@@ -12,7 +12,7 @@ st.set_page_config(page_title="Listing Analyzer", page_icon="🔍", layout="wide
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-3-haiku-20240307"
 
-SCHEMA = '{"summary":"...","title_score":7,"title_gaps":["gap1","gap2"],"title_rec":"rec","bullets_score":7,"bullets_gaps":["gap1"],"bullets_rec":"rec","desc_score":7,"desc_gaps":["gap1"],"desc_rec":"rec","photos_score":7,"photos_gaps":["gap1"],"photos_rec":"rec","aplus_score":7,"aplus_gaps":["gap1"],"aplus_rec":"rec","missing_chars":[{"name":"char","how_competitors_use":"use","priority":"HIGH"}],"tech_params":[{"param":"p","competitor_value":"v","our_gap":"g"}],"actions":[{"action":"act","impact":"HIGH","effort":"LOW","details":"det"}]}'
+SCHEMA = '{"summary":"...","title_score":7,"title_gaps":["gap1"],"title_rec":"rec","bullets_score":7,"bullets_gaps":["gap1"],"bullets_rec":"rec","desc_score":7,"desc_gaps":["gap1"],"desc_rec":"rec","photos_score":7,"photos_gaps":["gap1"],"photos_rec":"rec","aplus_score":7,"aplus_gaps":["gap1"],"aplus_rec":"rec","cosmo_score":65,"cosmo_semantic":[{"relationship":"Used For (Function)","status":"WELL-DEVELOPED","evidence":"...","opportunity":"..."},{"relationship":"Used For (Situation)","status":"GOOD","evidence":"...","opportunity":"..."},{"relationship":"Target Audience","status":"ADEQUATE","evidence":"...","opportunity":"..."},{"relationship":"Solves Problem","status":"GOOD","evidence":"...","opportunity":"..."},{"relationship":"Compared To (Alternative)","status":"PARTIAL","evidence":"...","opportunity":"..."},{"relationship":"Used In (Location)","status":"MINIMAL","evidence":"...","opportunity":"..."},{"relationship":"Used With (Complementary)","status":"MINIMAL","evidence":"...","opportunity":"..."}],"rufus_answered":[{"question":"q","answer":"..."}],"rufus_partial":[{"question":"q","gap":"..."}],"rufus_missing":[{"question":"q","missing":"..."}],"missing_chars":[{"name":"char","how_competitors_use":"use","priority":"HIGH"}],"tech_params":[{"param":"p","competitor_value":"v","our_gap":"g"}],"actions":[{"action":"act","impact":"HIGH","effort":"LOW","details":"det"}]}'
 
 def get_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
@@ -171,14 +171,17 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log):
             f"Bullets: {chr(10).join(bullets[:5])}",
             f"Reviews snippets: {review_texts}",
             f"Description: {str(data.get('description',''))[:300]}",
-            f"A+ Content: {str(data.get('aplus_content','нет данных'))[:500]}",
+            f"A+ Content: {str(data.get('aplus_content','нет данных'))[:3000]}",
         ])
 
     our_text = fmt(our_data)
     comp_text = "\n\n".join([f"КОНКУРЕНТ {i+1}:\n{fmt(d)}" for i,d in enumerate(competitor_data_list) if d])
     vision_section = f"\nVISION АНАЛИЗ ФОТО:\n{vision_result[:1500]}" if vision_result else ""
 
-    prompt = f"""Проанализируй Amazon листинг и дай рекомендации.
+    prompt = f"""Ты эксперт по Amazon листингам. Проанализируй листинг по трём направлениям:
+1. Классический анализ (title, bullets, description, фото, A+)
+2. COSMO семантический анализ (11 связей)
+3. Rufus Q&A анализ (какие вопросы отвечает/не отвечает листинг)
 
 НАШ ЛИСТИНГ (ASIN {asin}):
 {our_text}
@@ -186,7 +189,23 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log):
 {comp_text}
 {vision_section}
 
-Верни ТОЛЬКО JSON на русском языке. Заполни ВСЕ поля реальными данными из листинга, не "x".
+COSMO анализирует 11 семантических связей:
+- Used For (Function) — для чего используется
+- Used For (Situation) — в каких ситуациях
+- Target Audience — кто покупатель (возраст, пол, стиль жизни)
+- Solves Problem (xIntent) — какую проблему решает
+- Product Type — что это за продукт
+- Capable Of — на что способен
+- Compared To (Alternative) — vs конкуренты/материалы
+- Develops Skills (xEffect) — какой эффект для пользователя
+- Used In (Location) — где используется
+- Used On (Time/Season) — когда/в какой сезон
+- Used With (Complementary) — с чем используется
+
+RUFUS задаёт типичные вопросы покупателей — оцени насколько листинг на них отвечает.
+
+Верни ТОЛЬКО JSON на русском. Все поля заполни реальными данными — не "x".
+cosmo_score = общий балл COSMO от 0 до 100.
 {SCHEMA}"""
 
     raw = anthropic_call("Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble.", prompt, max_tokens=3000)
@@ -318,6 +337,48 @@ if "result" in st.session_state:
                 st.markdown(f"**{p.get('param','')}**")
                 c1,c2 = st.columns(2)
                 c1.caption(f"🏆 {p.get('competitor_value','')}"); c2.caption(f"→ {p.get('our_gap','')}")
+
+    # COSMO Section
+    if r.get("cosmo_score") or r.get("cosmo_semantic"):
+        st.divider()
+        st.subheader("🧠 COSMO / Rufus Анализ")
+        cosmo_score = r.get("cosmo_score", 0)
+        color = "🟢" if cosmo_score >= 80 else ("🟡" if cosmo_score >= 60 else "🔴")
+        st.metric("COSMO Score", f"{color} {cosmo_score}/100")
+        st.progress(cosmo_score/100)
+
+        if r.get("cosmo_semantic"):
+            st.markdown("**📡 Семантические связи**")
+            status_icon = {"WELL-DEVELOPED":"✅","GOOD":"✅","ADEQUATE":"⚠️","PARTIAL":"⚠️","MINIMAL":"❌"}
+            for rel in r["cosmo_semantic"]:
+                icon = status_icon.get(rel.get("status",""), "❓")
+                with st.container(border=True):
+                    st.markdown(f"{icon} **{rel.get('relationship','')}** — {rel.get('status','')}")
+                    if rel.get("evidence"): st.caption(f"✓ {rel['evidence']}")
+                    if rel.get("opportunity"): st.info(f"💡 {rel['opportunity']}")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if r.get("rufus_answered"):
+                st.markdown("**✅ Rufus отвечает**")
+                for q in r["rufus_answered"]:
+                    with st.container(border=True):
+                        st.caption(q.get("question",""))
+                        st.success(q.get("answer","")[:150])
+        with col2:
+            if r.get("rufus_partial"):
+                st.markdown("**⚠️ Частично**")
+                for q in r["rufus_partial"]:
+                    with st.container(border=True):
+                        st.caption(q.get("question",""))
+                        st.warning(q.get("gap","")[:150])
+        with col3:
+            if r.get("rufus_missing"):
+                st.markdown("**❌ Не отвечает**")
+                for q in r["rufus_missing"]:
+                    with st.container(border=True):
+                        st.caption(q.get("question",""))
+                        st.error(q.get("missing","")[:150])
 
     with st.expander("🔧 Raw JSON"):
         st.json(r)
