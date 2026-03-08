@@ -325,8 +325,9 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     images = download_images(img_urls, log) if img_urls else []
     st.session_state["images"] = images
 
+    _lang = st.session_state.get("analysis_lang","ru")
     _prog(30, "👁️ Vision анализ фото...")
-    vision_result = analyze_vision(images, our_data, asin, log) if images else ""
+    vision_result = analyze_vision(images, our_data, asin, log, lang=_lang) if images else ""
     if not images: log("⚠️ Фото не загружены")
 
     # Competitors — full analysis (scrape + vision + AI) for each
