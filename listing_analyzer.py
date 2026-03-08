@@ -18,7 +18,7 @@ GEMINI_KEYS = [
     "AIzaSyBd6gmCW9CZ2uX_TREHozfCOQEyQcqeF-M",
 ]
 GEMINI_URL   = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-2.0-flash-lite"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-3-haiku-20240307"
 
