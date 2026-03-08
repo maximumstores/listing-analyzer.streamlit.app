@@ -31,7 +31,7 @@ def run_analysis(our_url, competitor_urls, model_id, log):
     log(f"**Листингов:** {len(all_urls)}")
     for i, u in enumerate(all_urls):
         log(f"- {'НАШ' if i==0 else f'Конк.{i}'}: `{u}`")
-    log("🌐 Gemini читает страницы через url_context...")
+    log("🔍 Gemini ищет данные через Google Search...")
 
     prompt = f"""Analyze these Amazon product listing pages for a competitive audit.
 
@@ -49,7 +49,7 @@ Schema: {SCHEMA}"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "tools": [{"url_context": {}}],
+        "tools": [{"google_search": {}}],
         "generationConfig": {"maxOutputTokens": 8192},
     }
 
@@ -98,7 +98,7 @@ def section(label, score, gaps, advantages, rec):
 # ── App ───────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Анализ листинга", page_icon="🔍", layout="wide")
 st.title("🔍 Конкурентный анализ листинга")
-st.caption("Gemini читает Amazon страницы напрямую по URL — просто вставь ссылки")
+st.caption("Gemini ищет данные листингов через Google Search — просто вставь ссылки или ASIN")
 
 with st.sidebar:
     st.header("⚙️ Модель")
