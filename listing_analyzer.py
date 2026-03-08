@@ -329,20 +329,37 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     vision_result = analyze_vision(images, our_data, asin, log) if images else ""
     if not images: log("⚠️ Фото не загружены")
 
-    # Competitors
+    # Competitors — full analysis (scrape + vision + AI) for each
     active = [u.strip() for u in competitor_urls if u.strip()]
     comp_data_list = []
-    comp_step = 20 // max(len(active), 1)
+    _lang = st.session_state.get("analysis_lang","ru")
+    n_active = max(len(active), 1)
+
     for i, url in enumerate(active[:3]):
         casin = get_asin(url)
-        if casin:
-            _prog(50 + i*comp_step, f"🔍 Конкурент {i+1}: {casin}...")
-            cdata, _ = scrapingdog_product(casin, log)
-            cdata["_input_asin"] = casin
-            comp_data_list.append(cdata)
+        if not casin: continue
+        base_pct = 50 + i * (20 // n_active)
 
-    _prog(75, "🧠 AI анализ листинга...")
-    _lang = st.session_state.get("analysis_lang","ru")
+        _prog(base_pct, f"🌐 Конкурент {i+1}: загружаю {casin}...")
+        cdata, cimg_urls = scrapingdog_product(casin, log)
+        cdata["_input_asin"] = casin
+        comp_data_list.append(cdata)
+
+        _prog(base_pct + 3, f"⬇️ Конкурент {i+1}: скачиваю фото...")
+        cimgs_dl = download_images(cimg_urls[:5], log) if cimg_urls else []
+
+        _prog(base_pct + 5, f"👁️ Конкурент {i+1}: Vision анализ...")
+        cvision = analyze_vision(cimgs_dl, cdata, casin, log, lang=_lang) if cimgs_dl else ""
+
+        _prog(base_pct + 8, f"🧠 Конкурент {i+1}: AI анализ...")
+        cai = analyze_text(cdata, [], cvision, casin, log, lang=_lang)
+
+        # Store in session state — same keys as the manual button
+        st.session_state[f"comp_ai_{i}"] = cai
+        if cimgs_dl:
+            st.session_state[f"comp_vision_{i}"] = (cimgs_dl, cvision)
+
+    _prog(75, "🧠 AI финальный анализ нашего листинга...")
     result = analyze_text(our_data, comp_data_list, vision_result, asin, log, lang=_lang)
     st.session_state['our_data'] = our_data
     st.session_state['comp_data_list'] = comp_data_list
@@ -1094,7 +1111,7 @@ elif _is_competitor_page:
     if not _cai_result:
         _cbtn1, _cbtn2 = st.columns([3,1])
         with _cbtn1:
-            st.info("💡 Запусти полный анализ — текст + Vision фото (как у нашего листинга)")
+            st.info("💡 Нажми Анализ — или перезапусти главный анализ с URL конкурента")
         with _cbtn2:
             if st.button("🧠 Анализ", key=f"ai_btn_{cidx}", type="primary"):
                 _clang = st.session_state.get("analysis_lang","ru")
