@@ -165,14 +165,23 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log):
         bullets = data.get("feature_bullets", [])
         reviews = data.get("customer_reviews", [])
         review_texts = " | ".join([r.get("review_snippet","")[:100] for r in reviews[:5]])
+        opts = data.get("customization_options", {})
+        sizes  = [s.get("value","") for s in opts.get("size",[])]
+        colors = [c.get("value","") for c in opts.get("color",[])]
+        # Also check product_information for size field
+        pi_size = pi.get("Size","") or pi.get("size","")
+        prime = data.get("is_prime_exclusive", False) or data.get("is_prime", False)
         return "\n".join([
             f"Title: {data.get('title','')}",
             f"Price: {data.get('price','')} | Старая цена: {data.get('previous_price','')}",
             f"Rating: {data.get('average_rating','')} | Reviews: {pi.get('Customer Reviews',{}).get('ratings_count','')}",
             f"BSR: {pi.get('Best Sellers Rank','')}",
             f"Material: {pi.get('Material Type','')} | Fabric: {pi.get('Fabric Type','')}",
-            f"A+: {data.get('aplus',False)} | Videos: {data.get('number_of_videos',0)}",
-            f"Bullets: {chr(10).join(bullets[:5])}",
+            f"Sizes (variants): {sizes if sizes else pi_size or 'не указаны'}",
+            f"Colors (variants): {colors if colors else 'не указаны'}",
+            f"Prime: {prime} | A+: {data.get('aplus',False)} | Videos: {data.get('number_of_videos',0)}",
+            f"Images count: {len(data.get('images',[]))}",
+            f"Bullets:\n{chr(10).join(bullets[:5])}",
             f"Reviews snippets: {review_texts}",
             f"Description: {str(data.get('description',''))[:300]}",
             f"A+ Content: {str(data.get('aplus_content','нет данных'))[:3000]}",
@@ -299,22 +308,62 @@ with st.sidebar:
     st.markdown("## 🔍 Listing Analyzer")
     st.divider()
 
-    # Navigation
+    # Navigation via buttons
+    if "page" not in st.session_state:
+        st.session_state["page"] = "🏠 Обзор"
+
+    NAV_ITEMS = [
+        ("🏠", "Обзор"),
+        ("📸", "Фото"),
+        ("📝", "Контент"),
+        ("🏆", "Benchmark"),
+        ("🧠", "COSMO / Rufus"),
+    ]
+
     if "result" in st.session_state:
-        page = st.radio("📂 Навигация", [
-            "🏠 Обзор",
-            "📸 Фото",
-            "📝 Контент",
-            "🏆 Benchmark",
-            "🧠 COSMO / Rufus",
-        ], label_visibility="collapsed")
+        _our = st.session_state.get("our_data", {})
+        _our_asin = _our.get("parent_asin","") or _our.get("product_information",{}).get("ASIN","")
+        _our_title = _our.get("title","")
+        _cd_nav = st.session_state.get("comp_data_list", [])
+
+        st.markdown(f"""<div style="background:#f0f9ff;border-radius:8px;padding:8px 10px;margin-bottom:4px;border-left:3px solid #3b82f6">
+<div style="font-size:0.75rem;font-weight:700;color:#1d4ed8">🔵 {_our_asin}</div>
+<div style="font-size:0.7rem;color:#64748b;margin-top:1px">{_our_title[:30]}{"..." if len(_our_title)>30 else ""}</div>
+</div>""", unsafe_allow_html=True)
+
+        for _i, _c in enumerate(_cd_nav):
+            _cpi = _c.get("product_information", {})
+            _casin = _c.get("parent_asin","") or _cpi.get("ASIN","")
+            _ct = _c.get("title","")
+            st.markdown(f"""<div style="background:#fff5f5;border-radius:8px;padding:8px 10px;margin-bottom:4px;border-left:3px solid #ef4444">
+<div style="font-size:0.75rem;font-weight:700;color:#b91c1c">🔴 {_casin}</div>
+<div style="font-size:0.7rem;color:#64748b;margin-top:1px">{_ct[:30]}{"..." if len(_ct)>30 else ""}</div>
+</div>""", unsafe_allow_html=True)
+
+        st.divider()
+
+        cur = st.session_state.get("page","🏠 Обзор")
+        all_nav = list(NAV_ITEMS)
+        for _i2, _c2 in enumerate(_cd_nav):
+            _cpi2 = _c2.get("product_information", {})
+            _casin2 = _c2.get("parent_asin","") or _cpi2.get("ASIN",f"Конк.{_i2+1}")
+            all_nav.append(("🔴", f"Конкурент {_i2+1} · {_casin2}"))
+
+        for icon, label in all_nav:
+            full = f"{icon} {label}"
+            is_active = (cur == full)
+            btn_style = "primary" if is_active else "secondary"
+            if st.button(f"{icon}  {label}", key=f"nav_{label}", use_container_width=True, type=btn_style):
+                st.session_state["page"] = full
+                st.rerun()
     else:
-        page = "🏠 Обзор"
         st.caption("Запусти анализ чтобы открыть все страницы")
+        for icon, label in NAV_ITEMS:
+            st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
 
     st.divider()
     st.markdown("**🔑 API**")
-    if st.button("🧪 Anthropic"):
+    if st.button("🧪 Anthropic", key="api_test"):
         try:
             res = anthropic_call(None, "Say: OK", max_tokens=5)
             st.success(f"✅ {res}")
@@ -330,25 +379,70 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
     comp3 = c3.text_input("Конкурент 3", key="c2", value=st.session_state.get("c2_saved",""), placeholder="https://www.amazon.com/dp/...")
     competitor_urls = [comp1, comp2, comp3]
 
-    if st.button("🚀 Запустить анализ", type="primary", disabled=not our_url.strip()):
-        st.session_state["our_url_saved"] = our_url
-        st.session_state["c0_saved"] = comp1
-        st.session_state["c1_saved"] = comp2
-        st.session_state["c2_saved"] = comp3
-        lines = []
-        ph = st.empty()
+    # Detect what changed
+    prev_url  = st.session_state.get("our_url_saved","")
+    prev_comp = [st.session_state.get(f"c{i}_saved","") for i in range(3)]
+    curr_comp = competitor_urls
+    our_changed  = (our_url.strip() != prev_url.strip())
+    new_comps    = [u for u,p in zip(curr_comp,prev_comp) if u.strip() and u.strip()!=p.strip()]
+    already_done = "result" in st.session_state
+
+    # Button label hint
+    if already_done and not our_changed and new_comps:
+        btn_label = f"➕ Добавить {len(new_comps)} конкурент(а)"
+    elif already_done and not our_changed and not new_comps:
+        btn_label = "🔄 Перезапустить анализ"
+    else:
+        btn_label = "🚀 Запустить анализ"
+
+    if st.button(btn_label, type="primary", disabled=not our_url.strip()):
+        lines = []; ph = st.empty()
         def log(msg):
             lines.append(msg); ph.markdown("\n\n".join(lines[-8:]))
+
         with st.spinner("Анализирую..."):
             try:
-                result, vision = run_analysis(our_url, competitor_urls, log)
-                st.session_state.update({"result": result, "vision": vision})
-                st.success("✅ Готово! Открой нужный раздел в меню слева.")
+                # SMART: only re-run full analysis if our URL changed or first run
+                if not already_done or our_changed:
+                    result, vision = run_analysis(our_url, competitor_urls, log)
+                    st.session_state.update({"result": result, "vision": vision})
+                    st.session_state["our_url_saved"] = our_url
+                    st.session_state["c0_saved"] = comp1
+                    st.session_state["c1_saved"] = comp2
+                    st.session_state["c2_saved"] = comp3
+                else:
+                    # Only fetch new competitors
+                    existing = st.session_state.get("comp_data_list", [])
+                    for i, url in enumerate(curr_comp):
+                        if url.strip() and url.strip() != prev_comp[i].strip():
+                            casin = get_asin(url)
+                            if casin:
+                                log(f"➕ Новый конкурент {i+1}: {casin}...")
+                                cdata, _ = scrapingdog_product(casin, log)
+                                # Replace or append
+                                if i < len(existing):
+                                    existing[i] = cdata
+                                else:
+                                    existing.append(cdata)
+                                st.session_state[f"c{i}_saved"] = url.strip()
+                    st.session_state["comp_data_list"] = existing
+                    # Re-run only text analysis with updated competitors
+                    log("🧠 Обновляю сравнительный анализ...")
+                    od_s = st.session_state.get("our_data", {})
+                    v_s  = st.session_state.get("vision", "")
+                    asin_s = get_asin(our_url) or "unknown"
+                    result = analyze_text(od_s, existing, v_s, asin_s, log)
+                    st.session_state["result"] = result
+
+                st.success("✅ Готово!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Ошибка: {e}")
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
+page = st.session_state.get("page", "🏠 Обзор")
+_is_competitor_page = page.startswith("🔴 Конкурент")
+
 if "result" not in st.session_state:
     st.markdown("## 👈 Введи ссылки и нажми «Запустить анализ»")
     st.stop()
@@ -506,77 +600,39 @@ elif page == "📝 Контент":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "🏆 Benchmark":
     st.title("🏆 Benchmark — Сравнение с конкурентами")
-    health_card()
-    st.divider()
 
     if not cd:
         st.info("Добавь конкурентов в форму выше и запусти анализ повторно")
         st.stop()
 
-    all_p  = [od] + cd
-    labels = ["🔵 НАШ"] + [f"Конкурент {i+1}" for i in range(len(cd))]
-
-    # Auto-score competitors from raw data
+    # ── auto_score helper ────────────────────────────────────────────────────
     def auto_score(d):
         pi2 = d.get("product_information", {})
-        title2  = d.get("title","")
-        imgs2   = d.get("images",[])
-        bul2    = d.get("feature_bullets",[])
-        desc2   = d.get("description","")
+        title2  = d.get("title",""); imgs2 = d.get("images",[])
+        bul2    = d.get("feature_bullets",[]); desc2 = d.get("description","")
         rating2 = float(d.get("average_rating",0) or 0)
         rev_cnt = int(pi2.get("Customer Reviews",{}).get("ratings_count","0") or 0)
         has_vid = int(d.get("number_of_videos",0) or 0) > 0
-        has_ap  = bool(d.get("aplus"))
-        is_prime= bool(d.get("is_prime_exclusive"))
-        bsr_raw = str(pi2.get("Best Sellers Rank",""))
+        has_ap  = bool(d.get("aplus")); is_prime = bool(d.get("is_prime_exclusive"))
         bsr_num = 99999
-        bsr_m = re.search(r"#([\d,]+)", bsr_raw)
+        bsr_m = re.search(r"#([\d,]+)", str(pi2.get("Best Sellers Rank","")))
         if bsr_m:
             try: bsr_num = int(bsr_m.group(1).replace(",",""))
             except: pass
-        colors  = len(d.get("customization_options",{}).get("color",[]))
-        sizes   = len(d.get("customization_options",{}).get("size",[]))
+        colors = len(d.get("customization_options",{}).get("color",[]))
+        sizes  = len(d.get("customization_options",{}).get("size",[]))
+        ts = min(10, max(0, (1.5 if len(title2)<=125 else 0) + (3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5) + (3.0 if any(k in title2.lower() for k in ["sport","hiking","travel","daily","gym","outdoor"]) else 1.0) + (1.0 if not re.search(r"[!$?{}]",title2) else 0) + 1))
+        bs = min(10, max(0, (1.5 if len(bul2)<=5 else 0) + (2.5 if any(":" in b for b in bul2) else 1.0) + (4.0 if len(bul2)>=4 else len(bul2)*1.0) + (1.0 if all(len(b.encode())<=255 for b in bul2) else 0) + 1))
+        ds = 0 if not desc2 else min(10, 4+(3 if len(desc2)>200 else 1)+(2 if len(desc2)>500 else 0))
+        ps = min(10, max(0, (4.0 if len(imgs2)>=6 else len(imgs2)*0.6)+(2.0 if has_vid else 0)+(4.0 if len(imgs2)>=6 else 0)))
+        as_ = 0 if not has_ap else 7
+        rs = 10 if (rating2>=4.4 and rev_cnt>=50) else (7 if rating2>=4.0 else 4)
+        bsrs = 10 if bsr_num<=1000 else (8 if bsr_num<=5000 else 5)
+        prs = 10 if is_prime else 5
+        vs = 10 if (colors>=5 and sizes>=3) else (7 if sizes>=3 else 4)
+        h = int((ts*0.10+bs*0.10+ds*0.10+ps*0.10+as_*0.10+rs*0.15+bsrs*0.15+7*0.10+vs*0.05+prs*0.05)*10)
+        return {"title":round(ts,1),"bullets":round(bs,1),"description":round(ds,1),"photos":round(ps,1),"aplus":as_,"reviews":rs,"bsr":bsrs,"variants":vs,"prime":prs,"health":h}
 
-        t_score = min(10, max(0,
-            (1.5 if len(title2)<=125 else 0) +
-            (3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5) +
-            (3.0 if any(k in title2.lower() for k in ["sport","hiking","travel","daily","gym","outdoor"]) else 1.0) +
-            (1.0 if not re.search(r"[!$?{}^¬¦]", title2) else 0) +
-            (1.0 if len(re.findall(r"(\w+)", title2.lower())) == len(set(re.findall(r"(\w+)", title2.lower()))) else 0)
-        ))
-        b_score = min(10, max(0,
-            (1.5 if len(bul2) <= 5 else 0) +
-            (2.5 if any(":" in b for b in bul2) else 1.0) +
-            (4.0 if len(bul2) >= 4 else len(bul2)*1.0) +
-            (1.0 if all(len(b.encode()) <= 255 for b in bul2) else 0) +
-            (1.0 if not any(c in "".join(bul2) for c in ["🔥","✅","⭐","❌","💪"]) else 0)
-        ))
-        d_score = 0 if not desc2 else min(10, 4 + (3 if len(desc2)>200 else 1) + (2 if len(desc2)>500 else 0))
-        p_score = min(10, max(0,
-            (4.0 if len(imgs2)>=6 else len(imgs2)*0.6) +
-            (2.0 if has_vid else 0) +
-            (4.0 if len(imgs2)>=6 else 0)
-        ))
-        a_score = 0 if not has_ap else 7
-        rev_score = 10 if (rating2>=4.4 and rev_cnt>=50) else (7 if rating2>=4.0 else 4)
-        bsr_score = 10 if bsr_num<=1000 else (8 if bsr_num<=5000 else 5)
-        pr_score  = 10 if is_prime else 5
-        var_score = 10 if (colors>=5 and sizes>=3) else (7 if sizes>=3 else 4)
-
-        health = int(
-            t_score*0.10 + b_score*0.10 + d_score*0.10 + p_score*0.10 +
-            a_score*0.10 + rev_score*0.15 + bsr_score*0.15 +
-            7*0.10 + var_score*0.05 + pr_score*0.05
-        ) * 10
-
-        return {
-            "title": round(t_score,1), "bullets": round(b_score,1),
-            "description": round(d_score,1), "photos": round(p_score,1),
-            "aplus": a_score, "reviews": rev_score, "bsr": bsr_score,
-            "variants": var_score, "prime": pr_score, "health": health
-        }
-
-    # Score all products
     our_scores = {
         "title": r.get("title_score",0), "bullets": r.get("bullets_score",0),
         "description": r.get("desc_score",0), "photos": r.get("photos_score",0),
@@ -589,70 +645,133 @@ elif page == "🏆 Benchmark":
     }
     comp_scores = [auto_score(c) for c in cd]
     all_scores  = [our_scores] + comp_scores
+    all_p       = [od] + cd
 
+    # ── helper: render one product full card ─────────────────────────────────
+    def render_product_card(d, sc, label, is_ours=False):
+        dpi  = d.get("product_information", {})
+        dasin   = d.get("parent_asin","") or dpi.get("ASIN","")
+        dtitle  = d.get("title","")
+        dprice  = d.get("price","")
+        drating = d.get("average_rating","")
+        drev    = dpi.get("Customer Reviews",{}).get("ratings_count","")
+        dbsr    = str(dpi.get("Best Sellers Rank",""))[:50]
+        dbrand  = d.get("brand","")
+        dbul    = d.get("feature_bullets",[])
+        ddesc   = d.get("description","")
+        dimgs   = d.get("images",[])
+        daplus  = d.get("aplus",False)
+        dvid    = int(d.get("number_of_videos",0) or 0)
+        dprime  = d.get("is_prime_exclusive",False)
+        dcolors = d.get("customization_options",{}).get("color",[])
+        dsizes  = d.get("customization_options",{}).get("size",[])
+        dmat    = dpi.get("Material Type","")
+        tlen    = len(dtitle)
+        h       = sc.get("health",0)
+        hc      = "#22c55e" if h>=75 else ("#f59e0b" if h>=50 else "#ef4444")
+        bg      = "linear-gradient(135deg,#1e293b,#334155)" if is_ours else "linear-gradient(135deg,#3b1e1e,#5c2626)"
+
+        st.markdown(f"""
+<div style="background:{bg};border-radius:14px;padding:18px;color:white;margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <div>
+      <div style="font-size:0.78rem;opacity:0.6">{dbrand} - {dasin}</div>
+      <div style="font-size:0.92rem;font-weight:600;max-width:480px;margin-top:3px">{dtitle[:75]}{"..." if tlen>75 else ""}</div>
+      <div style="display:flex;gap:12px;margin-top:7px;font-size:0.8rem;opacity:0.8;flex-wrap:wrap">
+        <span>💰 {dprice}</span><span>⭐ {drating} ({drev})</span>
+        <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">{tlen} симв.</span>
+      </div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:2.8rem;font-weight:800;color:{hc}">{h}%</div>
+      <div style="font-size:0.75rem;color:{hc}">Health</div>
+    </div>
+  </div>
+  <div style="background:rgba(255,255,255,0.12);border-radius:6px;height:8px;margin-top:10px">
+    <div style="background:{hc};width:{h}%;height:8px;border-radius:6px"></div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        # Mini score cards
+        sitems = [("Title",sc.get("title",0)),("Bullets",sc.get("bullets",0)),
+                  ("Описание",sc.get("description",0)),("Фото",sc.get("photos",0)),
+                  ("A+",sc.get("aplus",0)),("Отзывы",sc.get("reviews",0)),
+                  ("BSR",sc.get("bsr",0)),("Варианты",sc.get("variants",0)),("Prime",sc.get("prime",0))]
+        sc2 = st.columns(len(sitems))
+        for col2,(lbl2,val2) in zip(sc2,sitems):
+            p2 = int(val2/10*100); c2="#22c55e" if p2>=75 else ("#f59e0b" if p2>=50 else "#ef4444")
+            col2.markdown(f'<div style="border-left:3px solid {c2};padding:5px 4px;text-align:center;background:#f8fafc;border-radius:4px"><div style="font-size:1.05rem;font-weight:700;color:{c2}">{p2}%</div><div style="font-size:0.62rem;color:#64748b">{lbl2}</div></div>', unsafe_allow_html=True)
+
+        # Content tabs
+        tab_cont, tab_photo, tab_data = st.tabs(["📝 Контент", "📸 Фото", "📊 Данные"])
+        with tab_cont:
+            tcc = "#ef4444" if tlen>125 else "#22c55e"
+            st.markdown(f"**Title** — <span style='color:{tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
+            st.markdown(f"> {dtitle}")
+            st.divider()
+            st.markdown(f"**Bullets** ({len(dbul)})")
+            for b in dbul:
+                blen = len(b.encode())
+                st.markdown(f"{'🔴' if blen>255 else '✅'} {b}")
+                st.caption(f"{blen} байт")
+            if not dbul: st.caption("Нет буллетов")
+            st.divider()
+            st.markdown("**Описание**")
+            if ddesc: st.markdown(str(ddesc)[:600])
+            else: st.warning("Описание отсутствует")
+            st.divider()
+            st.markdown(f"**A+:** {'✅' if daplus else '❌'}  |  **Видео:** {'✅ '+str(dvid)+' шт.' if dvid else '❌'}")
+        with tab_photo:
+            if dimgs:
+                for rs in range(0, min(len(dimgs),9), 3):
+                    rc = st.columns(3)
+                    for ci2,iu in enumerate(dimgs[rs:rs+3]):
+                        try:
+                            ri2 = requests.get(iu, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+                            if ri2.ok: rc[ci2].image(ri2.content, caption=f"#{rs+ci2+1}", use_container_width=True)
+                        except: rc[ci2].caption(f"#{rs+ci2+1} ошибка")
+                st.caption(f"Всего: {len(dimgs)} фото")
+            else: st.warning("Нет фото")
+        with tab_data:
+            da1,da2 = st.columns(2)
+            da1.metric("Цена", dprice); da2.metric("Рейтинг", drating)
+            da1.metric("Отзывов", drev); da2.metric("BSR", dbsr[:30])
+            da1.metric("Материал", dmat or "—"); da2.metric("Prime", "Да" if dprime else "Нет")
+            da1.metric("Цветов", len(dcolors)); da2.metric("Размеров", len(dsizes))
+            st.caption(f"Размеры: {[s.get('value','') for s in dsizes]}")
+            st.caption(f"Цвета: {[c.get('value','') for c in dcolors]}")
+
+    # ── Score comparison bars (always visible at top) ────────────────────────
     score_rows = [
-        ("🏷️ Title",    "title",       10),
-        ("📋 Bullets",  "bullets",     10),
-        ("📄 Описание", "description", 10),
-        ("📸 Фото",     "photos",      10),
-        ("✨ A+",       "aplus",       10),
-        ("⭐ Отзывы",   "reviews",     10),
-        ("📊 BSR",      "bsr",         10),
-        ("🎨 Варианты", "variants",    10),
-        ("🚀 Prime",    "prime",       10),
-        ("💯 Health",   "health",      100),
+        ("🏷️ Title","title",10),("📋 Bullets","bullets",10),
+        ("📄 Описание","description",10),("📸 Фото","photos",10),
+        ("✨ A+","aplus",10),("⭐ Отзывы","reviews",10),
+        ("📊 BSR","bsr",10),("🎨 Варианты","variants",10),
+        ("🚀 Prime","prime",10),("💯 Health","health",100),
     ]
+    asin_labels = ["🔵 НАШ"] + [f"🔴 {c.get('parent_asin','') or c.get('product_information',{}).get('ASIN',f'Конк.{i+1}')}" for i,c in enumerate(cd)]
 
-    st.subheader("📊 Оценки: мы vs конкуренты")
-    hdr2 = st.columns([2] + [3]*(1+len(cd)))
+    st.subheader("📊 Сравнение оценок")
+    hdr2 = st.columns([2]+[3]*(1+len(cd)))
     hdr2[0].markdown("**Метрика**")
-    hdr2[1].markdown("**🔵 НАШ**")
-    for j in range(len(cd)): hdr2[j+2].markdown(f"**Конк. {j+1}**")
+    for j,al in enumerate(asin_labels): hdr2[j+1].markdown(f"**{al}**")
 
-    for lbl, key, mx in score_rows:
-        vals = [s.get(key, 0) for s in all_scores]
+    for lbl,key,mx in score_rows:
+        vals = [s.get(key,0) for s in all_scores]
         best_val = max(vals)
-        row2 = st.columns([2] + [3]*(1+len(cd)))
+        row2 = st.columns([2]+[3]*(1+len(cd)))
         row2[0].caption(lbl)
-        for j, val in enumerate(vals):
-            pct = int(val/mx*100)
-            is_best = (val == best_val)
+        for j,val in enumerate(vals):
+            pct = int(val/mx*100); is_best = (val==best_val)
             cc = "#22c55e" if is_best else ("#f59e0b" if pct>=50 else "#ef4444")
-            star = " ★" if is_best else ""
             row2[j+1].markdown(
                 f'<div style="background:#e5e7eb;border-radius:5px;height:22px;position:relative">'
                 f'<div style="background:{cc};width:{pct}%;height:22px;border-radius:5px"></div>'
-                f'<div style="position:absolute;top:2px;left:6px;font-size:0.75rem;font-weight:700;color:white">{val}{star}</div>'
-                f'</div>', unsafe_allow_html=True
-            )
+                f'<div style="position:absolute;top:2px;left:6px;font-size:0.75rem;font-weight:700;color:white">{val}{"★" if is_best else ""}</div>'
+                f'</div>', unsafe_allow_html=True)
 
-    st.divider()
-    st.subheader("📋 Метрики: мы vs конкуренты")
-    metrics = [
-        ("Название",   lambda d: (d.get("title","")[:55]+"...") if len(d.get("title",""))>55 else d.get("title","")),
-        ("Цена",       lambda d: d.get("price","")),
-        ("Рейтинг ⭐",  lambda d: d.get("average_rating","")),
-        ("Отзывов",    lambda d: d.get("product_information",{}).get("Customer Reviews",{}).get("ratings_count","")),
-        ("BSR",        lambda d: str(d.get("product_information",{}).get("Best Sellers Rank",""))[:45]),
-        ("Материал",   lambda d: d.get("product_information",{}).get("Material Type","")),
-        ("Фото шт.",   lambda d: str(len(d.get("images",[])))),
-        ("Видео",      lambda d: str(d.get("number_of_videos","0"))),
-        ("A+",         lambda d: "✅" if d.get("aplus") else "❌"),
-        ("Prime",      lambda d: "✅" if d.get("is_prime_exclusive") else "—"),
-    ]
 
-    hdr = st.columns([2]+[3]*len(all_p))
-    hdr[0].markdown("**Метрика**")
-    for j,lbl in enumerate(labels):
-        hdr[j+1].markdown(f"**{lbl}**")
-    st.divider()
-    for mname, gfn in metrics:
-        row = st.columns([2]+[3]*len(all_p))
-        row[0].caption(mname)
-        for j,prod in enumerate(all_p):
-            val = gfn(prod)
-            if j==0: row[j+1].markdown(f"**{val}**")
-            else:    row[j+1].caption(str(val))
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: COSMO / Rufus
@@ -700,129 +819,122 @@ elif page == "🧠 COSMO / Rufus":
     with st.expander("🔧 Raw JSON"):
         st.json(r)
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE: Конкурент N
+# PAGE: Конкурент N (individual pages)
 # ══════════════════════════════════════════════════════════════════════════════
-elif page.startswith("🔴 Конкурент"):
-    idx_match = re.search(r"Конкурент (\d+)", page)
-    cidx = int(idx_match.group(1)) - 1 if idx_match else 0
+elif _is_competitor_page:
+    idx_m = re.search(r"Конкурент (\d+)", page)
+    cidx = int(idx_m.group(1)) - 1 if idx_m else 0
     c = cd[cidx] if cidx < len(cd) else {}
-    cpi = c.get("product_information", {})
-    ctitle   = c.get("title","")
-    cprice   = c.get("price","")
-    crating  = c.get("average_rating","")
-    creviews = cpi.get("Customer Reviews",{}).get("ratings_count","")
-    cbsr     = str(cpi.get("Best Sellers Rank",""))[:50]
-    cbrand   = c.get("brand","")
-    casin    = c.get("parent_asin","") or cpi.get("ASIN","")
-    cbullets = c.get("feature_bullets",[])
-    cdesc    = c.get("description","")
-    cimgs    = c.get("images",[])
-    caplus   = c.get("aplus", False)
-    cvideo   = int(c.get("number_of_videos",0) or 0)
-    cprime   = c.get("is_prime_exclusive", False)
-    ccolors  = c.get("customization_options",{}).get("color",[])
-    csizes   = c.get("customization_options",{}).get("size",[])
-    cmaterial= cpi.get("Material Type","")
 
-    def _auto(d):
-        dp = d.get("product_information",{})
-        t2 = d.get("title",""); i2 = d.get("images",[]); b2 = d.get("feature_bullets",[])
-        desc2 = d.get("description","")
-        rat2 = float(d.get("average_rating",0) or 0)
-        rev2 = int(dp.get("Customer Reviews",{}).get("ratings_count","0") or 0)
-        vid2 = int(d.get("number_of_videos",0) or 0)>0; ap2 = bool(d.get("aplus"))
-        pr2  = bool(d.get("is_prime_exclusive"))
-        bsr2 = 99999
-        bm = re.search(r"#(\d[\d,]*)", str(dp.get("Best Sellers Rank","")))
-        if bm:
-            try: bsr2 = int(bm.group(1).replace(",",""))
-            except: pass
-        col2 = len(d.get("customization_options",{}).get("color",[])); sz2 = len(d.get("customization_options",{}).get("size",[]))
-        ts = min(10, (1.5 if len(t2)<=125 else 0) + (3.5 if any(k in t2.lower() for k in ["merino","wool","base layer","tank"]) else 1.5) + 3.0 + (1 if not re.search(r"[!$?{}]",t2) else 0) + 1)
-        bs = min(10, (1.5 if len(b2)<=5 else 0) + (2.5 if any(":" in b for b in b2) else 1) + min(4, len(b2)) + 1 + 1)
-        ds = 0 if not desc2 else min(10, 4+(3 if len(desc2)>200 else 1))
-        ps = min(10, (4 if len(i2)>=6 else len(i2)*0.6) + (2 if vid2 else 0) + (4 if len(i2)>=6 else 0))
-        as_ = 0 if not ap2 else 7
-        rs = 10 if (rat2>=4.4 and rev2>=50) else (7 if rat2>=4.0 else 4)
-        bsrs = 10 if bsr2<=1000 else (8 if bsr2<=5000 else 5)
-        prs = 10 if pr2 else 5
-        vs = 10 if (col2>=5 and sz2>=3) else (7 if sz2>=3 else 4)
-        h = int((ts*0.10+bs*0.10+ds*0.10+ps*0.10+as_*0.10+rs*0.15+bsrs*0.15+7*0.10+vs*0.05+prs*0.05)*10)
-        return {"title":round(ts,1),"bullets":round(bs,1),"description":round(ds,1),"photos":round(ps,1),"aplus":as_,"reviews":rs,"bsr":bsrs,"variants":vs,"prime":prs,"health":h}
+    if not c:
+        st.warning("Данные конкурента не найдены"); st.stop()
 
-    csc = _auto(c)
-    ch = csc.get("health",0)
-    chc = "#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
-    tlen = len(ctitle)
+    # Use render_product_card defined in benchmark — redefine inline here
+    cpi   = c.get("product_information", {})
+    casin = c.get("parent_asin","") or cpi.get("ASIN","")
+    csc_page = {}
+    # auto_score inline
+    _t2 = c.get("title",""); _i2 = c.get("images",[]); _b2 = c.get("feature_bullets",[])
+    _d2 = c.get("description",""); _rat2 = float(c.get("average_rating",0) or 0)
+    _rev2 = int(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0)
+    _vid2 = int(c.get("number_of_videos",0) or 0)>0; _ap2 = bool(c.get("aplus"))
+    _pr2  = bool(c.get("is_prime_exclusive"))
+    _bsr2 = 99999
+    _bm = re.search(r"#([\d,]+)", str(cpi.get("Best Sellers Rank","")))
+    if _bm:
+        try: _bsr2 = int(_bm.group(1).replace(",",""))
+        except: pass
+    _col2 = len(c.get("customization_options",{}).get("color",[])); _sz2 = len(c.get("customization_options",{}).get("size",[]))
+    _ts = min(10, max(0, (1.5 if len(_t2)<=125 else 0)+(3.5 if any(k in _t2.lower() for k in ["merino","wool","tank","shirt","base layer"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",_t2) else 0)+1))
+    _bs = min(10, max(0, (1.5 if len(_b2)<=5 else 0)+(2.5 if any(":" in b for b in _b2) else 1)+min(4,len(_b2))+1+1))
+    _ds = 0 if not _d2 else min(10, 4+(3 if len(_d2)>200 else 1))
+    _ps = min(10, max(0, (4 if len(_i2)>=6 else len(_i2)*0.6)+(2 if _vid2 else 0)+(4 if len(_i2)>=6 else 0)))
+    _as = 0 if not _ap2 else 7
+    _rs = 10 if (_rat2>=4.4 and _rev2>=50) else (7 if _rat2>=4.0 else 4)
+    _bsrs = 10 if _bsr2<=1000 else (8 if _bsr2<=5000 else 5)
+    _prs = 10 if _pr2 else 5
+    _vs = 10 if (_col2>=5 and _sz2>=3) else (7 if _sz2>=3 else 4)
+    _h = int((_ts*0.10+_bs*0.10+_ds*0.10+_ps*0.10+_as*0.10+_rs*0.15+_bsrs*0.15+7*0.10+_vs*0.05+_prs*0.05)*10)
+    csc_page = {"title":round(_ts,1),"bullets":round(_bs,1),"description":round(_ds,1),"photos":round(_ps,1),"aplus":_as,"reviews":_rs,"bsr":_bsrs,"variants":_vs,"prime":_prs,"health":_h}
+
+    ch = csc_page["health"]; hc = "#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
+    tlen = len(_t2); cprice = c.get("price",""); cbrand = c.get("brand","")
+    crating = c.get("average_rating",""); crev = cpi.get("Customer Reviews",{}).get("ratings_count","")
+    cbsr_s = str(cpi.get("Best Sellers Rank",""))[:50]
 
     st.title(f"🔴 Конкурент {cidx+1}")
-    st.caption(f"{cbrand} - {casin}")
 
+    # Health card
     st.markdown(f"""
-<div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:16px;padding:20px;color:white;margin-bottom:16px">
+<div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:14px;padding:18px;color:white;margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
     <div>
-      <div style="font-size:0.8rem;opacity:0.6">{cbrand} - {casin}</div>
-      <div style="font-size:0.95rem;font-weight:600;max-width:500px;margin-top:4px">{ctitle[:80]}{"..." if tlen>80 else ""}</div>
-      <div style="display:flex;gap:14px;margin-top:8px;font-size:0.82rem;opacity:0.8;flex-wrap:wrap">
+      <div style="font-size:0.78rem;opacity:0.6">{cbrand} - {casin}</div>
+      <div style="font-size:0.95rem;font-weight:600;max-width:500px;margin-top:3px">{_t2[:80]}{"..." if tlen>80 else ""}</div>
+      <div style="display:flex;gap:12px;margin-top:7px;font-size:0.8rem;opacity:0.8;flex-wrap:wrap">
         <span>Price: {cprice}</span>
-        <span>Rating: {crating} ({creviews} rev.)</span>
-        <span>BSR: {cbsr[:35]}</span>
-        <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">Title: {tlen} chars</span>
+        <span>Rating: {crating} ({crev} reviews)</span>
+        <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">{tlen} chars</span>
       </div>
     </div>
     <div style="text-align:center">
-      <div style="font-size:3rem;font-weight:800;color:{chc}">{ch}%</div>
-      <div style="font-size:0.8rem;color:{chc}">Health Score</div>
+      <div style="font-size:2.8rem;font-weight:800;color:{hc}">{ch}%</div>
+      <div style="font-size:0.75rem;color:{hc}">Health Score</div>
     </div>
   </div>
-  <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:12px">
-    <div style="background:{chc};width:{ch}%;height:10px;border-radius:8px"></div>
+  <div style="background:rgba(255,255,255,0.12);border-radius:6px;height:8px;margin-top:10px">
+    <div style="background:{hc};width:{ch}%;height:8px;border-radius:6px"></div>
   </div>
 </div>""", unsafe_allow_html=True)
 
-    citems = [("Title",csc.get("title",0)),("Bullets",csc.get("bullets",0)),
-              ("Описание",csc.get("description",0)),("Фото",csc.get("photos",0)),
-              ("A+",csc.get("aplus",0)),("Отзывы",csc.get("reviews",0)),
-              ("BSR",csc.get("bsr",0)),("Варианты",csc.get("variants",0)),("Prime",csc.get("prime",0))]
-    ccols2 = st.columns(len(citems))
-    for col2,(lbl2,val2) in zip(ccols2,citems):
-        pct2 = int(val2/10*100)
-        cc3 = "#22c55e" if pct2>=75 else ("#f59e0b" if pct2>=50 else "#ef4444")
-        col2.markdown(f'<div style="background:#f8f0f0;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid {cc3}"><div style="font-size:1.1rem;font-weight:700;color:{cc3}">{pct2}%</div><div style="font-size:0.68rem;color:#64748b">{lbl2}</div></div>', unsafe_allow_html=True)
+    # Score mini-cards
+    _sitems = [("Title",_ts),("Bullets",_bs),("Описание",_ds),("Фото",_ps),
+               ("A+",_as),("Отзывы",_rs),("BSR",_bsrs),("Варианты",_vs),("Prime",_prs)]
+    _sc2 = st.columns(len(_sitems))
+    for _col3,(_lbl3,_val3) in zip(_sc2,_sitems):
+        _p3 = int(_val3/10*100); _c3 = "#22c55e" if _p3>=75 else ("#f59e0b" if _p3>=50 else "#ef4444")
+        _col3.markdown(f'<div style="border-left:3px solid {_c3};padding:5px 4px;text-align:center;background:#f8fafc;border-radius:4px"><div style="font-size:1.05rem;font-weight:700;color:{_c3}">{_p3}%</div><div style="font-size:0.62rem;color:#64748b">{_lbl3}</div></div>', unsafe_allow_html=True)
 
     st.divider()
-    ct1, ct2, ct3 = st.tabs(["Контент", "Фото", "Данные"])
-    with ct1:
-        tcc = "#ef4444" if tlen>125 else "#22c55e"
-        st.markdown(f"**Title** — <span style='color:{tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
-        st.markdown(f"> {ctitle}")
+
+    # Content
+    tab_cont, tab_photo, tab_data = st.tabs(["📝 Контент", "📸 Фото", "📊 Данные"])
+    with tab_cont:
+        _tcc = "#ef4444" if tlen>125 else "#22c55e"
+        st.markdown(f"**Title** — <span style='color:{_tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
+        st.markdown(f"> {_t2}")
         st.divider()
-        st.markdown(f"**Bullets** ({len(cbullets)})")
-        for b2 in cbullets:
-            blen2 = len(b2.encode())
-            st.markdown(f"{'🔴' if blen2>255 else '✅'} {b2}")
-            st.caption(f"{blen2} байт")
+        st.markdown(f"**Bullets** ({len(_b2)})")
+        for _bul in _b2:
+            _blen = len(_bul.encode())
+            st.markdown(f"{'🔴' if _blen>255 else '✅'} {_bul}")
+            st.caption(f"{_blen} байт")
+        if not _b2: st.caption("Нет буллетов")
         st.divider()
         st.markdown("**Описание**")
-        if cdesc: st.markdown(str(cdesc)[:600])
+        if _d2: st.markdown(str(_d2)[:600])
         else: st.warning("Описание отсутствует")
         st.divider()
-        st.markdown(f"**A+:** {'✅ Есть' if caplus else '❌ Нет'}  |  **Видео:** {'✅ ' + str(cvideo) + ' шт.' if cvideo else '❌ Нет'}")
-    with ct2:
-        if cimgs:
-            for row_s in range(0, min(len(cimgs),9), 3):
-                rcols2 = st.columns(3)
-                for ci3,img_url2 in enumerate(cimgs[row_s:row_s+3]):
+        st.markdown(f"**A+:** {'✅' if _ap2 else '❌'}  |  **Видео:** {'✅ '+str(int(c.get('number_of_videos',0) or 0))+' шт.' if _vid2 else '❌'}")
+    with tab_photo:
+        _cimgs = c.get("images",[])
+        if _cimgs:
+            for _rs in range(0, min(len(_cimgs),9), 3):
+                _rc = st.columns(3)
+                for _ci2,_iu in enumerate(_cimgs[_rs:_rs+3]):
                     try:
-                        ri2 = requests.get(img_url2, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
-                        if ri2.ok: rcols2[ci3].image(ri2.content, caption=f"#{row_s+ci3+1}", use_container_width=True)
-                    except: rcols2[ci3].caption(f"#{row_s+ci3+1} ошибка")
-            st.caption(f"Всего: {len(cimgs)} фото")
+                        _ri2 = requests.get(_iu, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+                        if _ri2.ok: _rc[_ci2].image(_ri2.content, caption=f"#{_rs+_ci2+1}", use_container_width=True)
+                    except: _rc[_ci2].caption(f"#{_rs+_ci2+1} ошибка")
+            st.caption(f"Всего: {len(_cimgs)} фото")
         else: st.warning("Нет фото")
-    with ct3:
-        ca1,ca2 = st.columns(2)
-        ca1.metric("Цена", cprice); ca2.metric("Рейтинг", f"{crating}")
-        ca1.metric("Отзывов", creviews); ca2.metric("BSR", cbsr[:25])
-        ca1.metric("Материал", cmaterial or "—"); ca2.metric("Prime", "Да" if cprime else "Нет")
-        ca1.metric("Цветов", len(ccolors)); ca2.metric("Размеров", len(csizes))
+    with tab_data:
+        _da1,_da2 = st.columns(2)
+        _da1.metric("Цена", cprice); _da2.metric("Рейтинг", crating)
+        _da1.metric("Отзывов", crev); _da2.metric("BSR", cbsr_s[:30])
+        _da1.metric("Материал", cpi.get("Material Type","") or "—"); _da2.metric("Prime", "Да" if _pr2 else "Нет")
+        _ccolors = c.get("customization_options",{}).get("color",[])
+        _csizes  = c.get("customization_options",{}).get("size",[])
+        _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
+        st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
+        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
