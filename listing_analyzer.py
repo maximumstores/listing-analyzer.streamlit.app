@@ -112,11 +112,11 @@ All text values must be in Russian. Max 3 items per array.
 Schema:
 {ANALYSIS_SCHEMA}"""
 
-    # Call with url_context tool
+    # Call with url_context tool (correct Gemini format)
+    from google.generativeai import types as gtypes
     response = model.generate_content(
         prompt,
-        tools=[{"url_context": {}}],
-        tool_config={"function_calling_config": {"mode": "AUTO"}},
+        tools=[gtypes.Tool(url_context=gtypes.UrlContext())],
     )
 
     raw = response.text.strip()
