@@ -811,7 +811,25 @@ elif page == "🏆 Benchmark":
         "prime":       pct(r.get("prime_score",0)),
         "health":      pct(r.get("overall_score", r.get("health_score",0))),
     }
-    comp_scores = [auto_score(c) for c in cd]
+    def get_comp_scores(c, i):
+        """Use AI scores if available, else auto_score"""
+        cai = st.session_state.get(f"comp_ai_{i}")
+        if cai:
+            return {
+                "title":       pct(cai.get("title_score",0)),
+                "bullets":     pct(cai.get("bullets_score",0)),
+                "description": pct(cai.get("description_score",0)),
+                "photos":      pct(cai.get("images_score",0)),
+                "aplus":       pct(cai.get("aplus_score",0)),
+                "reviews":     pct(cai.get("reviews_score",0)),
+                "bsr":         pct(cai.get("bsr_score",0)),
+                "variants":    pct(cai.get("customization_score",0)),
+                "prime":       pct(cai.get("prime_score",0)),
+                "health":      pct(cai.get("overall_score",0)),
+            }
+        return auto_score(c)
+
+    comp_scores = [get_comp_scores(c, i) for i,c in enumerate(cd)]
     all_scores  = [our_scores] + comp_scores
     all_p       = [od] + cd
 
@@ -922,10 +940,14 @@ elif page == "🏆 Benchmark":
     # ── Podium ───────────────────────────────────────────────────────────────
     total_scores = []
     for sc in all_scores:
-        keys = ["title","bullets","description","photos","aplus","reviews","bsr","variants","prime"]
-        w    = [0.10,0.10,0.10,0.10,0.10,0.15,0.15,0.05,0.05]
-        total = sum(sc.get(k,0)*wi for k,wi in zip(keys,w)) * 10
-        total_scores.append(round(total))
+        # Use pre-computed health/overall if available, else weighted average
+        if sc.get("health", 0) > 0:
+            total_scores.append(sc["health"])
+        else:
+            keys = ["title","bullets","description","photos","aplus","reviews","bsr","variants","prime"]
+            w    = [0.10,0.10,0.10,0.10,0.10,0.15,0.15,0.05,0.05]
+            total = sum(sc.get(k,0)*wi for k,wi in zip(keys,w))
+            total_scores.append(round(total))
     ranked = sorted(enumerate(zip(asin_labels, total_scores)), key=lambda x: x[1][1], reverse=True)
     medals = ["🥇","🥈","🥉","4️⃣","5️⃣"]
 
