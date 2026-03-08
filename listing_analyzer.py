@@ -228,11 +228,11 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang=
 
     prompt = f"""You are an expert Amazon listing analyst specializing in the Listing 3.0 era where AI visibility (Cosmo + Rufus) determines 50% of success.
 
-OUR LISTING (ASIN {{asin}}):
-{{our_text}}
+OUR LISTING (ASIN {asin}):
+{our_text}
 
-{{comp_text}}
-{{vision_section}}
+{comp_text}
+{vision_section}
 
 ## YOUR TASK
 Analyze the listing above and score each component. Use ONLY real data from the listing provided.
@@ -287,26 +287,26 @@ Evaluate: Relevance to Queries, Proof & Evidence, Visual Clarity (OCR), Complete
 
 CRITICAL RULES:
 - Return ONLY valid JSON, no markdown, no explanation
-- All text fields in {{lang_name}}
+- All text fields in {lang_name}
 - Use REAL data from the listing — no placeholder text
 - overall_score = weighted average of all 17 scores
 - images_score = 40% main + 30% gallery + 30% OCR combined
 
-{{SCHEMA}}"""
+{SCHEMA}"""
 
-    sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text in {{lang_name}}."
+    sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text in {lang_name}."
     raw = anthropic_call(sys_prompt, prompt, max_tokens=4000)
-    log(f"✅ JSON: {{len(raw)}} chars")
+    log(f"✅ JSON: {len(raw)} chars")
 
     s = raw.strip().replace("```json","").replace("```","").strip()
-    start,end = s.find("{{"),s.rfind("}}")
+    start,end = s.find("{"),s.rfind("}")
     if start==-1: start,end = s.find("{"),s.rfind("}")
     if start==-1: raise ValueError(f"JSON not found: {{raw[:200]}}")
-    s = re.sub(r",\s*([}}\]])", r"\1", s[start:end+1])
+    s = re.sub(r",\s*([}\]])", r"\1", s[start:end+1])
     try: return json.loads(s)
     except:
         s2 = re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace('\n',' ')+'"', s)
-        return json.loads(re.sub(r",\s*([}}\]])", r"\1", s2))
+        return json.loads(re.sub(r",\s*([}\]])", r"\1", s2))
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log):
