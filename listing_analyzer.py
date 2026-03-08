@@ -309,36 +309,39 @@ CRITICAL RULES:
         return json.loads(re.sub(r",\s*([}\]])", r"\1", s2))
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-def run_analysis(our_url, competitor_urls, log):
-    asin = get_asin(our_url) or "unknown"
-    log(f"🎯 ASIN: {asin}")
+def run_analysis(our_url, competitor_urls, log, prog=None):
+    def _prog(pct, text):
+        if prog: prog.progress(pct, text=text)
+        log(text)
 
-    # Our product
+    asin = get_asin(our_url) or "unknown"
+    n_comps = len([u for u in competitor_urls if u.strip()])
+    # Steps: scrape(10) + photos(20) + vision(35) + comps*N(50) + AI(90) + done(100)
+
+    _prog(5,  f"🌐 Загружаю данные листинга {asin}...")
     our_data, img_urls = scrapingdog_product(asin, log)
 
-    # Download & Vision
-    images = []
-    if img_urls:
-        log(f"⬇️ Скачиваю {len(img_urls)} фото...")
-        images = download_images(img_urls, log)
+    _prog(15, f"⬇️ Скачиваю фото ({len(img_urls)} шт.)...")
+    images = download_images(img_urls, log) if img_urls else []
+    st.session_state["images"] = images
+
+    _prog(30, "👁️ Vision анализ фото...")
     vision_result = analyze_vision(images, our_data, asin, log) if images else ""
     if not images: log("⚠️ Фото не загружены")
-    st.session_state["images"] = images
-    # Store images for display
-    import streamlit as _st
-    _st.session_state["images"] = images
 
     # Competitors
     active = [u.strip() for u in competitor_urls if u.strip()]
     comp_data_list = []
-    for i,url in enumerate(active[:3]):
+    comp_step = 20 // max(len(active), 1)
+    for i, url in enumerate(active[:3]):
         casin = get_asin(url)
         if casin:
-            log(f"🔍 Конкурент {i+1}: {casin}...")
+            _prog(50 + i*comp_step, f"🔍 Конкурент {i+1}: {casin}...")
             cdata, _ = scrapingdog_product(casin, log)
-            cdata["_input_asin"] = casin  # always store the requested ASIN
+            cdata["_input_asin"] = casin
             comp_data_list.append(cdata)
 
+    _prog(75, "🧠 AI анализ листинга...")
     _lang = st.session_state.get("analysis_lang","ru")
     result = analyze_text(our_data, comp_data_list, vision_result, asin, log, lang=_lang)
     st.session_state['our_data'] = our_data
@@ -455,16 +458,25 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
     lang = st.radio("🌐 Язык анализа", ["🇷🇺 Русский", "🇺🇸 English"], horizontal=True, key="lang_sel")
     st.session_state["analysis_lang"] = "ru" if "Русский" in lang else "en"
 
-    if st.button(btn_label, type="primary", disabled=not our_url.strip()):
+    _bcol1, _bcol2 = st.columns([3, 1])
+    with _bcol1:
+        _run_btn = st.button(btn_label, type="primary", disabled=not our_url.strip(), use_container_width=True)
+    with _bcol2:
+        if st.button("🗑️ Сброс", type="secondary", use_container_width=True, help="Очистить всё и начать заново"):
+            for _k in list(st.session_state.keys()):
+                del st.session_state[_k]
+            st.rerun()
+
+    if _run_btn:
         lines = []; ph = st.empty()
         def log(msg):
             lines.append(msg); ph.markdown("\n\n".join(lines[-8:]))
 
-        with st.spinner("Анализирую..."):
-            try:
+        _main_prog = st.progress(0, text="🚀 Запускаю анализ...")
+        try:
                 # SMART: only re-run full analysis if our URL changed or first run
                 if not already_done or our_changed:
-                    result, vision = run_analysis(our_url, competitor_urls, log)
+                    result, vision = run_analysis(our_url, competitor_urls, log, prog=_main_prog)
                     st.session_state.update({"result": result, "vision": vision})
                     st.session_state["our_url_saved"] = our_url
                     st.session_state["c0_saved"] = comp1
@@ -495,9 +507,9 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     result = analyze_text(od_s, existing, v_s, asin_s, log, lang=_lang)
                     st.session_state["result"] = result
 
-                st.success("✅ Готово!")
+                _main_prog.progress(100, text="✅ Анализ завершён!")
                 st.rerun()
-            except Exception as e:
+        except Exception as e:
                 st.error(f"Ошибка: {e}")
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
@@ -1075,20 +1087,32 @@ elif _is_competitor_page:
 </div>""", unsafe_allow_html=True)
 
     # ── AI Analysis button for competitor ───────────────────────────────────
-    _cai_key = f"comp_ai_{cidx}"
+    _cai_key    = f"comp_ai_{cidx}"
+    _vision_key = f"comp_vision_{cidx}"
     _cai_result = st.session_state.get(_cai_key)
 
     if not _cai_result:
         _cbtn1, _cbtn2 = st.columns([3,1])
         with _cbtn1:
-            st.info("💡 Запусти AI анализ чтобы получить точные оценки по рубрику Listing 3.0")
+            st.info("💡 Запусти полный анализ — текст + Vision фото (как у нашего листинга)")
         with _cbtn2:
-            if st.button("🧠 AI Анализ", key=f"ai_btn_{cidx}", type="primary"):
-                with st.spinner(f"Анализирую конкурента {casin}..."):
-                    _clang = st.session_state.get("analysis_lang","ru")
-                    _cai_result = analyze_text(c, [], "", casin, lambda m: None, lang=_clang)
-                    st.session_state[_cai_key] = _cai_result
-                    st.rerun()
+            if st.button("🧠 Анализ", key=f"ai_btn_{cidx}", type="primary"):
+                _clang = st.session_state.get("analysis_lang","ru")
+                _cimgs_urls = c.get("images",[])
+                _prog = st.progress(0, text="⬇️ Загружаю фото...")
+                # Step 1: download images
+                _cimgs_dl = download_images(_cimgs_urls[:5], lambda m: None) if _cimgs_urls else []
+                _prog.progress(33, text="👁️ Vision анализ фото...")
+                # Step 2: vision
+                _comp_vision = analyze_vision(_cimgs_dl, c, casin, lambda m: None, lang=_clang) if _cimgs_dl else ""
+                _prog.progress(66, text="🧠 AI анализ текста...")
+                # Step 3: text analysis
+                _cai_result = analyze_text(c, [], _comp_vision, casin, lambda m: None, lang=_clang)
+                # Save both
+                st.session_state[_cai_key]    = _cai_result
+                st.session_state[_vision_key] = (_cimgs_dl, _comp_vision) if _cimgs_dl else None
+                _prog.progress(100, text="✅ Готово!")
+                st.rerun()
 
     # Score mini-cards — use AI scores if available, else auto-score
     if _cai_result:
@@ -1158,17 +1182,8 @@ elif _is_competitor_page:
     with tab_photo:
         _cimgs = c.get("images",[])
         if _cimgs:
-            # Cache key for this competitor's vision
-            _vision_key = f"comp_vision_{cidx}"
-            if _vision_key not in st.session_state:
-                if st.button("🔍 Запустить Vision анализ фото", key=f"vision_btn_{cidx}"):
-                    with st.spinner("Анализирую фото конкурента..."):
-                        _comp_imgs_dl = download_images(_cimgs[:5], lambda m: None)
-                        if _comp_imgs_dl:
-                            _comp_vision = analyze_vision(_comp_imgs_dl, c, casin, lambda m: None)
-                            st.session_state[_vision_key] = (_comp_imgs_dl, _comp_vision)
-                            st.rerun()
-            if _vision_key in st.session_state:
+            # Vision results come from the combined AI Анализ button above
+            if _vision_key in st.session_state and st.session_state[_vision_key]:
                 _cv_imgs, _cv_text = st.session_state[_vision_key]
                 _cv_blocks = re.split(r"PHOTO_BLOCK_\d+", _cv_text)
                 _cv_blocks = [b.strip() for b in _cv_blocks if b.strip()]
