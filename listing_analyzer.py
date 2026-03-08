@@ -71,7 +71,7 @@ def fetch_images_scrapingdog(asin, log):
         urls = [u for u in urls if not re.search(r'_SR\d{2}|_SX3[0-9]|_SS4|_SL75|sprite|grey', u)]
         urls = list(dict.fromkeys(urls))  # deduplicate
         log(f"✅ ScrapingDog: {len(urls)} изображений")
-        return urls[:8]
+        return urls[:3]
     except Exception as e:
         log(f"⚠️ ScrapingDog exception: {e}")
         return []
@@ -242,7 +242,7 @@ def run_full_analysis(our_url, competitor_urls, uploaded_files, log):
         img_urls = fetch_images_scrapingdog(asin, log)
         if img_urls:
             log(f"⬇️ Скачиваю {len(img_urls)} фото...")
-            images = download_images(img_urls, log)
+            images = download_images(img_urls[:3], log)
 
     # 2. Vision analysis
     vision_data = ""
