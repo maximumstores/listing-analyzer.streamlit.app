@@ -10,7 +10,7 @@ import io
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-3-haiku-20240307"
 
-SCHEMA = '{"health_score":72,"health_breakdown":{"title":8,"bullets":8,"description":7,"photos":7,"aplus":6,"reviews":9,"bsr":8,"price":7,"variants":8,"prime":9},"summary":"...","title_score":7,"title_gaps":["gap1"],"title_rec":"rec","bullets_score":7,"bullets_gaps":["gap1"],"bullets_rec":"rec","desc_score":7,"desc_gaps":["gap1"],"desc_rec":"rec","photos_score":7,"photos_gaps":["gap1"],"photos_rec":"rec","aplus_score":7,"aplus_gaps":["gap1"],"aplus_rec":"rec","cosmo_score":65,"cosmo_semantic":[{"relationship":"Used For (Function)","status":"WELL-DEVELOPED","evidence":"...","opportunity":"..."},{"relationship":"Used For (Situation)","status":"GOOD","evidence":"...","opportunity":"..."},{"relationship":"Target Audience","status":"ADEQUATE","evidence":"...","opportunity":"..."},{"relationship":"Solves Problem","status":"GOOD","evidence":"...","opportunity":"..."},{"relationship":"Compared To (Alternative)","status":"PARTIAL","evidence":"...","opportunity":"..."},{"relationship":"Used In (Location)","status":"MINIMAL","evidence":"...","opportunity":"..."},{"relationship":"Used With (Complementary)","status":"MINIMAL","evidence":"...","opportunity":"..."}],"rufus_answered":[{"question":"q","answer":"..."}],"rufus_partial":[{"question":"q","gap":"..."}],"rufus_missing":[{"question":"q","missing":"..."}],"missing_chars":[{"name":"char","how_competitors_use":"use","priority":"HIGH"}],"tech_params":[{"param":"p","competitor_value":"v","our_gap":"g"}],"actions":[{"action":"act","impact":"HIGH","effort":"LOW","details":"det"}]}'
+SCHEMA = '{"health_score":72,"health_breakdown":{"title":8,"bullets":8,"description":7,"photos":7,"aplus":6,"reviews":9,"bsr":8,"price":7,"variants":8,"prime":9},"summary":"Листинг в целом хорошо оптимизирован, но требует доработки описания и A+","title_score":7,"title_gaps":["Не указан вес ткани (GSM)","Отсутствует слово outdoor"],"title_rec":"Добавить GSM ткани и сценарий использования в заголовок","bullets_score":7,"bullets_gaps":["Нет информации об уходе за изделием","Не указан процент шерсти"],"bullets_rec":"Добавить буллет с инструкцией по стирке и составом 100% merino","desc_score":0,"desc_gaps":["Описание полностью отсутствует"],"desc_rec":"Создать описание с заголовками, сценариями и ответами на возражения","photos_score":8,"photos_gaps":["Нет lifestyle фото на улице"],"photos_rec":"Добавить фото в природных условиях для подчёркивания outdoor применения","aplus_score":7,"aplus_gaps":["Brand Story отсутствует","Текст модулей превышает 80 символов"],"aplus_rec":"Добавить Brand Story и сократить текст в модулях","cosmo_score":65,"cosmo_semantic":[{"relationship":"Used For (Function)","status":"WELL-DEVELOPED","evidence":"Title и буллеты упоминают базовый слой и спорт","opportunity":"Добавить конкретные виды спорта: hiking, skiing"},{"relationship":"Used For (Situation)","status":"GOOD","evidence":"Упоминается travel и everyday wear","opportunity":"Расширить на деловую одежду"},{"relationship":"Target Audience","status":"ADEQUATE","evidence":"Мужчины, спортсмены","opportunity":"Уточнить возраст и активность"},{"relationship":"Solves Problem","status":"GOOD","evidence":"Терморегуляция и влагоотвод","opportunity":"Добавить проблему запаха"},{"relationship":"Compared To (Alternative)","status":"PARTIAL","evidence":"Упоминается шерсть vs синтетика","opportunity":"Прямое сравнение с хлопком"},{"relationship":"Used In (Location)","status":"MINIMAL","evidence":"Нет конкретных локаций","opportunity":"Горы, офис, путешествия"},{"relationship":"Used With (Complementary)","status":"MINIMAL","evidence":"Не упомянуто","opportunity":"Упомянуть hiking pants, fleece jacket"}],"rufus_answered":[{"question":"Из какого материала сделана майка?","answer":"100% мериносовая шерсть, указано в title и буллетах"}],"rufus_partial":[{"question":"Подходит ли для холодной погоды?","gap":"Упоминается терморегуляция, но не указана температура комфорта"}],"rufus_missing":[{"question":"Как стирать изделие?","missing":"Инструкция по уходу полностью отсутствует в контенте"}],"missing_chars":[{"name":"Инструкция по уходу","how_competitors_use":"Конкуренты указывают машинная стирка при 30°C","priority":"HIGH"},{"name":"Вес ткани (GSM)","how_competitors_use":"Конкуренты указывают 160-200 GSM в title","priority":"HIGH"}],"tech_params":[{"param":"Вес ткани","competitor_value":"160-200 GSM у топ-конкурентов","our_gap":"GSM не указан нигде в листинге"},{"param":"Состав","competitor_value":"Конкуренты пишут 100% Merino Wool в буллете #1","our_gap":"Состав упомянут только в title"}],"actions":[{"action":"Добавить описание товара","impact":"HIGH","effort":"LOW","details":"Написать 300-500 слов с заголовками, сценариями и FAQ"},{"action":"Добавить GSM в title","impact":"HIGH","effort":"LOW","details":"Изменить title: добавить 160GSM после Merino Wool"}]}'
 
 def get_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
@@ -241,7 +241,15 @@ Used In Location, Used On Season, Used With Complementary.
 
 RUFUS — типичные вопросы покупателей для этой категории.
 
-Верни ТОЛЬКО JSON на русском. Все поля — реальные данные из листинга, не "x".
+КРИТИЧЕСКИ ВАЖНО: Верни ТОЛЬКО валидный JSON. 
+- Все строковые поля ДОЛЖНЫ содержать реальный текст на русском — анализ реального листинга выше.
+- ЗАПРЕЩЕНО копировать значения из примера схемы ("gap1", "rec", "p", "v", "char", "use", "act", "det", "q").
+- Каждый gap — конкретная проблема данного листинга.
+- Каждый rec — конкретная рекомендация с примером текста.
+- tech_params.param — реальное название характеристики (например "Вес ткани GSM").
+- tech_params.competitor_value — реальное значение у конкурента из данных выше.
+- missing_chars.name — реальная отсутствующая характеристика.
+- actions.action — конкретное действие, не абстрактное.
 cosmo_score = среднее по всем связям × 10.
 health_score (0-100) = взвешенное среднее:
   title×10% + bullets×10% + description×10% + photos×10% + aplus×10% + reviews×15% + bsr×15% + price×10% + variants×5% + prime×5%
@@ -343,19 +351,32 @@ with st.sidebar:
         st.divider()
 
         cur = st.session_state.get("page","🏠 Обзор")
-        all_nav = list(NAV_ITEMS)
-        for _i2, _c2 in enumerate(_cd_nav):
-            _cpi2 = _c2.get("product_information", {})
-            _casin2 = _c2.get("parent_asin","") or _cpi2.get("ASIN",f"Конк.{_i2+1}")
-            all_nav.append(("🔴", f"Конкурент {_i2+1} · {_casin2}"))
 
-        for icon, label in all_nav:
+        # ── МЫ ──────────────────────────────────────────────────────
+        st.markdown('<div style="font-size:0.7rem;font-weight:700;color:#94a3b8;letter-spacing:0.08em;padding:4px 2px">МЫ</div>', unsafe_allow_html=True)
+        for icon, label in NAV_ITEMS:
             full = f"{icon} {label}"
             is_active = (cur == full)
-            btn_style = "primary" if is_active else "secondary"
-            if st.button(f"{icon}  {label}", key=f"nav_{label}", use_container_width=True, type=btn_style):
+            if st.button(f"{icon}  {label}", key=f"nav_{label}", use_container_width=True,
+                         type="primary" if is_active else "secondary"):
                 st.session_state["page"] = full
                 st.rerun()
+
+        # ── КОНКУРЕНТЫ ───────────────────────────────────────────────
+        if _cd_nav:
+            st.markdown('<div style="font-size:0.7rem;font-weight:700;color:#94a3b8;letter-spacing:0.08em;padding:12px 2px 4px">КОНКУРЕНТЫ</div>', unsafe_allow_html=True)
+            for _i2, _c2 in enumerate(_cd_nav):
+                _cpi2 = _c2.get("product_information", {})
+                _casin2 = _c2.get("parent_asin","") or _cpi2.get("ASIN","")
+                _ct2 = _c2.get("title","")
+                _ct2_short = _ct2[:20]+"..." if len(_ct2)>20 else _ct2
+                full = f"🔴 Конкурент {_i2+1}"
+                is_active = cur.startswith(f"🔴 Конкурент {_i2+1}")
+                if st.button(f"🔴  Конкурент {_i2+1}", key=f"nav_comp_{_i2}", use_container_width=True,
+                             type="primary" if is_active else "secondary"):
+                    st.session_state["page"] = full
+                    st.rerun()
+                st.caption(f"  {_casin2}  {_ct2_short}")
     else:
         st.caption("Запусти анализ чтобы открыть все страницы")
         for icon, label in NAV_ITEMS:
@@ -751,6 +772,32 @@ elif page == "🏆 Benchmark":
     ]
     asin_labels = ["🔵 НАШ"] + [f"🔴 {c.get('parent_asin','') or c.get('product_information',{}).get('ASIN',f'Конк.{i+1}')}" for i,c in enumerate(cd)]
 
+    # ── Podium ───────────────────────────────────────────────────────────────
+    total_scores = []
+    for sc in all_scores:
+        keys = ["title","bullets","description","photos","aplus","reviews","bsr","variants","prime"]
+        w    = [0.10,0.10,0.10,0.10,0.10,0.15,0.15,0.05,0.05]
+        total = sum(sc.get(k,0)*wi for k,wi in zip(keys,w)) * 10
+        total_scores.append(round(total))
+    ranked = sorted(enumerate(zip(asin_labels, total_scores)), key=lambda x: x[1][1], reverse=True)
+    medals = ["🥇","🥈","🥉","4️⃣","5️⃣"]
+
+    st.subheader("🏅 Итоговый рейтинг")
+    pcols = st.columns(len(ranked))
+    for rank,(orig_idx,(lbl,score)) in enumerate(ranked):
+        medal = medals[rank] if rank < len(medals) else ""
+        bg = "#fef9c3" if rank==0 else ("#f8fafc" if rank==1 else "#fff7ed")
+        border = "#f59e0b" if rank==0 else ("#94a3b8" if rank==1 else "#fb923c")
+        tag = "Лучший" if rank==0 else f"#{rank+1} место"
+        pcols[rank].markdown(
+            f'<div style="background:{bg};border:2px solid {border};border-radius:12px;padding:14px;text-align:center">'
+            f'<div style="font-size:1.8rem">{medal}</div>'
+            f'<div style="font-size:0.82rem;font-weight:700;margin-top:4px">{lbl}</div>'
+            f'<div style="font-size:1.6rem;font-weight:800;color:{border};margin-top:4px">{score}%</div>'
+            f'<div style="font-size:0.65rem;color:#64748b">{tag}</div>'
+            f'</div>', unsafe_allow_html=True)
+
+    st.divider()
     st.subheader("📊 Сравнение оценок")
     hdr2 = st.columns([2]+[3]*(1+len(cd)))
     hdr2[0].markdown("**Метрика**")
@@ -919,13 +966,53 @@ elif _is_competitor_page:
     with tab_photo:
         _cimgs = c.get("images",[])
         if _cimgs:
-            for _rs in range(0, min(len(_cimgs),9), 3):
-                _rc = st.columns(3)
-                for _ci2,_iu in enumerate(_cimgs[_rs:_rs+3]):
-                    try:
-                        _ri2 = requests.get(_iu, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
-                        if _ri2.ok: _rc[_ci2].image(_ri2.content, caption=f"#{_rs+_ci2+1}", use_container_width=True)
-                    except: _rc[_ci2].caption(f"#{_rs+_ci2+1} ошибка")
+            # Cache key for this competitor's vision
+            _vision_key = f"comp_vision_{cidx}"
+            if _vision_key not in st.session_state:
+                if st.button("🔍 Запустить Vision анализ фото", key=f"vision_btn_{cidx}"):
+                    with st.spinner("Анализирую фото конкурента..."):
+                        _comp_imgs_dl = download_images(_cimgs[:5], lambda m: None)
+                        if _comp_imgs_dl:
+                            _comp_vision = analyze_vision(_comp_imgs_dl, c, casin, lambda m: None)
+                            st.session_state[_vision_key] = (_comp_imgs_dl, _comp_vision)
+                            st.rerun()
+            if _vision_key in st.session_state:
+                _cv_imgs, _cv_text = st.session_state[_vision_key]
+                _cv_blocks = re.split(r"PHOTO_BLOCK_\d+", _cv_text)
+                _cv_blocks = [b.strip() for b in _cv_blocks if b.strip()]
+                for _pi3, _pimg in enumerate(_cv_imgs):
+                    _ptext = _cv_blocks[_pi3] if _pi3 < len(_cv_blocks) else ""
+                    _psm = re.search(r"(\d+)/10", _ptext)
+                    _pscore = int(_psm.group(1)) if _psm else 0
+                    _pbc = "#22c55e" if _pscore>=8 else ("#f59e0b" if _pscore>=6 else "#ef4444")
+                    _pslbl = "Отлично" if _pscore>=8 else ("Хорошо" if _pscore>=6 else "Слабо")
+                    _ptyp = re.search(r"[Тт]ип:\s*(.+)", _ptext)
+                    _pstrg = re.search(r"[Сс]ильная сторона:\s*(.+)", _ptext)
+                    _pweak = re.search(r"[Сс]лабость:\s*(.+)", _ptext)
+                    with st.container(border=True):
+                        _pc1,_pc2 = st.columns([1,2])
+                        with _pc1:
+                            st.image(__import__("base64").b64decode(_pimg["b64"]), use_container_width=True)
+                        with _pc2:
+                            st.markdown(f"**Фото #{_pi3+1} — {_ptyp.group(1).strip() if _ptyp else ''}**")
+                            st.markdown(
+                                f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">'
+                                f'<div style="font-size:2rem;font-weight:800;color:{_pbc}">{_pscore}/10</div>'
+                                f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">'
+                                f'<div style="background:{_pbc};width:{_pscore*10}%;height:10px;border-radius:6px"></div>'
+                                f'</div><div style="color:{_pbc};font-size:0.8rem;margin-top:2px">{_pslbl}</div></div></div>',
+                                unsafe_allow_html=True)
+                            if _pstrg: st.success(f"✅ {_pstrg.group(1).strip()}")
+                            if _pweak: st.warning(f"⚠️ {_pweak.group(1).strip()}")
+            else:
+                # Show photos without analysis
+                for _rs in range(0, min(len(_cimgs),9), 3):
+                    _rc = st.columns(3)
+                    for _ci2,_iu in enumerate(_cimgs[_rs:_rs+3]):
+                        try:
+                            _ri2 = requests.get(_iu, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+                            if _ri2.ok: _rc[_ci2].image(_ri2.content, caption=f"#{_rs+_ci2+1}", use_container_width=True)
+                        except: _rc[_ci2].caption(f"#{_rs+_ci2+1} ошибка")
             st.caption(f"Всего: {len(_cimgs)} фото")
         else: st.warning("Нет фото")
     with tab_data:
