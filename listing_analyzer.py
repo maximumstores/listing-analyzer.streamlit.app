@@ -15,21 +15,36 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 GEMINI_MODEL_VISION = "gemini-2.0-flash"
 GEMINI_MODEL_TEXT   = "gemini-2.0-flash"
 
-def gemini_post(model, payload, api_key, timeout=120):
-    r = requests.post(
-        GEMINI_URL.format(model=model),
-        params={"key": api_key},
-        json=payload,
-        timeout=timeout
-    )
-    if not r.ok:
-        raise Exception(f"Gemini {r.status_code}: {r.text[:300]}")
-    data = r.json()
-    candidates = data.get("candidates", [])
-    if not candidates:
-        raise Exception(f"Gemini no candidates: {data}")
-    parts = candidates[0].get("content", {}).get("parts", [])
-    return "".join(p.get("text", "") for p in parts)
+GEMINI_KEYS = [
+    "AIzaSyC8CUvsCMnoGLfjOXP2Cod7KueJAMeNdY8",
+    "AIzaSyC62LXBA1dTUqYnbXcrljnafzXodo6-CKQ",
+    "AIzaSyAwsZXXADvRtdEBXM0vQAh3JHx8dK8uzs",
+    "AIzaSyCQxE6zBB7yoGqL5iv3dEtw0xSfINHHyPQ",
+    "AIzaSyBd6gmCW9CZ2uX_TREHozfCOQEyQcqeF-M",
+]
+
+def gemini_post(model, payload, api_key=None, timeout=120):
+    keys = GEMINI_KEYS if not api_key else [api_key] + GEMINI_KEYS
+    last_err = None
+    for key in keys:
+        r = requests.post(
+            GEMINI_URL.format(model=model),
+            params={"key": key},
+            json=payload,
+            timeout=timeout
+        )
+        if r.status_code == 429:
+            last_err = f"Gemini 429 key ...{key[-6:]}"
+            continue
+        if not r.ok:
+            raise Exception(f"Gemini {r.status_code}: {r.text[:300]}")
+        data = r.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise Exception(f"Gemini no candidates: {data}")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        return "".join(p.get("text", "") for p in parts)
+    raise Exception(f"Все ключи исчерпаны: {last_err}")
 
 def get_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
