@@ -42,9 +42,9 @@ def fetch_images_scrapingdog(asin, log):
     log(f"🌐 ScrapingDog: загружаю страницу {asin}...")
     try:
         r = requests.get(
-            "https://api.scrapingdog.com/amazon",
-            params={"api_key": sd_key, "domain": "com", "asin": asin, "type": "product"},
-            timeout=30
+            "https://api.scrapingdog.com/amazon/product",
+            params={"api_key": sd_key, "asin": asin, "country": "us"},
+            timeout=60
         )
         if not r.ok:
             log(f"⚠️ ScrapingDog error {r.status_code}")
