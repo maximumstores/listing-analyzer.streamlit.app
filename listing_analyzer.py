@@ -197,13 +197,18 @@ Be specific and detailed. This is merino wool apparel category."""
     log("🧠 Финальный анализ...")
     vision_section = f"\n\nВИЗУАЛЬНЫЙ АНАЛИЗ ФОТО:\n{vision_data[:3000]}" if vision_data else ""
     analysis_prompt = f"""Analyze Amazon listing. OUR product: {asin}
-Data: {raw_data[:6000]}
-{vision_section}
-Return ONLY JSON in Russian (max 3 items per array). Use Vision data for photos_score/photos_gaps.
+
+Vision analysis of screenshots:
+{vision_data[:2000]}
+
+Background data:
+{raw_data[:2000]}
+
+Return ONLY JSON in Russian (max 2 items per array). Be specific.
 {SCHEMA}"""
 
     raw_json, provider = ai_post(
-        {"model":ANTHROPIC_MODEL,"max_tokens":8000,
+        {"model":ANTHROPIC_MODEL,"max_tokens":4000,
          "system":"Amazon expert. Return ONLY valid JSON. No markdown.",
          "messages":[{"role":"user","content":analysis_prompt}]},
         {"system_instruction":{"parts":[{"text":"Amazon expert. Return ONLY valid JSON. No markdown."}]},
