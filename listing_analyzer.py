@@ -18,7 +18,7 @@ GEMINI_MODEL_TEXT   = "gemini-2.0-flash"
 GEMINI_KEYS = [
     "AIzaSyC8CUvsCMnoGLfjOXP2Cod7KueJAMeNdY8",
     "AIzaSyC62LXBA1dTUqYnbXcrljnafzXodo6-CKQ",
-    "AIzaSyAwsZXXADvRtdEBXM0vQAh3JHx8dK8uzs",
+    "AIzaSyAwsZXXADvRtdEBXM0vQAh3JHx8dK8uzsw",
     "AIzaSyCQxE6zBB7yoGqL5iv3dEtw0xSfINHHyPQ",
     "AIzaSyBd6gmCW9CZ2uX_TREHozfCOQEyQcqeF-M",
 ]
