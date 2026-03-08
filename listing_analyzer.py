@@ -86,63 +86,55 @@ def section(label, score, gaps, adv, rec):
             for a in adv: st.markdown(f"- {a}")
     if rec: st.info(f"💡 {rec}")
 
-# ── ScrapingDog ───────────────────────────────────────────────────────────────
-def fetch_images_scrapingdog(asin, log):
+# ── ScrapingDog Screenshot ───────────────────────────────────────────────────
+def fetch_listing_screenshot(listing_url, label, log):
+    """Делает полный скрин страницы Amazon и возвращает как image dict"""
     sd_key = st.secrets.get("SCRAPINGDOG_API_KEY", "")
     if not sd_key:
         log("⚠️ SCRAPINGDOG_API_KEY не задан")
-        return []
-    log(f"🌐 ScrapingDog: загружаю {asin}...")
+        return None
+    log(f"📸 ScrapingDog screenshot: {label}...")
     try:
         r = requests.get(
-            "https://api.scrapingdog.com/amazon/product",
-            params={"api_key": sd_key, "asin": asin, "domain": "com"}, timeout=60
+            "https://api.scrapingdog.com/screenshot",
+            params={"api_key": sd_key, "url": listing_url, "fullPage": "true"},
+            timeout=90
         )
         if not r.ok:
-            log(f"⚠️ ScrapingDog {r.status_code}: {r.text[:100]}")
-            return []
-        data = r.json()
-        urls = []
-        for field in ["images_of_specified_asin", "images"]:
-            raw = data.get(field, [])
-            if isinstance(raw, list):
-                urls.extend([u for u in raw if isinstance(u, str) and u.startswith("http")])
-            elif isinstance(raw, str):
-                try: urls.extend([u for u in json.loads(raw) if isinstance(u, str)])
-                except: pass
-        urls = list(dict.fromkeys([u for u in urls if not re.search(r'_SR\d{2}|_SX3[0-9]|_SS4|_SL75|sprite|grey', u)]))
-        log(f"✅ ScrapingDog: {len(urls)} изображений")
-        return urls[:3]
+            log(f"⚠️ Screenshot {r.status_code}: {r.text[:150]}")
+            return None
+        if len(r.content) < 5000:
+            log(f"⚠️ Screenshot слишком маленький: {len(r.content)} bytes")
+            return None
+        b64 = base64.b64encode(r.content).decode()
+        media_type = r.headers.get("content-type", "image/png").split(";")[0]
+        log(f"✅ Screenshot {label}: {len(r.content)//1024}KB")
+        return {"b64": b64, "media_type": media_type, "label": label}
     except Exception as e:
-        log(f"⚠️ ScrapingDog: {e}")
-        return []
-
-def download_images(urls, log):
-    images = []
-    for i, url in enumerate(urls):
-        try:
-            r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-            if r.ok and len(r.content) > 1000:
-                images.append({"b64": base64.b64encode(r.content).decode(),
-                               "media_type": r.headers.get("content-type","image/jpeg").split(";")[0]})
-                log(f"  📥 Фото {i+1}: {len(r.content)//1024}KB ✅")
-        except Exception as e:
-            log(f"  ⚠️ Фото {i+1}: {e}")
-    return images
+        log(f"⚠️ Screenshot {label}: {e}")
+        return None
 
 # ── Vision ────────────────────────────────────────────────────────────────────
 def analyze_images_vision(images, asin, log):
     if not images: return ""
     log(f"👁️ Vision: анализирую {len(images)} фото...")
 
-    prompt = f"""Ты эксперт по Amazon листингам. Проанализируй фотографии продукта ASIN {asin}.
-Для КАЖДОГО изображения:
-1. Тип (главное / lifestyle / инфографика / A+ баннер / детали / размерная сетка)
-2. Что видно — фон, модель, композиция, текст и цифры
-3. Оценка конверсии 1-10
-4. Сильная сторона
-5. Слабость или чего не хватает
-В конце — топ 3 улучшения. Отвечай на русском."""
+    prompt = f"""Ты эксперт по Amazon листингам. Тебе показаны ПОЛНЫЕ СКРИНЫ страниц Amazon листингов.
+
+Для КАЖДОГО скрина проанализируй:
+1. Title — ключевые слова, длина, УТП
+2. Bullets — о чём пишут, какие характеристики, цифры
+3. Главное фото — фон, ракурс, качество
+4. A+ контент — есть ли, что показывают
+5. Цена и позиционирование
+6. Оценка общего листинга 1-10
+
+Потом сравни НАШ листинг с конкурентами:
+- Что у нас лучше
+- Чего нам не хватает
+- Топ 5 конкретных улучшений
+
+Отвечай на русском. Будь конкретен — указывай реальный текст который видишь на скринах."""
 
     # Anthropic payload
     content_a = [{"type":"text","text":prompt}]
@@ -234,13 +226,19 @@ Return ONLY JSON in Russian (max 3 items per array). Use Vision data for photos_
 def run_full_analysis(our_url, competitor_urls, log):
     asin = get_asin(our_url) or "unknown"
     log(f"🎯 ASIN: {asin}")
-    img_urls = fetch_images_scrapingdog(asin, log)
-    images = []
-    if img_urls:
-        log(f"⬇️ Скачиваю {len(img_urls)} фото...")
-        images = download_images(img_urls, log)
-    vision_data = analyze_images_vision(images, asin, log) if images else ""
-    if not images: log("⚠️ Фото не загружены — только текст")
+
+    # Make screenshots of our listing + competitors
+    screenshots = []
+    shot = fetch_listing_screenshot(our_url, f"НАШ ({asin})", log)
+    if shot: screenshots.append(shot)
+
+    active = [u.strip() for u in competitor_urls if u.strip()]
+    for i, url in enumerate(active[:2]):  # max 2 конкурента для Vision
+        shot = fetch_listing_screenshot(url, f"Конкурент {i+1}", log)
+        if shot: screenshots.append(shot)
+
+    vision_data = analyze_images_vision(screenshots, asin, log) if screenshots else ""
+    if not screenshots: log("⚠️ Скрины не получены — только текст")
     result = run_text_analysis(our_url, competitor_urls, vision_data, log)
     return result, vision_data
 
