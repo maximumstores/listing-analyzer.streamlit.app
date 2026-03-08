@@ -6,7 +6,6 @@ Secrets:
   SCRAPINGDOG_API_KEY = "..."  # опционально — для авто-получения фото
 """
 import json, re, base64, requests, streamlit as st
-import anthropic
 
 st.set_page_config(page_title="Listing Analyzer", page_icon="🔍", layout="wide")
 
@@ -98,7 +97,7 @@ def analyze_images_vision(images, asin, log):
     if not images:
         return ""
 
-    client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
     log(f"👁️ Vision: анализирую {len(images)} фото...")
 
     content = [{
@@ -123,18 +122,29 @@ def analyze_images_vision(images, asin, log):
             "source": {"type": "base64", "media_type": img["media_type"], "data": img["b64"]}
         })
 
-    resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=4000,
-        messages=[{"role": "user", "content": content}]
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        },
+        json={
+            "model": "claude-sonnet-4-5-20250929",
+            "max_tokens": 4000,
+            "messages": [{"role": "user", "content": content}]
+        },
+        timeout=120
     )
-    result = resp.content[0].text
+    if not resp.ok:
+        raise Exception(f"Error code: {resp.status_code} - {resp.json()}")
+    result = resp.json()["content"][0]["text"]
     log(f"✅ Vision анализ: {len(result)} символов")
     return result
 
 # ── Step 4: Text analysis via web_search ─────────────────────────────────────
 def run_text_analysis(our_url, competitor_urls, vision_data, log):
-    client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
     active = [u.strip() for u in competitor_urls if u.strip()]
     asin = get_asin(our_url) or our_url
 
@@ -153,13 +163,27 @@ Search each by ASIN and summarize what you find."""
 
     search_count = 0
     for _ in range(12):
-        resp = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=6000,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=messages,
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": "claude-sonnet-4-5-20250929", "max_tokens": 6000,
+                  "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+                  "messages": messages},
+            timeout=120
         )
-        messages.append({"role": "assistant", "content": resp.content})
+        resp_data = r.json() if r.ok else (_ for _ in ()).throw(Exception(f"Error code: {r.status_code} - {r.json()}"))
+        class _Resp:
+            pass
+        resp = _Resp()
+        resp.stop_reason = resp_data.get("stop_reason")
+        class _Block:
+            def __init__(self, d):
+                self.type = d.get("type")
+                self.text = d.get("text","")
+                self.id = d.get("id","")
+                self.input = type("I", (), d.get("input", {}))()
+        resp.content = [_Block(b) for b in resp_data.get("content", [])]
+        messages.append({"role": "assistant", "content": resp_data.get("content", [])})
 
         if resp.stop_reason == "end_turn":
             raw_data = "".join(b.text for b in resp.content if hasattr(b, "text"))
@@ -168,14 +192,15 @@ Search each by ASIN and summarize what you find."""
 
         if resp.stop_reason == "tool_use":
             tool_results = []
-            for block in resp.content:
-                if block.type == "tool_use":
+            for block in resp_data.get("content", []):
+                if block.get("type") == "tool_use":
                     search_count += 1
-                    q = getattr(block.input, "query", "") or str(block.input)
+                    inp = block.get("input", {})
+                    q = inp.get("query", str(inp))
                     log(f"  🔎 #{search_count}: {str(q)[:60]}")
                     tool_results.append({
                         "type": "tool_result",
-                        "tool_use_id": block.id,
+                        "tool_use_id": block["id"],
                         "content": "Search completed"
                     })
             messages.append({"role": "user", "content": tool_results})
@@ -189,13 +214,14 @@ Search each by ASIN and summarize what you find."""
     if vision_data:
         vision_section = f"\n\nВИЗУАЛЬНЫЙ АНАЛИЗ ФОТОГРАФИЙ (Claude Vision):\n{vision_data[:3000]}"
 
-    resp2 = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=8000,
-        system="Amazon listing optimization expert. Respond ONLY with valid JSON. No markdown. No explanation.",
-        messages=[{
-            "role": "user",
-            "content": f"""Analyze this Amazon listing. OUR product: {asin}
+    r2 = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+        json={
+            "model": "claude-sonnet-4-5-20250929",
+            "max_tokens": 8000,
+            "system": "Amazon listing optimization expert. Respond ONLY with valid JSON. No markdown. No explanation.",
+            "messages": [{"role": "user", "content": f"""Analyze this Amazon listing. OUR product: {asin}
 
 Text data from web:
 {raw_data[:6000]}
@@ -203,11 +229,13 @@ Text data from web:
 
 Return ONLY JSON in Russian (max 3 items per array).
 For photos_score and photos_gaps use the Vision analysis above — be specific about real photos.
-{SCHEMA}"""
-        }]
+{SCHEMA}"""}]
+        },
+        timeout=120
     )
-
-    raw_json = "".join(b.text for b in resp2.content if hasattr(b, "text"))
+    if not r2.ok:
+        raise Exception(f"Error code: {r2.status_code} - {r2.json()}")
+    raw_json = r2.json()["content"][0]["text"]
     log(f"✅ JSON: {len(raw_json)} символов")
 
     s = raw_json.strip().replace("```json","").replace("```","").strip()
@@ -266,8 +294,7 @@ with st.sidebar:
 # Quick API test button
 if st.sidebar.button("🧪 Тест API ключа"):
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+                api_key = st.secrets["ANTHROPIC_API_KEY"]
         r = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=10,
