@@ -170,45 +170,36 @@ def run_text_analysis(our_url, competitor_urls, vision_data, log):
     active = [u.strip() for u in competitor_urls if u.strip()]
     url_list = f"НАШ: {our_url}\n" + "\n".join([f"Конк.{i+1}: {u}" for i,u in enumerate(active)])
 
-    log("🔍 Читаю листинги...")
-
-    # Try Anthropic with web_search tool first
+    log("🔍 Читаю листинги через Anthropic...")
     raw_data = ""
     try:
         key = st.secrets.get("ANTHROPIC_API_KEY","")
         if not key: raise Exception("no key")
-        messages = [{"role":"user","content":f"Search Amazon for these listings and extract full content (title, bullets, description, BSR, reviews, price):\n{url_list}"}]
-        search_count = 0
-        for _ in range(10):
-            r = requests.post(ANTHROPIC_URL,
-                headers={"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"},
-                json={"model":ANTHROPIC_MODEL,"max_tokens":6000,
-                      "tools":[{"type":"web_search_20250305","name":"web_search"}],
-                      "messages":messages}, timeout=120)
-            if not r.ok: raise Exception(f"{r.status_code}: {r.json()}")
-            resp = r.json()
-            messages.append({"role":"assistant","content":resp["content"]})
-            if resp["stop_reason"] == "end_turn":
-                raw_data = "".join(b.get("text","") for b in resp["content"] if b.get("type")=="text")
-                log(f"📄 Anthropic web_search: {len(raw_data)} символов, {search_count} поисков")
-                break
-            if resp["stop_reason"] == "tool_use":
-                results = []
-                for b in resp["content"]:
-                    if b.get("type") == "tool_use":
-                        search_count += 1
-                        q = b.get("input",{}).get("query","")
-                        log(f"  🔎 #{search_count}: {str(q)[:60]}")
-                        results.append({"type":"tool_result","tool_use_id":b["id"],"content":"done"})
-                messages.append({"role":"user","content":results})
+        # Direct analysis without web_search tool (not available on this tier)
+        prompt = f"""You are an Amazon product research expert. Based on your knowledge, provide detailed information about these Amazon listings:
+
+{url_list}
+
+For OUR product ({asin}) and each competitor, describe what you know about:
+- Product title and main keywords
+- Key product features (material, weight, certifications)
+- Typical bullet points for this product category
+- Price range and positioning
+- Common strengths and weaknesses in this niche
+- What competitors typically emphasize
+
+Be specific and detailed. This is merino wool apparel category."""
+
+        r = requests.post(ANTHROPIC_URL,
+            headers={"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"},
+            json={"model":ANTHROPIC_MODEL,"max_tokens":4000,
+                  "messages":[{"role":"user","content":prompt}]}, timeout=120)
+        if not r.ok: raise Exception(f"{r.status_code}: {r.json()}")
+        raw_data = r.json()["content"][0]["text"]
+        log(f"📄 Anthropic: {len(raw_data)} символов")
     except Exception as e:
-        log(f"  ⚠️ Anthropic search: {str(e)[:80]} → Gemini")
-        try:
-            raw_data = gemini_post({"contents":[{"parts":[{"text":f"Search Amazon for these listings, extract full content (title, bullets, description, BSR, price):\n{url_list}"}],"role":"user"}],"tools":[{"google_search":{}}]})
-            log(f"📄 Gemini search: {len(raw_data)} символов")
-        except Exception as e2:
-            log(f"  ⚠️ Gemini search: {e2} — продолжаю без данных")
-            raw_data = f"ASIN: {asin}"
+        log(f"  ⚠️ {str(e)[:80]}")
+        raw_data = f"Amazon merino wool tank top ASIN: {asin}"
 
     # Final JSON analysis
     log("🧠 Финальный анализ...")
