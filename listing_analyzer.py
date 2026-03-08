@@ -10,14 +10,27 @@ import io
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-3-haiku-20240307"
 
-SCHEMA = '{"health_score":72,"health_breakdown":{"title":8,"bullets":8,"description":7,"photos":7,"aplus":6,"reviews":9,"bsr":8,"price":7,"variants":8,"prime":9},"summary":"Листинг в целом хорошо оптимизирован, но требует доработки описания и A+","title_score":7,"title_gaps":["Не указан вес ткани (GSM)","Отсутствует слово outdoor"],"title_rec":"Добавить GSM ткани и сценарий использования в заголовок","bullets_score":7,"bullets_gaps":["Нет информации об уходе за изделием","Не указан процент шерсти"],"bullets_rec":"Добавить буллет с инструкцией по стирке и составом 100% merino","desc_score":0,"desc_gaps":["Описание полностью отсутствует"],"desc_rec":"Создать описание с заголовками, сценариями и ответами на возражения","photos_score":8,"photos_gaps":["Нет lifestyle фото на улице"],"photos_rec":"Добавить фото в природных условиях для подчёркивания outdoor применения","aplus_score":7,"aplus_gaps":["Brand Story отсутствует","Текст модулей превышает 80 символов"],"aplus_rec":"Добавить Brand Story и сократить текст в модулях","cosmo_score":65,"cosmo_semantic":[{"relationship":"Used For (Function)","status":"WELL-DEVELOPED","evidence":"Title и буллеты упоминают базовый слой и спорт","opportunity":"Добавить конкретные виды спорта: hiking, skiing"},{"relationship":"Used For (Situation)","status":"GOOD","evidence":"Упоминается travel и everyday wear","opportunity":"Расширить на деловую одежду"},{"relationship":"Target Audience","status":"ADEQUATE","evidence":"Мужчины, спортсмены","opportunity":"Уточнить возраст и активность"},{"relationship":"Solves Problem","status":"GOOD","evidence":"Терморегуляция и влагоотвод","opportunity":"Добавить проблему запаха"},{"relationship":"Compared To (Alternative)","status":"PARTIAL","evidence":"Упоминается шерсть vs синтетика","opportunity":"Прямое сравнение с хлопком"},{"relationship":"Used In (Location)","status":"MINIMAL","evidence":"Нет конкретных локаций","opportunity":"Горы, офис, путешествия"},{"relationship":"Used With (Complementary)","status":"MINIMAL","evidence":"Не упомянуто","opportunity":"Упомянуть hiking pants, fleece jacket"}],"rufus_answered":[{"question":"Из какого материала сделана майка?","answer":"100% мериносовая шерсть, указано в title и буллетах"}],"rufus_partial":[{"question":"Подходит ли для холодной погоды?","gap":"Упоминается терморегуляция, но не указана температура комфорта"}],"rufus_missing":[{"question":"Как стирать изделие?","missing":"Инструкция по уходу полностью отсутствует в контенте"}],"missing_chars":[{"name":"Инструкция по уходу","how_competitors_use":"Конкуренты указывают машинная стирка при 30°C","priority":"HIGH"},{"name":"Вес ткани (GSM)","how_competitors_use":"Конкуренты указывают 160-200 GSM в title","priority":"HIGH"}],"tech_params":[{"param":"Вес ткани","competitor_value":"160-200 GSM у топ-конкурентов","our_gap":"GSM не указан нигде в листинге"},{"param":"Состав","competitor_value":"Конкуренты пишут 100% Merino Wool в буллете #1","our_gap":"Состав упомянут только в title"}],"actions":[{"action":"Добавить описание товара","impact":"HIGH","effort":"LOW","details":"Написать 300-500 слов с заголовками, сценариями и FAQ"},{"action":"Добавить GSM в title","impact":"HIGH","effort":"LOW","details":"Изменить title: добавить 160GSM после Merino Wool"}]}'
-
+SCHEMA = '{"overall_score":"72%","title_score":"85%","bullets_score":"70%","description_score":"0%","images_score":"75%","qa_score":"50%","reviews_score":"80%","aplus_score":"65%","price_score":"70%","availability_score":"90%","average_rating_score":"80%","total_reviews_score":"70%","bsr_score":"60%","keywords_score":"50%","prime_score":"100%","returns_score":"70%","customization_score":"80%","first_available_score":"60%","images_breakdown":{"main_image":"80% - модель на белом фоне, хорошая видимость товара","gallery":"70% - 5 фото, нет размерной сетки и lifestyle","ocr_readability":"75% - текст читаем, но мелкий шрифт на баннере"},"cosmo_analysis":{"score":"65%","signals_present":["Use Cases: базовый слой для спорта","Audience: мужчины","Material: 100% merino wool","Gender: мужской"],"signals_missing":["Season: не указан температурный диапазон","Compatibility: нет упоминания совместимости с другой одеждой","Skill Level: нет указания на уровень активности"]},"rufus_analysis":{"score":"60%","issues":["Нет ответов на вопрос об уходе за изделием","Инструкция по стирке отсутствует","Нет сравнения с синтетическими аналогами"]},"priority_improvements":["1. Добавить описание товара с HTML-разметкой","2. Добавить инструкцию по уходу в буллеты","3. Улучшить OCR читаемость инфографики — крупный шрифт, белый фон"],"missing_chars":[{"name":"Инструкция по уходу","how_competitors_use":"Конкуренты пишут машинная стирка 30°C в буллете #5","priority":"HIGH"}],"tech_params":[{"param":"Вес ткани (GSM)","competitor_value":"160 GSM у топ-конкурентов","our_gap":"GSM не указан нигде в листинге"}],"actions":[{"action":"Написать описание товара","impact":"HIGH","effort":"LOW","details":"300-500 слов с HTML: заголовки, сценарии использования, FAQ"},{"action":"Добавить GSM в title","impact":"HIGH","effort":"LOW","details":"Вставить 160GSM после Merino Wool в заголовок"}]}'
 def get_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
     return m.group(1) if m else None
 
 def sc(s): return "🟢" if s>=8 else ("🟡" if s>=6 else "🔴")
 def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"}.get(p,p)
+
+def pct(val):
+    """Parse score: int 0-100, int 0-10, or string 'XX%' -> int 0-100"""
+    if isinstance(val, str):
+        try: return int(val.replace("%","").strip())
+        except: return 0
+    if isinstance(val, (float, int)):
+        v = int(val)
+        return v if v > 10 else v * 10
+    return 0
+
+def sc_pct(val):
+    v = pct(val)
+    return "🟢" if v>=75 else ("🟡" if v>=50 else "🔴")
 
 def section(label, score, gaps, rec, raw_text="", char_limit=0):
     c1,c2 = st.columns([4,1])
@@ -205,93 +218,91 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang=
         ])
 
     our_text = fmt(our_data)
-    comp_text = "\n\n".join([f"КОНКУРЕНТ {i+1}:\n{fmt(d)}" for i,d in enumerate(competitor_data_list) if d])
-    vision_section = f"\nVISION АНАЛИЗ ФОТО:\n{vision_result[:1500]}" if vision_result else ""
+    comp_text = "\n\n".join([f"COMPETITOR {{i+1}}:\n{{fmt(d)}}" for i,d in enumerate(competitor_data_list) if d])
+    vision_section = f"\nPHOTO VISION ANALYSIS:\n{{vision_result[:1500]}}" if vision_result else ""
+    lang_name = "Russian" if lang == "ru" else "English"
 
-    prompt = f"""Ты эксперт по Amazon листингам. Оцени листинг строго по рубрику ниже.
+    prompt = f"""You are an expert Amazon listing analyst specializing in the Listing 3.0 era where AI visibility (Cosmo + Rufus) determines 50% of success.
 
-НАШ ЛИСТИНГ (ASIN {asin}):
-{our_text}
+OUR LISTING (ASIN {{asin}}):
+{{our_text}}
 
-{comp_text}
-{vision_section}
+{{comp_text}}
+{{vision_section}}
 
-═══ РУБРИК ОЦЕНКИ ═══
+## YOUR TASK
+Analyze the listing above and score each component. Use ONLY real data from the listing provided.
 
-TITLE (0-10):
-- Длина ≤125 символов: +1.5 балла
-- Бренд + тип товара + материал + характеристики: +3.5 балла
-- Чёткость назначения (для спорта / на каждый день): +3 балла
-- Нет спецсимволов (! $ ? ¬): +1 балл
-- Нет повторов слов ≥3 раз: +1 балл
+## SCORING CRITERIA
 
-BULLETS (0-10):
-- ≤5 буллетов: +1.5 балла
-- Формат "Свойство: Детали. Польза": +2.5 балла
-- Покрытие: материал + комфорт + функциональность + уход: +4 балла
-- Длина каждого ≤255 байт: +1 балл
-- Нет эмодзи: +1 балл
+### TITLE — ≤125 chars, [Brand][Gender][Material][Type][Feature] format, top keywords, readable
+- 90-100%: All criteria met
+- 70-89%: Minor issues (slightly long, missing 1 element)
+- 50-69%: Major issues (too long, poor structure, missing brand/material)
+- 0-49%: Unreadable or broken
 
-DESCRIPTION (0-10):
-- Отсутствует = 0 баллов автоматически
-- Структура (заголовки, списки, абзацы): +3 балла
-- Преимущества + характеристики + сценарии: +5 баллов
-- Ответы на возражения из отзывов: +2 балла
+### BULLETS — 5 bullets, ≤250 chars each, "Feature: Details. Benefit." format
+- 90-100%: All 5 bullets, perfect format, addresses customer concerns
+- 70-89%: Good structure but missing benefits
+- 50-69%: Walls of text, no benefits
+- 0-49%: Missing bullets
 
-PHOTOS (0-10):
-- 6+ изображений + видео = 10; 6+ без видео = 8; <6 = штраф
-- Чёткость и высокое разрешение: +4 балла
-- Разнообразие: модель + крупный план + lifestyle + инфографика: +3 балла
+### DESCRIPTION — HTML formatted, covers Benefits/Features/Care/Usage
+- 90-100%: ≤2000 words, HTML, storytelling, all sections covered
+- 70-89%: Decent but poor formatting
+- 0-49%: Missing or duplicate of bullets
 
-APLUS (0-10):
-- Отсутствует = 0 автоматически
-- Структурированный текст (заголовки, логика): +2 балла
-- Текст ≤80 символов в каждом модуле: +1.5 балла
-- Brand Story присутствует: +1.5 балла
-- Изображения с текстовыми описаниями: +1 балл
+### IMAGES — Evaluate: main image (40%), gallery completeness (30%), OCR readability for Rufus (30%)
+- Main 90-100%: Unique angle, shows product in action, clear at thumbnail
+- Gallery 90-100%: 6+ images: lifestyle, infographics, size/scale, packaging, variants
+- OCR 90-100%: Dark text on white background, sans-serif, horizontal layout
+- Combined 90-100%: All three excellent
 
-COSMO (0-100) — 11 семантических связей Amazon:
-Used For Function, Used For Situation, Target Audience, Solves Problem,
-Product Type, Capable Of, Compared To Alternative, Develops Skills,
-Used In Location, Used On Season, Used With Complementary.
-Каждая связь: WELL-DEVELOPED=9-10, GOOD=7-8, ADEQUATE=5-6, PARTIAL=3-4, MINIMAL=1-2.
+### Q&A — 10+ Q&As, brand responses, covers objections
+### REVIEWS — 100+ reviews, 4.5+ stars, recent activity
+### A+ CONTENT — Comparison charts, brand story, lifestyle imagery
+### PRICE — Competitive + deal badge OR coupon OR Subscribe&Save
+### AVAILABILITY — In stock, FBA, fast shipping
+### BSR — Top 1%=100%, Top 5%=80%, Top 20%=60%, below=40%
+### KEYWORDS — 5-10 phrases, ≤249 bytes, no duplicates from title
+### PRIME — 100% if Prime, 0% if not
+### RETURNS — Free returns=90%, standard=70%, restricted=50%
+### CUSTOMIZATION — Multiple variants with clear images
+### FIRST_AVAILABLE — 2+ years=90%, 1-2yr=70%, 6-12mo=60%, <6mo=40%
+### AVERAGE_RATING — 4.7+=100%, 4.3-4.6=80%, 4.0-4.2=60%, <4.0=40%
+### TOTAL_REVIEWS — 500+=100%, 100-499=80%, 20-99=60%, <20=40%
 
-RUFUS — типичные вопросы покупателей для этой категории.
+## COSMO AI (15 signals)
+Score how well Amazon's Cosmo AI understands this product:
+Use Cases, Audience, Functional Attributes, Material/Composition, Size/Dimensions,
+Compatibility, Occasion/Setting, Season/Weather, Skill Level, Age Appropriateness,
+Gender, Style/Aesthetic, Quality Tier, Problem Solved, Unique Value
 
-КРИТИЧЕСКИ ВАЖНО: Верни ТОЛЬКО валидный JSON.
-- Все строковые поля ДОЛЖНЫ содержать реальный текст — анализ реального листинга выше.
-- Язык всех текстовых полей JSON: {{"ru": "русский", "en": "English"}}["{lang}"].
-- ЗАПРЕЩЕНО копировать значения из примера схемы ("gap1", "rec", "p", "v", "char", "use", "act", "det", "q").
-- Каждый gap — конкретная проблема данного листинга.
-- Каждый rec — конкретная рекомендация с примером текста.
-- tech_params.param — реальное название характеристики (например "Вес ткани GSM").
-- tech_params.competitor_value — реальное значение у конкурента из данных выше.
-- missing_chars.name — реальная отсутствующая характеристика.
-- actions.action — конкретное действие, не абстрактное.
-cosmo_score = среднее по всем связям × 10.
-health_score (0-100) = взвешенное среднее:
-  title×10% + bullets×10% + description×10% + photos×10% + aplus×10% + reviews×15% + bsr×15% + price×10% + variants×5% + prime×5%
-  где каждый компонент нормализован к 0-10.
-  reviews: ≥4.4 и ≥50 отз=10, ≥4.0=7, <4.0=4
-  bsr: ≤1000=10, ≤5000=8, >5000=5, нет=5
-  price: конкурентная=10, выше рынка=6
-  variants: ≥5 цветов И размеры=10, только размеры=7, один вариант=4
-  prime: prime exclusive=10, prime=8, нет=5
-health_breakdown содержит все 10 компонентов со значениями 0-10.
-{SCHEMA}"""
+## RUFUS RECOMMENDATION POTENTIAL
+Evaluate: Relevance to Queries, Proof & Evidence, Visual Clarity (OCR), Completeness, Competitive Position
 
-    sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text fields in {'Russian' if lang=='ru' else 'English'}."
-    raw = anthropic_call(sys_prompt, prompt, max_tokens=3000)
-    log(f"✅ JSON: {len(raw)} символов")
+CRITICAL RULES:
+- Return ONLY valid JSON, no markdown, no explanation
+- All text fields in {{lang_name}}
+- Use REAL data from the listing — no placeholder text
+- overall_score = weighted average of all 17 scores
+- images_score = 40% main + 30% gallery + 30% OCR combined
+
+{{SCHEMA}}"""
+
+    sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text in {{lang_name}}."
+    raw = anthropic_call(sys_prompt, prompt, max_tokens=4000)
+    log(f"✅ JSON: {{len(raw)}} chars")
 
     s = raw.strip().replace("```json","").replace("```","").strip()
-    start,end = s.find("{"),s.rfind("}")
-    if start==-1: raise ValueError(f"JSON не найден: {raw[:200]}")
-    s = re.sub(r",\s*([}\]])", r"\1", s[start:end+1])
+    start,end = s.find("{{"),s.rfind("}}")
+    if start==-1: start,end = s.find("{"),s.rfind("}")
+    if start==-1: raise ValueError(f"JSON not found: {{raw[:200]}}")
+    s = re.sub(r",\s*([}}\]])", r"\1", s[start:end+1])
     try: return json.loads(s)
     except:
         s2 = re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace('\n',' ')+'"', s)
-        return json.loads(re.sub(r",\s*([}\]])", r"\1", s2))
+        return json.loads(re.sub(r",\s*([}}\]])", r"\1", s2))
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log):
@@ -501,7 +512,7 @@ imgs = st.session_state.get("images", [])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def health_card():
-    health = r.get("health_score", 0)
+    health = pct(r.get("overall_score", r.get("health_score", 0)))
     hb     = r.get("health_breakdown", {})
     hc     = "#22c55e" if health>=75 else ("#f59e0b" if health>=50 else "#ef4444")
     hl     = "Отличный листинг" if health>=75 else ("Есть над чем работать" if health>=50 else "Требует срочных улучшений")
@@ -536,16 +547,23 @@ def health_card():
   </div>
 </div>""", unsafe_allow_html=True)
 
-    items = [("Title",hb.get("title",0)),("Bullets",hb.get("bullets",0)),
-             ("Описание",hb.get("description",0)),("Фото",hb.get("photos",0)),
-             ("A+",hb.get("aplus",0)),("Отзывы",hb.get("reviews",0)),
-             ("BSR",hb.get("bsr",0)),("Цена",hb.get("price",0)),
-             ("Варианты",hb.get("variants",0)),("Prime",hb.get("prime",0))]
+    items = [
+        ("Title",   r.get("title_score",0)),
+        ("Bullets", r.get("bullets_score",0)),
+        ("Описание",r.get("description_score",0)),
+        ("Фото",    r.get("images_score",0)),
+        ("A+",      r.get("aplus_score",0)),
+        ("Отзывы",  r.get("reviews_score",0)),
+        ("BSR",     r.get("bsr_score",0)),
+        ("Цена",    r.get("price_score",0)),
+        ("Варианты",r.get("customization_score",0)),
+        ("Prime",   r.get("prime_score",0)),
+    ]
     cols = st.columns(len(items))
     for col,(lbl,val) in zip(cols,items):
-        pct = int(val/10*100)
-        cc  = "#22c55e" if pct>=75 else ("#f59e0b" if pct>=50 else "#ef4444")
-        col.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid {cc}"><div style="font-size:1.2rem;font-weight:700;color:{cc}">{pct}%</div><div style="font-size:0.68rem;color:#64748b">{lbl}</div></div>', unsafe_allow_html=True)
+        p2 = pct(val)
+        cc = "#22c55e" if p2>=75 else ("#f59e0b" if p2>=50 else "#ef4444")
+        col.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid {cc}"><div style="font-size:1.2rem;font-weight:700;color:{cc}">{p2}%</div><div style="font-size:0.68rem;color:#64748b">{lbl}</div></div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Обзор
@@ -555,17 +573,42 @@ if page == "🏠 Обзор":
     health_card()
     st.divider()
 
-    st.info(f"**📋 Резюме:** {r.get('summary','')}")
+    _sum = r.get("summary", "")
+    _cosmo = r.get("cosmo_analysis",{})
+    _rufus = r.get("rufus_analysis",{})
+    if _sum: st.info(f"**📋 Резюме:** {_sum}")
 
-    if r.get("actions"):
+    # Cosmo + Rufus summary
+    if _cosmo or _rufus:
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            cs = pct(_cosmo.get("score",0))
+            cc = "#22c55e" if cs>=75 else ("#f59e0b" if cs>=50 else "#ef4444")
+            st.markdown(f"**🧠 COSMO:** <span style='color:{cc};font-size:1.2rem;font-weight:700'>{cs}%</span>", unsafe_allow_html=True)
+            for sig in _cosmo.get("signals_missing",[])[:3]: st.caption(f"❌ {sig}")
+        with cc2:
+            rs = pct(_rufus.get("score",0))
+            rc = "#22c55e" if rs>=75 else ("#f59e0b" if rs>=50 else "#ef4444")
+            st.markdown(f"**🤖 Rufus:** <span style='color:{rc};font-size:1.2rem;font-weight:700'>{rs}%</span>", unsafe_allow_html=True)
+            for iss in _rufus.get("issues",[])[:3]: st.caption(f"⚠️ {iss}")
+
+    actions = r.get("actions", [])
+    priority_improvements = r.get("priority_improvements", [])
+    if actions or priority_improvements:
         st.subheader("🎯 Приоритетные действия")
-        for i, a in enumerate(r["actions"]):
+        # New format: priority_improvements is list of strings
+        for item in priority_improvements:
             with st.container(border=True):
-                c1,c2,c3 = st.columns([5,1,1])
-                c1.markdown(f"**{i+1}. {a.get('action','')}**")
-                c2.markdown(badge(a.get("impact","MEDIUM")))
-                c3.caption(f"Усилия: {a.get('effort','')}")
-                if a.get("details"): st.caption(a["details"])
+                st.markdown(f"**{item}**")
+        # Old/mixed format: actions is list of dicts
+        for i, a in enumerate(actions):
+            if isinstance(a, dict):
+                with st.container(border=True):
+                    c1,c2,c3 = st.columns([5,1,1])
+                    c1.markdown(f"**{i+1}. {a.get('action','')}**")
+                    c2.markdown(badge(a.get("impact","MEDIUM")))
+                    c3.caption(f"Усилия: {a.get('effort','')}")
+                    if a.get("details"): st.caption(a["details"])
 
     if r.get("missing_chars"):
         st.subheader("🔍 Отсутствующие характеристики")
@@ -593,10 +636,11 @@ elif page == "📸 Фото":
         score = int(sm.group(1)) if sm else 0
         bc    = "#22c55e" if score>=8 else ("#f59e0b" if score>=6 else "#ef4444")
         slbl  = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
-        typ   = re.search(r"[Тт]ип:\s*(.+)", text)
-        strg  = re.search(r"[Сс]ильная сторона:\s*(.+)", text)
-        weak  = re.search(r"[Сс]лабость:\s*(.+)", text)
-        ptype = typ.group(1).strip() if typ else f"Фото #{i+1}"
+        # Flexible parsing: RU and EN
+        typ  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", text)
+        strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength)\s*[:\-]\s*(.+)", text)
+        weak = re.search(r"(?:[Сс]лабость|Weakness)\s*[:\-]\s*(.+)", text)
+        ptype = typ.group(1).strip().rstrip(".") if typ else ""
         stxt  = strg.group(1).strip() if strg else ""
         wtxt  = weak.group(1).strip() if weak else ""
 
@@ -605,10 +649,20 @@ elif page == "📸 Фото":
             with c1:
                 st.image(__import__("base64").b64decode(img["b64"]), use_container_width=True)
             with c2:
-                st.markdown(f"**Фото #{i+1} — {ptype}**")
-                st.markdown(f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0"><div style="font-size:2rem;font-weight:800;color:{bc}">{score}/10</div><div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px"><div style="background:{bc};width:{score*10}%;height:10px;border-radius:6px"></div></div><div style="color:{bc};font-size:0.8rem;margin-top:2px">{slbl}</div></div></div>', unsafe_allow_html=True)
+                _head = f"Фото #{i+1}" + (f" — {ptype}" if ptype else "")
+                st.markdown(f"**{_head}**")
+                if score > 0:
+                    bc = "#22c55e" if score>=8 else ("#f59e0b" if score>=6 else "#ef4444")
+                    slbl = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
+                    st.markdown(f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0"><div style="font-size:2rem;font-weight:800;color:{bc}">{score}/10</div><div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px"><div style="background:{bc};width:{score*10}%;height:10px;border-radius:6px"></div></div><div style="color:{bc};font-size:0.8rem;margin-top:2px">{slbl}</div></div></div>', unsafe_allow_html=True)
+                else:
+                    st.warning("⚠️ Оценка не распознана")
                 if stxt: st.success(f"✅ {stxt}")
                 if wtxt: st.warning(f"⚠️ {wtxt}")
+                # Debug: show raw if nothing parsed
+                if not (ptype or stxt or wtxt or score) and text:
+                    with st.expander("🔧 Raw"):
+                        st.code(text[:400])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Контент
@@ -619,17 +673,41 @@ elif page == "📝 Контент":
     our_bullets = od.get("feature_bullets",[])
     our_desc    = od.get("description","")
 
-    section("Title",       r.get("title_score",0),   r.get("title_gaps",[]),   r.get("title_rec",""),
-            raw_text=our_title, char_limit=125)
+    def _sec(label, key, **kw):
+        val = pct(r.get(key, 0))
+        gaps = r.get(key.replace("_score","_gaps"), r.get("priority_improvements",[]))
+        rec  = r.get(key.replace("_score","_rec"), "")
+        sc2  = sc_pct(val)
+        c1,c2 = st.columns([4,1])
+        c1.markdown(f"**{label}**"); c2.markdown(f"{sc2} **{val}%**")
+        st.progress(val/100)
+        if kw.get("raw_text"):
+            cl = kw.get("char_limit",0); ct = len(kw["raw_text"])
+            col = "red" if (cl and ct>cl) else "gray"
+            st.markdown(f"<small style='color:{col}'>📝 {ct} симв{f' / {cl} лимит' if cl else ''}</small>", unsafe_allow_html=True)
+            with st.expander("Показать текст"): st.markdown(f"> {kw['raw_text']}")
+        if gaps and isinstance(gaps, list):
+            with st.expander(f"⚠️ ({len(gaps)})"): 
+                for g in gaps: st.markdown(f"- {g}")
+        if rec: st.info(f"💡 {rec}")
+
+    _sec("Title",       "title_score",       raw_text=our_title, char_limit=125)
     st.divider()
     bullets_text = "\n".join([f"• {b}" for b in our_bullets]) if our_bullets else ""
-    section("Bullets",     r.get("bullets_score",0), r.get("bullets_gaps",[]), r.get("bullets_rec",""),
-            raw_text=bullets_text)
+    _sec("Bullets",     "bullets_score",     raw_text=bullets_text)
     st.divider()
-    section("Description", r.get("desc_score",0),    r.get("desc_gaps",[]),    r.get("desc_rec",""),
-            raw_text=str(our_desc)[:400] if our_desc else "")
+    _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
     st.divider()
-    section("A+",          r.get("aplus_score",0),   r.get("aplus_gaps",[]),   r.get("aplus_rec",""))
+    _sec("A+",          "aplus_score")
+    st.divider()
+    _sec("Фото",        "images_score")
+
+    # Images breakdown
+    ib = r.get("images_breakdown", {})
+    if ib:
+        st.subheader("📸 Детализация фото")
+        for k,v in ib.items():
+            st.markdown(f"**{k}:** {v}")
 
     if r.get("tech_params"):
         st.divider()
@@ -679,14 +757,16 @@ elif page == "🏆 Benchmark":
         return {"title":round(ts,1),"bullets":round(bs,1),"description":round(ds,1),"photos":round(ps,1),"aplus":as_,"reviews":rs,"bsr":bsrs,"variants":vs,"prime":prs,"health":h}
 
     our_scores = {
-        "title": r.get("title_score",0), "bullets": r.get("bullets_score",0),
-        "description": r.get("desc_score",0), "photos": r.get("photos_score",0),
-        "aplus": r.get("aplus_score",0),
-        "reviews": r.get("health_breakdown",{}).get("reviews",0),
-        "bsr": r.get("health_breakdown",{}).get("bsr",0),
-        "variants": r.get("health_breakdown",{}).get("variants",0),
-        "prime": r.get("health_breakdown",{}).get("prime",0),
-        "health": r.get("health_score",0)
+        "title":       pct(r.get("title_score",0)),
+        "bullets":     pct(r.get("bullets_score",0)),
+        "description": pct(r.get("description_score", r.get("desc_score",0))),
+        "photos":      pct(r.get("images_score", r.get("photos_score",0))),
+        "aplus":       pct(r.get("aplus_score",0)),
+        "reviews":     pct(r.get("reviews_score",0)),
+        "bsr":         pct(r.get("bsr_score",0)),
+        "variants":    pct(r.get("customization_score",0)),
+        "prime":       pct(r.get("prime_score",0)),
+        "health":      pct(r.get("overall_score", r.get("health_score",0))),
     }
     comp_scores = [auto_score(c) for c in cd]
     all_scores  = [our_scores] + comp_scores
@@ -788,11 +868,11 @@ elif page == "🏆 Benchmark":
 
     # ── Score comparison bars (always visible at top) ────────────────────────
     score_rows = [
-        ("🏷️ Title","title",10),("📋 Bullets","bullets",10),
-        ("📄 Описание","description",10),("📸 Фото","photos",10),
-        ("✨ A+","aplus",10),("⭐ Отзывы","reviews",10),
-        ("📊 BSR","bsr",10),("🎨 Варианты","variants",10),
-        ("🚀 Prime","prime",10),("💯 Health","health",100),
+        ("🏷️ Title","title",100),("📋 Bullets","bullets",100),
+        ("📄 Описание","description",100),("📸 Фото","photos",100),
+        ("✨ A+","aplus",100),("⭐ Отзывы","reviews",100),
+        ("📊 BSR","bsr",100),("🎨 Варианты","variants",100),
+        ("🚀 Prime","prime",100),("💯 Overall","health",100),
     ]
     asin_labels = ["🔵 НАШ"] + [f"🔴 {c.get('parent_asin','') or c.get('product_information',{}).get('ASIN',f'Конк.{i+1}')}" for i,c in enumerate(cd)]
 
@@ -833,12 +913,12 @@ elif page == "🏆 Benchmark":
         row2 = st.columns([2]+[3]*(1+len(cd)))
         row2[0].caption(lbl)
         for j,val in enumerate(vals):
-            pct = int(val/mx*100); is_best = (val==best_val)
-            cc = "#22c55e" if is_best else ("#f59e0b" if pct>=50 else "#ef4444")
+            p3 = int(val); is_best = (val==best_val)
+            cc = "#22c55e" if is_best else ("#f59e0b" if p3>=50 else "#ef4444")
             row2[j+1].markdown(
                 f'<div style="background:#e5e7eb;border-radius:5px;height:22px;position:relative">'
-                f'<div style="background:{cc};width:{pct}%;height:22px;border-radius:5px"></div>'
-                f'<div style="position:absolute;top:2px;left:6px;font-size:0.75rem;font-weight:700;color:white">{val}{"★" if is_best else ""}</div>'
+                f'<div style="background:{cc};width:{p3}%;height:22px;border-radius:5px"></div>'
+                f'<div style="position:absolute;top:2px;left:6px;font-size:0.75rem;font-weight:700;color:white">{p3}%{"★" if is_best else ""}</div>'
                 f'</div>', unsafe_allow_html=True)
 
 
@@ -850,12 +930,36 @@ elif page == "🏆 Benchmark":
 elif page == "🧠 COSMO / Rufus":
     st.title("🧠 COSMO / Rufus Анализ")
 
-    cosmo = r.get("cosmo_score",0)
-    cc    = "#22c55e" if cosmo>=80 else ("#f59e0b" if cosmo>=60 else "#ef4444")
-    st.markdown(f'<div style="text-align:center;padding:20px 0"><div style="font-size:3rem;font-weight:800;color:{cc}">{cosmo}/100</div><div style="color:{cc}">COSMO Score</div><div style="background:#e5e7eb;border-radius:8px;height:12px;margin-top:10px"><div style="background:{cc};width:{cosmo}%;height:12px;border-radius:8px"></div></div></div>', unsafe_allow_html=True)
+    _ca   = r.get("cosmo_analysis", {})
+    cosmo = pct(_ca.get("score", r.get("cosmo_score",0)))
+    _ra   = r.get("rufus_analysis", {})
+    rufus_s = pct(_ra.get("score", 0))
+    cc    = "#22c55e" if cosmo>=75 else ("#f59e0b" if cosmo>=50 else "#ef4444")
+    rc2   = "#22c55e" if rufus_s>=75 else ("#f59e0b" if rufus_s>=50 else "#ef4444")
+    ccc1,ccc2 = st.columns(2)
+    with ccc1:
+        st.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{cc}">{cosmo}%</div><div style="color:{cc};font-weight:600">COSMO Score</div><div style="background:#e5e7eb;border-radius:6px;height:10px;margin-top:8px"><div style="background:{cc};width:{cosmo}%;height:10px;border-radius:6px"></div></div></div>', unsafe_allow_html=True)
+    with ccc2:
+        st.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{rc2}">{rufus_s}%</div><div style="color:{rc2};font-weight:600">Rufus Score</div><div style="background:#e5e7eb;border-radius:6px;height:10px;margin-top:8px"><div style="background:{rc2};width:{rufus_s}%;height:10px;border-radius:6px"></div></div></div>', unsafe_allow_html=True)
     st.divider()
 
-    if r.get("cosmo_semantic"):
+    # New format: cosmo_analysis.signals_present/missing
+    if _ca:
+        c_present = _ca.get("signals_present",[])
+        c_missing = _ca.get("signals_missing",[])
+        if c_present or c_missing:
+            st.subheader("📡 COSMO сигналы")
+            col_p, col_m = st.columns(2)
+            with col_p:
+                st.markdown("**✅ Присутствуют**")
+                for s2 in c_present:
+                    st.success(s2)
+            with col_m:
+                st.markdown("**❌ Отсутствуют**")
+                for s2 in c_missing:
+                    st.error(s2)
+    # Old format fallback
+    elif r.get("cosmo_semantic"):
         st.subheader("📡 Семантические связи")
         status_icon = {"WELL-DEVELOPED":"✅","GOOD":"✅","ADEQUATE":"⚠️","PARTIAL":"⚠️","MINIMAL":"❌"}
         for rel in r["cosmo_semantic"]:
