@@ -124,7 +124,7 @@ def analyze_images_vision(images, asin, log):
         })
 
     resp = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=4000,
         messages=[{"role": "user", "content": content}]
     )
@@ -154,7 +154,7 @@ Search each by ASIN and summarize what you find."""
     search_count = 0
     for _ in range(12):
         resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=6000,
             tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=messages,
@@ -190,7 +190,7 @@ Search each by ASIN and summarize what you find."""
         vision_section = f"\n\nВИЗУАЛЬНЫЙ АНАЛИЗ ФОТОГРАФИЙ (Claude Vision):\n{vision_data[:3000]}"
 
     resp2 = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=8000,
         system="Amazon listing optimization expert. Respond ONLY with valid JSON. No markdown. No explanation.",
         messages=[{
