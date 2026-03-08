@@ -33,17 +33,47 @@ def run_analysis(our_url, competitor_urls, model_id, log):
         log(f"- {'НАШ' if i==0 else f'Конк.{i}'}: `{u}`")
     log("🔍 Gemini ищет данные через Google Search...")
 
-    prompt = f"""Analyze these Amazon product listing pages for a competitive audit.
+    # Extract ASINs for explicit search
+    import re as _re
+    def get_asin(url):
+        m = _re.search(r'/dp/([A-Z0-9]{10})', url)
+        return m.group(1) if m else url
 
-OUR LISTING: {our_url}
-COMPETITORS: {chr(10).join(active) if active else 'none'}
+    our_asin = get_asin(our_url)
+    comp_asins = [get_asin(u) for u in active]
 
-Read each URL using url_context. For each listing extract: full title, all bullet points, description, A+ content, photo count/types, video presence, technical specs, BSR rank, review count/rating, price.
+    comp_section = ""
+    if comp_asins:
+        comp_section = "COMPETITORS (search each by ASIN):\n" + "\n".join(
+            [f"- ASIN {a}: site:amazon.com/dp/{a}" for a in comp_asins]
+        )
+    else:
+        comp_section = "No competitors provided — analyze OUR listing only."
 
-Then give a detailed competitive analysis comparing OUR listing vs competitors.
+    prompt = f"""You are an Amazon listing optimization expert. Use Google Search to find and analyze these specific Amazon product listings.
 
-Return ONLY valid JSON (no markdown, no code blocks, no explanation).
-All text in Russian. Max 3 items per array.
+SEARCH FOR OUR LISTING:
+Search query: "amazon.com B0D6WBQ7G1" OR "site:amazon.com/dp/B0D6WBQ7G1"
+ASIN: {our_asin}
+URL: {our_url}
+
+{comp_section}
+
+For OUR listing, extract EXACTLY:
+- Full product title (copy verbatim)
+- All bullet points (copy each one)
+- Product description text
+- A+ content text if present
+- Number of product images
+- Whether video is present
+- All technical specifications
+- BSR rank numbers
+- Review count and star rating
+- Price
+
+Then analyze and compare our listing vs competitors (if any).
+
+Return ONLY valid JSON. No markdown. No explanation. All text values in Russian. Max 3 items per array.
 Schema: {SCHEMA}"""
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
