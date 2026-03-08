@@ -1,9 +1,9 @@
 """
-listing_analyzer.py — Amazon Listing Analyzer с Claude Vision
-pip install streamlit anthropic requests
+listing_analyzer.py — Amazon Listing Analyzer с Gemini Vision
+pip install streamlit requests
 Secrets:
-  ANTHROPIC_API_KEY = "sk-ant-..."
-  SCRAPINGDOG_API_KEY = "..."  # опционально — для авто-получения фото
+  GEMINI_API_KEY = "AIzaSy..."
+  SCRAPINGDOG_API_KEY = "..."
 """
 import json, re, base64, requests, streamlit as st
 
@@ -11,7 +11,26 @@ st.set_page_config(page_title="Listing Analyzer", page_icon="🔍", layout="wide
 
 SCHEMA = '{"summary":"...","title_score":7,"title_gaps":["x"],"title_advantages":["x"],"title_rec":"x","bullets_score":7,"bullets_gaps":["x"],"bullets_advantages":["x"],"bullets_rec":"x","desc_score":7,"desc_gaps":["x"],"desc_advantages":["x"],"desc_rec":"x","photos_score":7,"photos_gaps":["x"],"photos_advantages":["x"],"photos_rec":"x","video_score":7,"video_gaps":["x"],"video_advantages":["x"],"video_rec":"x","aplus_score":7,"aplus_gaps":["x"],"aplus_advantages":["x"],"aplus_rec":"x","missing_chars":[{"name":"x","how_competitors_use":"x","priority":"HIGH"}],"tech_params":[{"param":"x","competitor_value":"x","our_gap":"x"}],"scenarios":[{"scenario":"x","competitors":[],"how_to_add":"x"}],"numbers":[{"metric":"x","competitor_usage":"x","suggested":"x"}],"actions":[{"action":"x","impact":"HIGH","effort":"LOW","details":"x"}]}'
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_MODEL_VISION = "gemini-2.0-flash"
+GEMINI_MODEL_TEXT   = "gemini-2.0-flash"
+
+def gemini_post(model, payload, api_key, timeout=120):
+    r = requests.post(
+        GEMINI_URL.format(model=model),
+        params={"key": api_key},
+        json=payload,
+        timeout=timeout
+    )
+    if not r.ok:
+        raise Exception(f"Gemini {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    candidates = data.get("candidates", [])
+    if not candidates:
+        raise Exception(f"Gemini no candidates: {data}")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    return "".join(p.get("text", "") for p in parts)
+
 def get_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
     return m.group(1) if m else None
@@ -31,13 +50,12 @@ def section(label, score, gaps, adv, rec):
             for a in adv: st.markdown(f"- {a}")
     if rec: st.info(f"💡 {rec}")
 
-# ── Step 1: Fetch images via ScrapingDog ──────────────────────────────────────
+# ── ScrapingDog ───────────────────────────────────────────────────────────────
 def fetch_images_scrapingdog(asin, log):
     sd_key = st.secrets.get("SCRAPINGDOG_API_KEY", "")
     if not sd_key:
-        log("⚠️ SCRAPINGDOG_API_KEY не задан — пропускаю авто-загрузку фото")
+        log("⚠️ SCRAPINGDOG_API_KEY не задан")
         return []
-
     log(f"🌐 ScrapingDog: загружаю страницу {asin}...")
     try:
         r = requests.get(
@@ -46,11 +64,9 @@ def fetch_images_scrapingdog(asin, log):
             timeout=60
         )
         if not r.ok:
-            log(f"⚠️ ScrapingDog error {r.status_code}")
+            log(f"⚠️ ScrapingDog error {r.status_code}: {r.text[:200]}")
             return []
         data = r.json()
-
-        # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin", "images"]:
             raw = data.get(field, [])
@@ -63,19 +79,15 @@ def fetch_images_scrapingdog(asin, log):
                     parsed = json.loads(raw)
                     if isinstance(parsed, list):
                         urls.extend([u for u in parsed if isinstance(u, str)])
-                except:
-                    pass
-
-        # Filter thumbnails
+                except: pass
         urls = [u for u in urls if not re.search(r'_SR\d{2}|_SX3[0-9]|_SS4|_SL75|sprite|grey', u)]
-        urls = list(dict.fromkeys(urls))  # deduplicate
+        urls = list(dict.fromkeys(urls))
         log(f"✅ ScrapingDog: {len(urls)} изображений")
         return urls[:3]
     except Exception as e:
-        log(f"⚠️ ScrapingDog exception: {e}")
+        log(f"⚠️ ScrapingDog: {e}")
         return []
 
-# ── Step 2: Download images ───────────────────────────────────────────────────
 def download_images(urls, log):
     images = []
     for i, url in enumerate(urls):
@@ -92,150 +104,89 @@ def download_images(urls, log):
             log(f"  ⚠️ Фото {i+1}: {e}")
     return images
 
-# ── Step 3: Vision analysis ───────────────────────────────────────────────────
+# ── Vision ────────────────────────────────────────────────────────────────────
 def analyze_images_vision(images, asin, log):
     if not images:
         return ""
+    api_key = st.secrets["GEMINI_API_KEY"]
+    log(f"👁️ Gemini Vision: анализирую {len(images)} фото...")
 
-    api_key = st.secrets["ANTHROPIC_API_KEY"]
-    log(f"👁️ Vision: анализирую {len(images)} фото...")
+    parts = [{
+        "text": f"""Ты эксперт по Amazon листингам. Проанализируй фотографии продукта ASIN {asin}.
 
-    content = [{
-        "type": "text",
-        "text": f"""Ты эксперт по Amazon листингам. Проанализируй ВСЕ фотографии продукта ASIN {asin}.
-
-Для КАЖДОГО изображения укажи:
-1. Тип (главное фото / lifestyle / инфографика / A+ баннер / детали материала / размерная сетка)
+Для КАЖДОГО изображения:
+1. Тип (главное фото / lifestyle / инфографика / A+ баннер / детали / размерная сетка)
 2. Что видно — фон, модель, композиция, текст и цифры на фото
 3. Оценка конверсии 1-10
 4. Сильная сторона
 5. Слабость или чего не хватает
 
 В конце — топ 3 приоритетных улучшения для увеличения конверсии.
-Отвечай на русском. Будь конкретен и actionable."""
+Отвечай на русском. Будь конкретен."""
     }]
 
     for i, img in enumerate(images):
-        content.append({"type": "text", "text": f"\n--- Изображение №{i+1} ---"})
-        content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": img["media_type"], "data": img["b64"]}
+        parts.append({"text": f"\n--- Изображение №{i+1} ---"})
+        parts.append({
+            "inline_data": {
+                "mime_type": img["media_type"],
+                "data": img["b64"]
+            }
         })
 
-    resp = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        },
-        json={
-            "model": "claude-3-haiku-20240307",
-            "max_tokens": 4000,
-            "messages": [{"role": "user", "content": content}]
-        },
-        timeout=120
-    )
-    if not resp.ok:
-        raise Exception(f"Error code: {resp.status_code} - {resp.json()}")
-    result = resp.json()["content"][0]["text"]
-    log(f"✅ Vision анализ: {len(result)} символов")
+    result = gemini_post(GEMINI_MODEL_VISION, {"contents": [{"parts": parts}]}, api_key)
+    log(f"✅ Vision: {len(result)} символов")
     return result
 
-# ── Step 4: Text analysis via web_search ─────────────────────────────────────
+# ── Text analysis with Google Search ─────────────────────────────────────────
 def run_text_analysis(our_url, competitor_urls, vision_data, log):
-    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    api_key = st.secrets["GEMINI_API_KEY"]
     active = [u.strip() for u in competitor_urls if u.strip()]
     asin = get_asin(our_url) or our_url
-
-    log("🔍 Шаг: web_search — читаю текст листингов...")
     url_list = f"НАШ: {our_url}\n" + "\n".join([f"Конк.{i+1}: {u}" for i,u in enumerate(active)])
 
-    messages = [{
-        "role": "user",
-        "content": f"""Search Amazon for these product listings and extract their content.
-For EACH product find: full title, all bullet points, description, A+ content, BSR rank, reviews, price.
+    log("🔍 Gemini: читаю листинги через Google Search...")
+
+    payload = {
+        "contents": [{
+            "parts": [{"text": f"""Search Amazon for these product listings and extract full content.
+For EACH product find: title, all bullet points, description, BSR rank, reviews count, price, A+ content.
 
 {url_list}
 
-Search each by ASIN and summarize what you find."""
-    }]
+Search each ASIN separately and return all text you find."""}],
+            "role": "user"
+        }],
+        "tools": [{"google_search": {}}]
+    }
 
-    search_count = 0
-    for _ in range(12):
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-3-haiku-20240307", "max_tokens": 6000,
-                  "tools": [{"type": "web_search_20250305", "name": "web_search"}],
-                  "messages": messages},
-            timeout=120
-        )
-        resp_data = r.json() if r.ok else (_ for _ in ()).throw(Exception(f"Error code: {r.status_code} - {r.json()}"))
-        class _Resp:
-            pass
-        resp = _Resp()
-        resp.stop_reason = resp_data.get("stop_reason")
-        class _Block:
-            def __init__(self, d):
-                self.type = d.get("type")
-                self.text = d.get("text","")
-                self.id = d.get("id","")
-                self.input = type("I", (), d.get("input", {}))()
-        resp.content = [_Block(b) for b in resp_data.get("content", [])]
-        messages.append({"role": "assistant", "content": resp_data.get("content", [])})
+    try:
+        raw_data = gemini_post(GEMINI_MODEL_TEXT, payload, api_key)
+        log(f"📄 Текст: {len(raw_data)} символов")
+    except Exception as e:
+        log(f"⚠️ Search failed: {e} — продолжаю без поиска")
+        raw_data = f"Product ASIN: {asin}, URL: {our_url}"
 
-        if resp.stop_reason == "end_turn":
-            raw_data = "".join(b.text for b in resp.content if hasattr(b, "text"))
-            log(f"📄 Текст: {len(raw_data)} символов, {search_count} поисков")
-            break
-
-        if resp.stop_reason == "tool_use":
-            tool_results = []
-            for block in resp_data.get("content", []):
-                if block.get("type") == "tool_use":
-                    search_count += 1
-                    inp = block.get("input", {})
-                    q = inp.get("query", str(inp))
-                    log(f"  🔎 #{search_count}: {str(q)[:60]}")
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block["id"],
-                        "content": "Search completed"
-                    })
-            messages.append({"role": "user", "content": tool_results})
-    else:
-        raw_data = ""
-
-    # ── Final analysis → JSON ─────────────────────────────────────────────────
     log("🧠 Финальный анализ...")
+    vision_section = f"\n\nВИЗУАЛЬНЫЙ АНАЛИЗ ФОТО:\n{vision_data[:3000]}" if vision_data else ""
 
-    vision_section = ""
-    if vision_data:
-        vision_section = f"\n\nВИЗУАЛЬНЫЙ АНАЛИЗ ФОТОГРАФИЙ (Claude Vision):\n{vision_data[:3000]}"
+    analysis_payload = {
+        "system_instruction": {"parts": [{"text": "Amazon listing optimization expert. Respond ONLY with valid JSON. No markdown. No explanation."}]},
+        "contents": [{
+            "parts": [{"text": f"""Analyze Amazon listing. OUR product: {asin}
 
-    r2 = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-        json={
-            "model": "claude-3-haiku-20240307",
-            "max_tokens": 8000,
-            "system": "Amazon listing optimization expert. Respond ONLY with valid JSON. No markdown. No explanation.",
-            "messages": [{"role": "user", "content": f"""Analyze this Amazon listing. OUR product: {asin}
-
-Text data from web:
+Data:
 {raw_data[:6000]}
 {vision_section}
 
-Return ONLY JSON in Russian (max 3 items per array).
-For photos_score and photos_gaps use the Vision analysis above — be specific about real photos.
-{SCHEMA}"""}]
-        },
-        timeout=120
-    )
-    if not r2.ok:
-        raise Exception(f"Error code: {r2.status_code} - {r2.json()}")
-    raw_json = r2.json()["content"][0]["text"]
+Return ONLY JSON in Russian (max 3 items per array). Use Vision data for photos_score/photos_gaps.
+{SCHEMA}"""}],
+            "role": "user"
+        }],
+        "generationConfig": {"temperature": 0.1}
+    }
+
+    raw_json = gemini_post(GEMINI_MODEL_TEXT, analysis_payload, api_key)
     log(f"✅ JSON: {len(raw_json)} символов")
 
     s = raw_json.strip().replace("```json","").replace("```","").strip()
@@ -248,77 +199,47 @@ For photos_score and photos_gaps use the Vision analysis above — be specific a
         s = re.sub(r'"([^"]*)"', lambda m: '"' + m.group(1).replace('\n',' ') + '"', s)
         return json.loads(re.sub(r",\s*([}\]])", r"\1", s))
 
-
-# ── Main flow ─────────────────────────────────────────────────────────────────
-def run_full_analysis(our_url, competitor_urls, uploaded_files, log):
+# ── Main ──────────────────────────────────────────────────────────────────────
+def run_full_analysis(our_url, competitor_urls, log):
     asin = get_asin(our_url) or "unknown"
     log(f"🎯 ASIN: {asin}")
 
-    # 1. Get images
+    img_urls = fetch_images_scrapingdog(asin, log)
     images = []
+    if img_urls:
+        log(f"⬇️ Скачиваю {len(img_urls)} фото...")
+        images = download_images(img_urls, log)
 
-    # Priority: uploaded files
-    if uploaded_files:
-        log(f"📸 Загружено вручную: {len(uploaded_files)} фото")
-        for f in uploaded_files:
-            b64 = base64.b64encode(f.read()).decode()
-            images.append({"b64": b64, "media_type": f.type or "image/jpeg", "url": f.name})
-        log(f"✅ Готово: {len(images)} фото")
-
-    # Fallback: ScrapingDog
-    elif asin != "unknown":
-        img_urls = fetch_images_scrapingdog(asin, log)
-        if img_urls:
-            log(f"⬇️ Скачиваю {len(img_urls)} фото...")
-            images = download_images(img_urls[:3], log)
-
-    # 2. Vision analysis
     vision_data = ""
     if images:
         vision_data = analyze_images_vision(images, asin, log)
     else:
         log("⚠️ Фото не загружены — анализ только по тексту")
 
-    # 3. Text + final analysis
     result = run_text_analysis(our_url, competitor_urls, vision_data, log)
     return result, vision_data
 
-
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.title("🔍 Amazon Listing Analyzer")
-st.caption("Вставь ссылки → Claude читает листинг + анализирует фото через Vision")
+st.caption("Вставь ссылку → Gemini читает листинг + анализирует фото через Vision")
 
 with st.sidebar:
     st.header("ℹ️ Как пользоваться")
 
-    if st.button("🧪 Тест API ключа"):
+    if st.button("🧪 Тест API"):
         try:
-            key = st.secrets["ANTHROPIC_API_KEY"]
-            r = requests.post("https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": "claude-3-haiku-20240307", "max_tokens": 10, "messages": [{"role":"user","content":"hi"}]},
-                timeout=30)
-            if r.ok:
-                st.success(f"✅ API работает! Key: ...{key[-8:]}")
-            else:
-                raise Exception(r.json())
+            key = st.secrets["GEMINI_API_KEY"]
+            result = gemini_post(GEMINI_MODEL_TEXT, {
+                "contents": [{"parts": [{"text": "say hi"}], "role": "user"}]
+            }, key, timeout=15)
+            st.success(f"✅ Gemini работает! Key: ...{key[-6:]}")
         except Exception as e:
             st.error(f"❌ {e}")
-            st.code(f"Key: ...{st.secrets.get('ANTHROPIC_API_KEY','NOT SET')[-20:]}")
 
     st.markdown("""
-**Авто (со ScrapingDog):**
-1. Вставь ссылку нашего листинга
-2. Нажми Запустить
-
-**С загрузкой фото:**
-1. Сохрани фото с Amazon (ПКМ → Сохранить)
-2. Загрузи в поле ниже
-3. Нажми Запустить
-
 **Secrets нужны:**
-- `ANTHROPIC_API_KEY`
-- `SCRAPINGDOG_API_KEY` (опционально)
+- `GEMINI_API_KEY`
+- `SCRAPINGDOG_API_KEY`
     """)
 
 st.subheader("📎 Листинги")
@@ -326,11 +247,9 @@ our_url = st.text_input("🔵 НАШ листинг", placeholder="https://www.a
 
 with st.expander("➕ Конкуренты (до 5)", expanded=False):
     competitor_urls = [
-        st.text_input(f"Конкурент {i+1}", key=f"c{i}", placeholder="https://www.amazon.com/dp/XXXXXXXXXX (опционально)")
+        st.text_input(f"Конкурент {i+1}", key=f"c{i}", placeholder="https://www.amazon.com/dp/XXXXXXXXXX")
         for i in range(5)
     ]
-
-uploaded_files = []
 
 st.divider()
 if st.button("🚀 Запустить анализ", type="primary", disabled=not our_url.strip()):
@@ -342,7 +261,7 @@ if st.button("🚀 Запустить анализ", type="primary", disabled=no
 
     with st.spinner("Анализирую..."):
         try:
-            r, vision_data = run_full_analysis(our_url, competitor_urls, uploaded_files, log)
+            r, vision_data = run_full_analysis(our_url, competitor_urls, log)
             st.session_state["result"] = r
             st.session_state["vision"] = vision_data
             st.success("✅ Готово!")
@@ -355,7 +274,6 @@ if "result" in st.session_state:
     v = st.session_state.get("vision", "")
     st.divider()
 
-    # Vision block
     if v:
         with st.expander("👁️ Vision анализ фотографий", expanded=True):
             st.markdown(v)
