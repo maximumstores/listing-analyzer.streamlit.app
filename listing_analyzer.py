@@ -18,6 +18,10 @@ def get_asin(url):
 def sc(s): return "🟢" if s>=8 else ("🟡" if s>=6 else "🔴")
 def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"}.get(p,p)
 
+def get_asin_from_data(d):
+    """Get ASIN from product data, using stored input ASIN as priority"""
+    return d.get("_input_asin","") or d.get("parent_asin","") or d.get("product_information",{}).get("ASIN","")
+
 def pct(val):
     """Parse score: int 0-100, int 0-10, or string 'XX%' -> int 0-100"""
     if isinstance(val, str):
@@ -332,6 +336,7 @@ def run_analysis(our_url, competitor_urls, log):
         if casin:
             log(f"🔍 Конкурент {i+1}: {casin}...")
             cdata, _ = scrapingdog_product(casin, log)
+            cdata["_input_asin"] = casin  # always store the requested ASIN
             comp_data_list.append(cdata)
 
     _lang = st.session_state.get("analysis_lang","ru")
@@ -372,7 +377,7 @@ with st.sidebar:
 
         for _i, _c in enumerate(_cd_nav):
             _cpi = _c.get("product_information", {})
-            _casin = _c.get("parent_asin","") or _cpi.get("ASIN","")
+            _casin = get_asin_from_data(_c)
             _ct = _c.get("title","")
             st.markdown(f"""<div style="background:#fff5f5;border-radius:8px;padding:8px 10px;margin-bottom:4px;border-left:3px solid #ef4444">
 <div style="font-size:0.75rem;font-weight:700;color:#b91c1c">🔴 {_casin}</div>
@@ -398,7 +403,7 @@ with st.sidebar:
             st.markdown('<div style="font-size:0.7rem;font-weight:700;color:#94a3b8;letter-spacing:0.08em;padding:12px 2px 4px">КОНКУРЕНТЫ</div>', unsafe_allow_html=True)
             for _i2, _c2 in enumerate(_cd_nav):
                 _cpi2 = _c2.get("product_information", {})
-                _casin2 = _c2.get("parent_asin","") or _cpi2.get("ASIN","")
+                _casin2 = get_asin_from_data(_c2)
                 _ct2 = _c2.get("title","")
                 _ct2_short = _ct2[:20]+"..." if len(_ct2)>20 else _ct2
                 full = f"🔴 Конкурент {_i2+1}"
@@ -782,7 +787,7 @@ elif page == "🏆 Benchmark":
     # ── helper: render one product full card ─────────────────────────────────
     def render_product_card(d, sc, label, is_ours=False):
         dpi  = d.get("product_information", {})
-        dasin   = d.get("parent_asin","") or dpi.get("ASIN","")
+        dasin   = get_asin_from_data(d)
         dtitle  = d.get("title","")
         dprice  = d.get("price","")
         drating = d.get("average_rating","")
@@ -881,7 +886,7 @@ elif page == "🏆 Benchmark":
         ("📊 BSR","bsr",100),("🎨 Варианты","variants",100),
         ("🚀 Prime","prime",100),("💯 Overall","health",100),
     ]
-    asin_labels = ["🔵 НАШ"] + [f"🔴 {c.get('parent_asin','') or c.get('product_information',{}).get('ASIN',f'Конк.{i+1}')}" for i,c in enumerate(cd)]
+    asin_labels = ["🔵 НАШ"] + [f"🔴 {get_asin_from_data(c) or f'Конк.{i+1}'}" for i,c in enumerate(cd)]
 
     # ── Podium ───────────────────────────────────────────────────────────────
     total_scores = []
@@ -1013,7 +1018,7 @@ elif _is_competitor_page:
 
     # Use render_product_card defined in benchmark — redefine inline here
     cpi   = c.get("product_information", {})
-    casin = c.get("parent_asin","") or cpi.get("ASIN","")
+    casin = get_asin_from_data(c)
     csc_page = {}
     # auto_score inline
     _t2 = c.get("title",""); _i2 = c.get("images",[]); _b2 = c.get("feature_bullets",[])
@@ -1069,12 +1074,46 @@ elif _is_competitor_page:
   </div>
 </div>""", unsafe_allow_html=True)
 
-    # Score mini-cards
-    _sitems = [("Title",_ts),("Bullets",_bs),("Описание",_ds),("Фото",_ps),
-               ("A+",_as),("Отзывы",_rs),("BSR",_bsrs),("Варианты",_vs),("Prime",_prs)]
+    # ── AI Analysis button for competitor ───────────────────────────────────
+    _cai_key = f"comp_ai_{cidx}"
+    _cai_result = st.session_state.get(_cai_key)
+
+    if not _cai_result:
+        _cbtn1, _cbtn2 = st.columns([3,1])
+        with _cbtn1:
+            st.info("💡 Запусти AI анализ чтобы получить точные оценки по рубрику Listing 3.0")
+        with _cbtn2:
+            if st.button("🧠 AI Анализ", key=f"ai_btn_{cidx}", type="primary"):
+                with st.spinner(f"Анализирую конкурента {casin}..."):
+                    _clang = st.session_state.get("analysis_lang","ru")
+                    _cai_result = analyze_text(c, [], "", casin, lambda m: None, lang=_clang)
+                    st.session_state[_cai_key] = _cai_result
+                    st.rerun()
+
+    # Score mini-cards — use AI scores if available, else auto-score
+    if _cai_result:
+        _sitems = [
+            ("Title",   pct(_cai_result.get("title_score",0))),
+            ("Bullets", pct(_cai_result.get("bullets_score",0))),
+            ("Описание",pct(_cai_result.get("description_score",0))),
+            ("Фото",    pct(_cai_result.get("images_score",0))),
+            ("A+",      pct(_cai_result.get("aplus_score",0))),
+            ("Отзывы",  pct(_cai_result.get("reviews_score",0))),
+            ("BSR",     pct(_cai_result.get("bsr_score",0))),
+            ("Варианты",pct(_cai_result.get("customization_score",0))),
+            ("Prime",   pct(_cai_result.get("prime_score",0))),
+        ]
+        _overall = pct(_cai_result.get("overall_score",0))
+        _ohc = "#22c55e" if _overall>=75 else ("#f59e0b" if _overall>=50 else "#ef4444")
+        st.markdown(f"**🧠 AI Overall: <span style='color:{_ohc};font-size:1.3rem'>{_overall}%</span>**", unsafe_allow_html=True)
+    else:
+        _sitems = [("Title",_ts*10),("Bullets",_bs*10),("Описание",_ds*10),("Фото",_ps*10),
+                   ("A+",_as*10),("Отзывы",_rs*10),("BSR",_bsrs*10),("Варианты",_vs*10),("Prime",_prs*10)]
+        st.caption("📊 Авто-оценка (формула) — нажми AI Анализ для точных данных")
+
     _sc2 = st.columns(len(_sitems))
-    for _col3,(_lbl3,_val3) in zip(_sc2,_sitems):
-        _p3 = int(_val3/10*100); _c3 = "#22c55e" if _p3>=75 else ("#f59e0b" if _p3>=50 else "#ef4444")
+    for _col3,(_lbl3,_p3) in zip(_sc2,_sitems):
+        _c3 = "#22c55e" if _p3>=75 else ("#f59e0b" if _p3>=50 else "#ef4444")
         _col3.markdown(f'<div style="border-left:3px solid {_c3};padding:5px 4px;text-align:center;background:#f8fafc;border-radius:4px"><div style="font-size:1.05rem;font-weight:700;color:{_c3}">{_p3}%</div><div style="font-size:0.62rem;color:#64748b">{_lbl3}</div></div>', unsafe_allow_html=True)
 
     st.divider()
@@ -1085,6 +1124,12 @@ elif _is_competitor_page:
         _tcc = "#ef4444" if tlen>125 else "#22c55e"
         st.markdown(f"**Title** — <span style='color:{_tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
         st.markdown(f"> {_t2}")
+        if _cai_result:
+            _ts_ai = pct(_cai_result.get("title_score",0))
+            _tc2 = "#22c55e" if _ts_ai>=75 else ("#f59e0b" if _ts_ai>=50 else "#ef4444")
+            st.markdown(f"🧠 AI оценка: <span style='color:{_tc2};font-weight:700'>{_ts_ai}%</span>", unsafe_allow_html=True)
+            _tgi = _cai_result.get("priority_improvements",[])[:2]
+            for _tg in _tgi: st.caption(f"💡 {_tg}")
         st.divider()
         st.markdown(f"**Bullets** ({len(_b2)})")
         for _bul in _b2:
@@ -1092,12 +1137,24 @@ elif _is_competitor_page:
             st.markdown(f"{'🔴' if _blen>255 else '✅'} {_bul}")
             st.caption(f"{_blen} байт")
         if not _b2: st.caption("Нет буллетов")
+        if _cai_result:
+            _bs_ai = pct(_cai_result.get("bullets_score",0))
+            _bc2 = "#22c55e" if _bs_ai>=75 else ("#f59e0b" if _bs_ai>=50 else "#ef4444")
+            st.markdown(f"🧠 Bullets AI: <span style='color:{_bc2};font-weight:700'>{_bs_ai}%</span>", unsafe_allow_html=True)
         st.divider()
         st.markdown("**Описание**")
         if _d2: st.markdown(str(_d2)[:600])
         else: st.warning("Описание отсутствует")
+        if _cai_result:
+            _ds_ai = pct(_cai_result.get("description_score",0))
+            _dc2 = "#22c55e" if _ds_ai>=75 else ("#f59e0b" if _ds_ai>=50 else "#ef4444")
+            st.markdown(f"🧠 Описание AI: <span style='color:{_dc2};font-weight:700'>{_ds_ai}%</span>", unsafe_allow_html=True)
         st.divider()
         st.markdown(f"**A+:** {'✅' if _ap2 else '❌'}  |  **Видео:** {'✅ '+str(int(c.get('number_of_videos',0) or 0))+' шт.' if _vid2 else '❌'}")
+        if _cai_result:
+            _as_ai = pct(_cai_result.get("aplus_score",0))
+            _ac2 = "#22c55e" if _as_ai>=75 else ("#f59e0b" if _as_ai>=50 else "#ef4444")
+            st.markdown(f"🧠 A+ AI: <span style='color:{_ac2};font-weight:700'>{_as_ai}%</span>", unsafe_allow_html=True)
     with tab_photo:
         _cimgs = c.get("images",[])
         if _cimgs:
