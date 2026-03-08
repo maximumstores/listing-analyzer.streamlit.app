@@ -11,6 +11,7 @@ SCHEMA = '{"summary":"...","title_score":7,"title_gaps":["x"],"title_advantages"
 
 # ── Gemini keys rotation ──────────────────────────────────────────────────────
 GEMINI_KEYS = [
+    "AIzaSyCiAwfbC4xkaapuBrQtDfOxQ52-Kd5bUPE",
     "AIzaSyC8CUvsCMnoGLfjOXP2Cod7KueJAMeNdY8",
     "AIzaSyC62LXBA1dTUqYnbXcrljnafzXodo6-CKQ",
     "AIzaSyAwsZXXADvRtdEBXM0vQAh3JHx8dK8uzsw",
