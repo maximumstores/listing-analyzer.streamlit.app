@@ -10,6 +10,20 @@ import io
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-3-haiku-20240307"
 
+SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
+
+"""
+listing_analyzer.py — Amazon Listing Analyzer
+ScrapingDog Product API → фото → Claude Vision + текстовый анализ
+Secrets: ANTHROPIC_API_KEY, SCRAPINGDOG_API_KEY
+"""
+import json, re, base64, requests, streamlit as st
+from PIL import Image
+import io
+
+ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MODEL = "claude-3-haiku-20240307"
+
 SCHEMA = '{"overall_score":"72%","title_score":"85%","bullets_score":"70%","description_score":"0%","images_score":"75%","qa_score":"50%","reviews_score":"80%","aplus_score":"65%","price_score":"70%","availability_score":"90%","average_rating_score":"80%","total_reviews_score":"70%","bsr_score":"60%","keywords_score":"50%","prime_score":"100%","returns_score":"70%","customization_score":"80%","first_available_score":"60%","images_breakdown":{"main_image":"80% - модель на белом фоне, хорошая видимость товара","gallery":"70% - 5 фото, нет размерной сетки и lifestyle","ocr_readability":"75% - текст читаем, но мелкий шрифт на баннере"},"cosmo_analysis":{"score":"65%","signals_present":["Use Cases: базовый слой для спорта","Audience: мужчины","Material: 100% merino wool","Gender: мужской"],"signals_missing":["Season: не указан температурный диапазон","Compatibility: нет упоминания совместимости с другой одеждой","Skill Level: нет указания на уровень активности"]},"rufus_analysis":{"score":"60%","issues":["Нет ответов на вопрос об уходе за изделием","Инструкция по стирке отсутствует","Нет сравнения с синтетическими аналогами"]},"priority_improvements":["1. Добавить описание товара с HTML-разметкой","2. Добавить инструкцию по уходу в буллеты","3. Улучшить OCR читаемость инфографики — крупный шрифт, белый фон"],"missing_chars":[{"name":"Инструкция по уходу","how_competitors_use":"Конкуренты пишут машинная стирка 30°C в буллете #5","priority":"HIGH"}],"tech_params":[{"param":"Вес ткани (GSM)","competitor_value":"160 GSM у топ-конкурентов","our_gap":"GSM не указан нигде в листинге"}],"actions":[{"action":"Написать описание товара","impact":"HIGH","effort":"LOW","details":"300-500 слов с HTML: заголовки, сценарии использования, FAQ"},{"action":"Добавить GSM в title","impact":"HIGH","effort":"LOW","details":"Вставить 160GSM после Merino Wool в заголовок"}]}'
 def get_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
