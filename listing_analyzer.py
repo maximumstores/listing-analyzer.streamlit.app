@@ -116,19 +116,39 @@ def download_images(urls, log):
     return images
 
 # ── Vision ────────────────────────────────────────────────────────────────────
-def analyze_vision(images, product_data, asin, log):
+def analyze_vision(images, product_data, asin, log, lang=None):
     if not images: return ""
+    if lang is None:
+        lang = st.session_state.get("analysis_lang", "ru")
     log(f"👁️ Vision: {len(images)} фото → Anthropic...")
 
-    title = product_data.get("title","")
-    price = product_data.get("price","")
+    title  = product_data.get("title","")
+    price  = product_data.get("price","")
     rating = product_data.get("average_rating","")
-    reviews = product_data.get("reviews_count","")
-    bsr = product_data.get("bestseller_rank","")
+    reviews= product_data.get("reviews_count","")
+    bsr    = product_data.get("bestseller_rank","")
 
-    blocks = [{
-        "type":"text",
-        "text": f"""Ты эксперт по Amazon листингам. Проанализируй фотографии продукта.
+    if lang == "en":
+        intro = f"""You are an Amazon listing expert. Analyze the product photos.
+
+Product info:
+- ASIN: {asin}
+- Title: {title}
+- Price: {price}
+- Rating: {rating} ({reviews} reviews)
+- BSR: {bsr}
+
+For EACH photo analyze:
+1. Type (main/lifestyle/infographic/A+ banner/details/size chart)
+2. What is visible — background, model, text and numbers on photo
+3. Conversion score 1-10
+4. Strength and weakness
+
+At the end — top 3 specific photo improvements to boost conversion.
+Be specific and concrete."""
+        block_fmt = "\nPHOTO_BLOCK_{i}\nAnswer STRICTLY in this format (4 lines only):\nType: ...\nScore: X/10\nStrength: ...\nWeakness: ..."
+    else:
+        intro = f"""Ты эксперт по Amazon листингам. Проанализируй фотографии продукта.
 
 Информация о продукте:
 - ASIN: {asin}
@@ -144,11 +164,12 @@ def analyze_vision(images, product_data, asin, log):
 4. Сильная сторона и слабость
 
 В конце — топ 3 конкретных улучшения фото для роста конверсии.
-Отвечай на русском, будь конкретен."""
-    }]
+Будь конкретен."""
+        block_fmt = "\nPHOTO_BLOCK_{i}\nОтветь СТРОГО в формате (4 строки, не больше):\nТип: ...\nОценка: X/10\nСильная сторона: ...\nСлабость: ..."
 
+    blocks = [{"type":"text","text": intro}]
     for i,img in enumerate(images):
-        blocks.append({"type":"text","text":f"\nPHOTO_BLOCK_{i+1}\nОтветь СТРОГО в формате (4 строки, не больше):\nТип: ...\nОценка: X/10\nСильная сторона: ...\nСлабость: ..."})
+        blocks.append({"type":"text","text": block_fmt.format(i=i+1)})
         blocks.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
 
     result = anthropic_vision(blocks, max_tokens=2000)
@@ -156,7 +177,7 @@ def analyze_vision(images, product_data, asin, log):
     return result
 
 # ── Text analysis ─────────────────────────────────────────────────────────────
-def analyze_text(our_data, competitor_data_list, vision_result, asin, log):
+def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang="ru"):
     log("🧠 Финальный анализ...")
 
     def fmt(data):
@@ -241,8 +262,9 @@ Used In Location, Used On Season, Used With Complementary.
 
 RUFUS — типичные вопросы покупателей для этой категории.
 
-КРИТИЧЕСКИ ВАЖНО: Верни ТОЛЬКО валидный JSON. 
-- Все строковые поля ДОЛЖНЫ содержать реальный текст на русском — анализ реального листинга выше.
+КРИТИЧЕСКИ ВАЖНО: Верни ТОЛЬКО валидный JSON.
+- Все строковые поля ДОЛЖНЫ содержать реальный текст — анализ реального листинга выше.
+- Язык всех текстовых полей JSON: {{"ru": "русский", "en": "English"}}["{lang}"].
 - ЗАПРЕЩЕНО копировать значения из примера схемы ("gap1", "rec", "p", "v", "char", "use", "act", "det", "q").
 - Каждый gap — конкретная проблема данного листинга.
 - Каждый rec — конкретная рекомендация с примером текста.
@@ -262,7 +284,8 @@ health_score (0-100) = взвешенное среднее:
 health_breakdown содержит все 10 компонентов со значениями 0-10.
 {SCHEMA}"""
 
-    raw = anthropic_call("Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble.", prompt, max_tokens=3000)
+    sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text fields in {'Russian' if lang=='ru' else 'English'}."
+    raw = anthropic_call(sys_prompt, prompt, max_tokens=3000)
     log(f"✅ JSON: {len(raw)} символов")
 
     s = raw.strip().replace("```json","").replace("```","").strip()
@@ -304,7 +327,8 @@ def run_analysis(our_url, competitor_urls, log):
             cdata, _ = scrapingdog_product(casin, log)
             comp_data_list.append(cdata)
 
-    result = analyze_text(our_data, comp_data_list, vision_result, asin, log)
+    _lang = st.session_state.get("analysis_lang","ru")
+    result = analyze_text(our_data, comp_data_list, vision_result, asin, log, lang=_lang)
     st.session_state['our_data'] = our_data
     st.session_state['comp_data_list'] = comp_data_list
     return result, vision_result
@@ -416,6 +440,9 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
     else:
         btn_label = "🚀 Запустить анализ"
 
+    lang = st.radio("🌐 Язык анализа", ["🇷🇺 Русский", "🇺🇸 English"], horizontal=True, key="lang_sel")
+    st.session_state["analysis_lang"] = "ru" if "Русский" in lang else "en"
+
     if st.button(btn_label, type="primary", disabled=not our_url.strip()):
         lines = []; ph = st.empty()
         def log(msg):
@@ -452,7 +479,8 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     od_s = st.session_state.get("our_data", {})
                     v_s  = st.session_state.get("vision", "")
                     asin_s = get_asin(our_url) or "unknown"
-                    result = analyze_text(od_s, existing, v_s, asin_s, log)
+                    _lang = st.session_state.get("analysis_lang","ru")
+                    result = analyze_text(od_s, existing, v_s, asin_s, log, lang=_lang)
                     st.session_state["result"] = result
 
                 st.success("✅ Готово!")
@@ -986,9 +1014,9 @@ elif _is_competitor_page:
                     _pscore = int(_psm.group(1)) if _psm else 0
                     _pbc = "#22c55e" if _pscore>=8 else ("#f59e0b" if _pscore>=6 else "#ef4444")
                     _pslbl = "Отлично" if _pscore>=8 else ("Хорошо" if _pscore>=6 else "Слабо")
-                    _ptyp = re.search(r"[Тт]ип:\s*(.+)", _ptext)
-                    _pstrg = re.search(r"[Сс]ильная сторона:\s*(.+)", _ptext)
-                    _pweak = re.search(r"[Сс]лабость:\s*(.+)", _ptext)
+                    _ptyp = re.search(r"(?:[Тт]ип|Type):\s*(.+)", _ptext)
+                    _pstrg = re.search(r"(?:[Сс]ильная сторона|Strength):\s*(.+)", _ptext)
+                    _pweak = re.search(r"(?:[Сс]лабость|Weakness):\s*(.+)", _ptext)
                     with st.container(border=True):
                         _pc1,_pc2 = st.columns([1,2])
                         with _pc1:
