@@ -62,6 +62,16 @@ def scrapingdog_product(asin, log):
             params={"api_key": sd_key, "asin": asin, "domain": "com"}, timeout=60)
         if not r.ok: log(f"⚠️ {r.status_code}: {r.text[:100]}"); return {}, []
         data = r.json()
+        # Fetch A+ content separately if available
+        if data.get("aplus"):
+            try:
+                ra = requests.get("https://api.scrapingdog.com/amazon/product",
+                    params={"api_key": sd_key, "asin": asin, "domain": "com", "type": "aplus"}, timeout=60)
+                if ra.ok:
+                    adata = ra.json()
+                    data["aplus_content"] = str(adata)[:2000]
+                    log(f"  ✅ A+ контент получен ({len(str(adata))} chars)")
+            except: pass
         # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin","images"]:
@@ -161,6 +171,7 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log):
             f"Bullets: {chr(10).join(bullets[:5])}",
             f"Reviews snippets: {review_texts}",
             f"Description: {str(data.get('description',''))[:300]}",
+            f"A+ Content: {str(data.get('aplus_content','нет данных'))[:500]}",
         ])
 
     our_text = fmt(our_data)
