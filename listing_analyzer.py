@@ -54,17 +54,11 @@ def gemini_post(payload, log=None):
         return "".join(p.get("text", "") for p in parts)
     raise Exception(f"Все Gemini ключи исчерпаны: {last_err}")
 
-def ai_post(payload_anthropic, payload_gemini, log=None):
-    """Anthropic приоритет → Gemini запасной"""
-    try:
-        result = anthropic_post(payload_anthropic)
-        if log: log("  ✅ Anthropic")
-        return result, "anthropic"
-    except Exception as e:
-        if log: log(f"  ⚠️ Anthropic: {str(e)[:80]} → переключаю на Gemini")
-        result = gemini_post(payload_gemini)
-        if log: log("  ✅ Gemini")
-        return result, "gemini"
+def ai_post(payload_anthropic, payload_gemini=None, log=None):
+    """Только Anthropic"""
+    result = anthropic_post(payload_anthropic)
+    if log: log("  ✅ Anthropic")
+    return result, "anthropic"
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def get_asin(url):
@@ -106,10 +100,31 @@ def fetch_listing_screenshot(listing_url, label, log):
         if len(r.content) < 5000:
             log(f"⚠️ Screenshot слишком маленький: {len(r.content)} bytes")
             return None
-        b64 = base64.b64encode(r.content).decode()
-        media_type = r.headers.get("content-type", "image/png").split(";")[0]
-        log(f"✅ Screenshot {label}: {len(r.content)//1024}KB")
-        return {"b64": b64, "media_type": media_type, "label": label}
+        # Resize to max 1500px wide to stay under Anthropic limits
+        try:
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(r.content))
+            w, h = img.size
+            if w > 1500:
+                ratio = 1500 / w
+                img = img.resize((1500, int(h * ratio)), Image.LANCZOS)
+            # Crop to top 3000px (most important part of listing)
+            if img.size[1] > 3000:
+                img = img.crop((0, 0, img.size[0], 3000))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=70)
+            buf.seek(0)
+            compressed = buf.read()
+            log(f"✅ Screenshot {label}: {len(r.content)//1024}KB → {len(compressed)//1024}KB (сжато)")
+            b64 = base64.b64encode(compressed).decode()
+            return {"b64": b64, "media_type": "image/jpeg", "label": label}
+        except Exception as pe:
+            log(f"⚠️ PIL: {pe} — отправляю оригинал")
+            b64 = base64.b64encode(r.content).decode()
+            media_type = r.headers.get("content-type", "image/png").split(";")[0]
+            log(f"✅ Screenshot {label}: {len(r.content)//1024}KB")
+            return {"b64": b64, "media_type": media_type, "label": label}
     except Exception as e:
         log(f"⚠️ Screenshot {label}: {e}")
         return None
