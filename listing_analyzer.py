@@ -91,7 +91,13 @@ def fetch_listing_screenshot(listing_url, label, log):
     try:
         r = requests.get(
             "https://api.scrapingdog.com/screenshot",
-            params={"api_key": sd_key, "url": listing_url, "fullPage": "true"},
+            params={
+                "api_key": sd_key,
+                "url": listing_url,
+                "fullPage": "true",
+                "dynamic": "true",
+                "premium": "true",
+            },
             timeout=90
         )
         if not r.ok:
