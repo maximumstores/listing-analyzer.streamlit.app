@@ -676,8 +676,9 @@ elif page == "📸 Фото":
         slbl  = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
         # Flexible parsing: RU and EN
         typ  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", text)
-        strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength)\s*[:\-]\s*(.+)", text)
-        weak = re.search(r"(?:[Сс]лабость|Weakness)\s*[:\-]\s*(.+)", text)
+        # Broad regex: match Strength/Weakness labels + content on same line (3+ chars)
+        strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
+        weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
         ptype = typ.group(1).strip().rstrip(".") if typ else ""
         stxt  = strg.group(1).strip() if strg else ""
         wtxt  = weak.group(1).strip() if weak else ""
@@ -700,9 +701,9 @@ elif page == "📸 Фото":
                     st.warning("⚠️ Оценка не распознана")
                 if stxt: st.success(f"✅ {stxt}")
                 if wtxt: st.warning(f"⚠️ {wtxt}")
-                # Debug: show raw if nothing parsed
-                if not (ptype or stxt or wtxt or score) and text:
-                    with st.expander("🔧 Raw"):
+                # Debug: show raw if strength missing
+                if not stxt and text:
+                    with st.expander("🔧 Raw (Strength не распознан)"):
                         st.code(text[:400])
 
 # ══════════════════════════════════════════════════════════════════════════════
