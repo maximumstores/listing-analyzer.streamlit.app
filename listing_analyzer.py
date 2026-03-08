@@ -157,7 +157,7 @@ SCORING RUBRIC (each photo scored 1-10):
 SCORE MEANINGS: 9-10=excellent, 7-8=good, 5-6=needs improvement, 1-4=poor/replace
 
 PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | comparison | packaging"""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 4 lines, no more:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific thing done well]\nWeakness: [1 specific actionable fix]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 4 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength of this photo]\nWeakness: [REQUIRED — 1 specific improvement: what exactly to add or change, even if photo is good. Never write 'None' or 'No weakness']"
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
 
@@ -174,7 +174,7 @@ PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | 
 ЗНАЧЕНИЯ: 9-10=отлично, 7-8=хорошо, 5-6=требует улучшения, 1-4=слабо/заменить
 
 ТИПЫ ФОТ: главное | lifestyle | инфографика | размерная-сетка | детали | A+-баннер | сравнение | упаковка"""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки, не больше:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретное достоинство]\nСлабость: [1 конкретное улучшение с примером]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона этого фото]\nСлабость: [ОБЯЗАТЕЛЬНО 1 конкретное улучшение — что именно добавить или изменить, даже если фото хорошее]"
 
     blocks = [{"type":"text","text": intro}]
     for i,img in enumerate(images):
@@ -627,8 +627,12 @@ elif page == "📸 Фото":
     if not imgs:
         st.warning("Фото не загружены"); st.stop()
 
-    blocks = re.split(r"PHOTO_BLOCK_\d+", v)
-    blocks = [b.strip() for b in blocks if b.strip()]
+    # Split by markers, skip any block without a score (intro text)
+    _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v)
+    blocks = [b.strip() for b in _all_blocks if b.strip() and re.search(r"\d+/10", b)]
+    # Fallback: if filtering removed all blocks, use raw split
+    if not blocks:
+        blocks = [b.strip() for b in _all_blocks if b.strip()]
 
     for i, img in enumerate(imgs):
         text = blocks[i] if i < len(blocks) else ""
@@ -643,6 +647,9 @@ elif page == "📸 Фото":
         ptype = typ.group(1).strip().rstrip(".") if typ else ""
         stxt  = strg.group(1).strip() if strg else ""
         wtxt  = weak.group(1).strip() if weak else ""
+        # Filter useless "no weakness" answers
+        if wtxt and any(x in wtxt.lower() for x in ["нет.", "no.", "none", "n/a", "отсутствует", "полностью соответствует"]):
+            wtxt = ""
 
         with st.container(border=True):
             c1,c2 = st.columns([1,2])
