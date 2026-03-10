@@ -2,6 +2,119 @@
 import json, re, base64, requests, streamlit as st
 from PIL import Image
 import io
+from datetime import datetime
+
+# ── PostgreSQL history ─────────────────────────────────────────────────────────
+def get_db():
+    """Get DB connection from Streamlit secrets"""
+    try:
+        import psycopg2
+        db_url = st.secrets.get("DATABASE_URL","")
+        if not db_url: return None
+        return psycopg2.connect(db_url, sslmode="require")
+    except Exception:
+        return None
+
+def db_init():
+    """Create table if not exists"""
+    conn = get_db()
+    if not conn: return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS listing_analysis (
+                    id SERIAL PRIMARY KEY,
+                    asin TEXT NOT NULL,
+                    analyzed_at TIMESTAMP DEFAULT NOW(),
+                    overall_score INT,
+                    title_score INT,
+                    bullets_score INT,
+                    images_score INT,
+                    aplus_score INT,
+                    cosmo_score INT,
+                    rufus_score INT,
+                    result_json TEXT,
+                    vision_text TEXT,
+                    our_title TEXT
+                )
+            """)
+            conn.commit()
+    except Exception as e:
+        pass
+    finally:
+        conn.close()
+
+def db_save(asin, result, vision_text, our_title):
+    """Save analysis result to DB"""
+    conn = get_db()
+    if not conn: return False
+    try:
+        with conn.cursor() as cur:
+            cosmo = pct(result.get("cosmo_analysis",{}).get("score",0)) if isinstance(result.get("cosmo_analysis"),dict) else 0
+            rufus = pct(result.get("rufus_analysis",{}).get("score",0)) if isinstance(result.get("rufus_analysis"),dict) else 0
+            cur.execute("""
+                INSERT INTO listing_analysis
+                  (asin, overall_score, title_score, bullets_score, images_score, 
+                   aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                asin,
+                pct(result.get("overall_score",0)),
+                pct(result.get("title_score",0)),
+                pct(result.get("bullets_score",0)),
+                pct(result.get("images_score",0)),
+                pct(result.get("aplus_score",0)),
+                cosmo, rufus,
+                json.dumps(result, ensure_ascii=False),
+                vision_text or "",
+                our_title or ""
+            ))
+            conn.commit()
+        return True
+    except Exception as e:
+        return False
+    finally:
+        conn.close()
+
+def db_history(asin, limit=10):
+    """Get analysis history for ASIN"""
+    conn = get_db()
+    if not conn: return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT analyzed_at, overall_score, title_score, bullets_score,
+                       images_score, aplus_score, cosmo_score, rufus_score, our_title
+                FROM listing_analysis
+                WHERE asin = %s
+                ORDER BY analyzed_at DESC
+                LIMIT %s
+            """, (asin, limit))
+            rows = cur.fetchall()
+            return [{"date": r[0], "overall": r[1], "title": r[2], "bullets": r[3],
+                     "images": r[4], "aplus": r[5], "cosmo": r[6], "rufus": r[7], "our_title": r[8]}
+                    for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+def db_all_asins():
+    """List all ASINs with latest score"""
+    conn = get_db()
+    if not conn: return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at
+                FROM listing_analysis
+                ORDER BY asin, analyzed_at DESC
+            """)
+            return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3]} for r in cur.fetchall()]
+    except Exception:
+        return []
+    finally:
+        conn.close()
 
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL        = "claude-sonnet-4-5"  # text analysis
@@ -639,14 +752,93 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     _lang = st.session_state.get("analysis_lang","ru")
                     result = analyze_text(od_s, existing, v_s, asin_s, log, lang=_lang)
                     st.session_state["result"] = result
+                    # Save to DB history
+                    try:
+                        _od = st.session_state.get("our_data", {})
+                        db_save(get_asin_from_data(_od), result,
+                                st.session_state.get("vision",""),
+                                _od.get("title",""))
+                        log("💾 Сохранено в историю")
+                    except Exception: pass
 
                 _main_prog.progress(100, text="✅ Анализ завершён!")
                 st.rerun()
         except Exception as e:
                 st.error(f"Ошибка: {e}")
 
+def page_history():
+    st.title("📈 История анализов")
+    all_asins = db_all_asins()
+    if not all_asins:
+        st.info("История пуста — запусти первый анализ")
+        return
+
+    # ASIN selector
+    asin_opts = [f"{a['asin']} — {(a['title'] or '')[:50]}" for a in all_asins]
+    sel = st.selectbox("ASIN", asin_opts)
+    sel_asin = sel.split(" — ")[0]
+
+    history = db_history(sel_asin, limit=20)
+    if not history:
+        st.warning("Нет данных для этого ASIN")
+        return
+
+    # Latest vs previous delta
+    latest = history[0]
+    st.subheader(f"Последний анализ: {latest['date'].strftime('%d.%m.%Y %H:%M')}")
+
+    cols = st.columns(4)
+    metrics = [("Overall", "overall"), ("Title", "title"), ("Bullets", "bullets"), ("Images", "images")]
+    for col, (label, key) in zip(cols, metrics):
+        val = latest[key] or 0
+        delta = None
+        if len(history) > 1:
+            prev = history[1][key] or 0
+            delta = f"{val-prev:+d}%" if val != prev else None
+        col.metric(label, f"{val}%", delta=delta)
+
+    cols2 = st.columns(3)
+    for col, (label, key) in zip(cols2, [("A+","aplus"),("COSMO","cosmo"),("Rufus","rufus")]):
+        val = latest[key] or 0
+        delta = None
+        if len(history) > 1:
+            prev = history[1][key] or 0
+            delta = f"{val-prev:+d}%" if val != prev else None
+        col.metric(label, f"{val}%", delta=delta)
+
+    # Trend chart
+    if len(history) > 1:
+        st.divider()
+        st.subheader("📊 Динамика Overall Score")
+        import json as _json
+        dates = [h["date"].strftime("%d.%m") for h in reversed(history)]
+        scores = [h["overall"] or 0 for h in reversed(history)]
+        chart_data = {"Дата": dates, "Overall %": scores}
+        import pandas as pd
+        st.line_chart(pd.DataFrame(chart_data).set_index("Дата"))
+
+    # Full history table
+    st.divider()
+    st.subheader("Все запуски")
+    import pandas as pd
+    df = pd.DataFrame([{
+        "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
+        "Overall": h["overall"],
+        "Title": h["title"],
+        "Bullets": h["bullets"],
+        "Images": h["images"],
+        "A+": h["aplus"],
+        "COSMO": h["cosmo"],
+        "Rufus": h["rufus"],
+    } for h in history])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+# Init DB on startup
+db_init()
+
 # ── Pages ─────────────────────────────────────────────────────────────────────
 page = st.session_state.get("page", "🏠 Обзор")
+if page == "📈 История": page_history(); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
 
 if "result" not in st.session_state:
@@ -1502,4 +1694,4 @@ elif _is_competitor_page:
         _csizes  = c.get("customization_options",{}).get("size",[])
         _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
         st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
-        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}") 
+        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
