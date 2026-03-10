@@ -7,27 +7,17 @@ from datetime import datetime
 # ── PostgreSQL history ─────────────────────────────────────────────────────────
 def get_db():
     """Get DB connection from Streamlit secrets"""
-    import re as _re
     db_url = st.secrets.get("DATABASE_URL","")
     if not db_url:
         st.session_state["_db_err"] = "DATABASE_URL не найден в secrets"
         return None
     try:
-        import pg8000.native
-    except ImportError as e:
-        st.session_state["_db_err"] = f"pg8000 не установлен: {e}"
-        return None
-    try:
-        m = _re.match(r"postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)", db_url)
-        if not m:
-            st.session_state["_db_err"] = f"URL не распарсился: {db_url[:40]}"
-            return None
-        conn = pg8000.native.Connection(
-            user=m.group(1), password=m.group(2),
-            host=m.group(3), port=int(m.group(4)),
-            database=m.group(5), ssl_context=True
-        )
+        import psycopg2
+        conn = psycopg2.connect(db_url, sslmode="require")
         return conn
+    except ImportError as e:
+        st.session_state["_db_err"] = f"psycopg2 не установлен: {e}"
+        return None
     except Exception as _e:
         st.session_state["_db_err"] = f"Ошибка подключения: {_e}"
         return None
@@ -37,7 +27,8 @@ def db_init():
     conn = get_db()
     if not conn: return
     try:
-        conn.run("""
+        cur = conn.cursor()
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS listing_analysis (
                 id SERIAL PRIMARY KEY,
                 asin TEXT NOT NULL,
@@ -54,6 +45,8 @@ def db_init():
                 our_title TEXT
             )
         """)
+        conn.commit()
+        conn.close()
     except Exception:
         pass
 
@@ -64,21 +57,24 @@ def db_save(asin, result, vision_text, our_title):
     try:
         cosmo = pct(result.get("cosmo_analysis",{}).get("score",0)) if isinstance(result.get("cosmo_analysis"),dict) else 0
         rufus = pct(result.get("rufus_analysis",{}).get("score",0)) if isinstance(result.get("rufus_analysis"),dict) else 0
-        conn.run("""
+        cur = conn.cursor()
+        cur.execute("""
             INSERT INTO listing_analysis
               (asin, overall_score, title_score, bullets_score, images_score,
                aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title)
-            VALUES (:asin,:overall,:title,:bullets,:images,:aplus,:cosmo,:rufus,:rjson,:vision,:our_title)
-        """, asin=asin,
-             overall=pct(result.get("overall_score",0)),
-             title=pct(result.get("title_score",0)),
-             bullets=pct(result.get("bullets_score",0)),
-             images=pct(result.get("images_score",0)),
-             aplus=pct(result.get("aplus_score",0)),
-             cosmo=cosmo, rufus=rufus,
-             rjson=json.dumps(result, ensure_ascii=False),
-             vision=vision_text or "",
-             our_title=our_title or "")
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (asin,
+              pct(result.get("overall_score",0)),
+              pct(result.get("title_score",0)),
+              pct(result.get("bullets_score",0)),
+              pct(result.get("images_score",0)),
+              pct(result.get("aplus_score",0)),
+              cosmo, rufus,
+              json.dumps(result, ensure_ascii=False),
+              vision_text or "",
+              our_title or ""))
+        conn.commit()
+        conn.close()
         return True
     except Exception:
         return False
@@ -88,14 +84,17 @@ def db_history(asin, limit=10):
     conn = get_db()
     if not conn: return []
     try:
-        rows = conn.run("""
+        cur = conn.cursor()
+        cur.execute("""
             SELECT analyzed_at, overall_score, title_score, bullets_score,
                    images_score, aplus_score, cosmo_score, rufus_score, our_title
             FROM listing_analysis
-            WHERE asin = :asin
+            WHERE asin = %s
             ORDER BY analyzed_at DESC
-            LIMIT :limit
-        """, asin=asin, limit=limit)
+            LIMIT %s
+        """, (asin, limit))
+        rows = cur.fetchall()
+        conn.close()
         return [{"date": r[0], "overall": r[1], "title": r[2], "bullets": r[3],
                  "images": r[4], "aplus": r[5], "cosmo": r[6], "rufus": r[7], "our_title": r[8]}
                 for r in rows]
@@ -107,11 +106,14 @@ def db_all_asins():
     conn = get_db()
     if not conn: return []
     try:
-        rows = conn.run("""
+        cur = conn.cursor()
+        cur.execute("""
             SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at
             FROM listing_analysis
             ORDER BY asin, analyzed_at DESC
         """)
+        rows = cur.fetchall()
+        conn.close()
         return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3]} for r in rows]
     except Exception:
         return []
@@ -653,8 +655,11 @@ with st.sidebar:
             else:
                 try:
                     db_init()
-                    rows = conn.run("SELECT COUNT(*) FROM listing_analysis")
-                    st.sidebar.success(f"✅ БД OK | {rows[0][0]} записей")
+                    cur = conn.cursor()
+                    cur.execute("SELECT COUNT(*) FROM listing_analysis")
+                    cnt = cur.fetchone()[0]
+                    conn.close()
+                    st.sidebar.success(f"✅ БД OK | {cnt} записей")
                 except Exception as e:
                     st.sidebar.error(f"❌ {e}")
 
