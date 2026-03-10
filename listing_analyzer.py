@@ -871,6 +871,8 @@ def page_history():
     # Full history table
     st.divider()
     st.subheader("Все запуски")
+    amz_url = f"https://www.amazon.com/dp/{sel_asin}"
+    st.markdown(f"🔗 **Amazon:** [открыть листинг {sel_asin}]({amz_url})", unsafe_allow_html=False)
     import pandas as pd
     df = pd.DataFrame([{
         "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
