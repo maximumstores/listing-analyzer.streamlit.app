@@ -308,11 +308,12 @@ Analyze the listing above and score each component. Use ONLY real data from the 
 
 ## SCORING CRITERIA
 
-### TITLE — ≤125 chars, [Brand][Gender][Material][Type][Feature] format, top keywords, readable
-- 90-100%: All criteria met
-- 70-89%: Minor issues (slightly long, missing 1 element)
-- 50-69%: Major issues (too long, poor structure, missing brand/material)
-- 0-49%: Unreadable or broken
+### TITLE — ≤125 chars, [Material][Gender][Type][Feature][Use case] format, top keywords, readable
+- NOTE: Brand name is shown separately above title by Amazon — do NOT penalize for missing brand in title
+- 90-100%: ≤125 chars, has material+type+gender+key feature, no keyword stuffing, readable
+- 70-89%: Minor issues (missing 1 element, slightly keyword-heavy)
+- 50-69%: Too long (>125), poor structure, or unreadable
+- 0-49%: Broken, all caps spam, or completely irrelevant
 
 ### BULLETS — 5 bullets, ≤250 chars each, "Feature: Details. Benefit." format
 - 90-100%: All 5 bullets, perfect format, addresses customer concerns
