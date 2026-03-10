@@ -7,20 +7,29 @@ from datetime import datetime
 # ── PostgreSQL history ─────────────────────────────────────────────────────────
 def get_db():
     """Get DB connection from Streamlit secrets"""
+    import re as _re
+    db_url = st.secrets.get("DATABASE_URL","")
+    if not db_url:
+        st.session_state["_db_err"] = "DATABASE_URL не найден в secrets"
+        return None
     try:
         import pg8000.native
-        db_url = st.secrets.get("DATABASE_URL","")
-        if not db_url: return None
-        # Parse postgresql://user:pass@host:port/db
-        import re as _re
+    except ImportError as e:
+        st.session_state["_db_err"] = f"pg8000 не установлен: {e}"
+        return None
+    try:
         m = _re.match(r"postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)", db_url)
-        if not m: return None
-        return pg8000.native.Connection(
+        if not m:
+            st.session_state["_db_err"] = f"URL не распарсился: {db_url[:40]}"
+            return None
+        conn = pg8000.native.Connection(
             user=m.group(1), password=m.group(2),
             host=m.group(3), port=int(m.group(4)),
             database=m.group(5), ssl_context=True
         )
+        return conn
     except Exception as _e:
+        st.session_state["_db_err"] = f"Ошибка подключения: {_e}"
         return None
 
 def db_init():
@@ -639,7 +648,8 @@ with st.sidebar:
         else:
             conn = get_db()
             if not conn:
-                st.sidebar.error("❌ get_db() = None")
+                err = st.session_state.get("_db_err","неизвестная ошибка")
+                st.sidebar.error(f"❌ {err}")
             else:
                 try:
                     db_init()
