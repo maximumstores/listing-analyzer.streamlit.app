@@ -200,14 +200,15 @@ def anthropic_call(system, user, max_tokens=3000):
     if not r.ok: raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
     return r.json()["content"][0]["text"]
 
-def anthropic_vision(content_blocks, max_tokens=3000):
+def anthropic_vision(content_blocks, max_tokens=3000, system=None):
     key = st.secrets.get("ANTHROPIC_API_KEY","")
     if not key: raise Exception("ANTHROPIC_API_KEY не задан")
+    payload = {"model": ANTHROPIC_MODEL_VISION, "max_tokens": max_tokens,
+               "messages": [{"role":"user","content":content_blocks}]}
+    if system: payload["system"] = system
     r = requests.post(ANTHROPIC_URL,
         headers={"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"},
-        json={"model": ANTHROPIC_MODEL_VISION, "max_tokens": max_tokens,
-              "messages": [{"role":"user","content":content_blocks}]},
-        timeout=300)
+        json=payload, timeout=300)
     if not r.ok: raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
     return r.json()["content"][0]["text"]
 
@@ -436,13 +437,8 @@ APLUS_BLOCK_{{i}}
         msg_content.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
 
     try:
-        client = anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY",""), timeout=120)
-        resp = client.messages.create(
-            model=ANTHROPIC_MODEL_VISION, max_tokens=2000,
-            system=sys_prompt,
-            messages=[{"role":"user","content":msg_content}]
-        )
-        return resp.content[0].text if resp.content else ""
+        result = anthropic_vision(msg_content, max_tokens=2000, system=sys_prompt)
+        return result
     except Exception as e:
         log(f"⚠️ A+ Vision: {e}"); return ""
 
