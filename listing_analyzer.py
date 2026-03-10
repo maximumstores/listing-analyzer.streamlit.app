@@ -505,7 +505,8 @@ CRITICAL RULES:
 - images_score = 40% main + 30% gallery + 30% OCR combined
 - title_gaps: 1-3 REAL issues in the ACTUAL title text. NEVER suggest adding what is already there. Score >=85% = max 1 gap or [].
 - bullets_gaps: 1-3 REAL issues in the ACTUAL bullets. NEVER suggest adding what is already present.
-- description_gaps: if no description exists write ["Описание отсутствует — добавить HTML 300-500 слов"], else real issues only.
+- description_gaps: if no description exists write ONLY ["Описание отсутствует"]. NEVER suggest HTML structure in gaps — put structure advice in actions.details only.
+- description_rec: if no description, write ONE short sentence what to add. No HTML tags in rec.
 - aplus_gaps: if no A+ exists write ["A+ контент отсутствует — создать"], else real issues only.
 - images_gaps: 1-2 issues based on vision analysis results above.
 - CRITICAL: Read the actual listing text before writing gaps. Never hallucinate missing elements that are already present in the text.
@@ -956,6 +957,7 @@ def page_history():
                 # Restore session state
                 st.session_state["result"]  = json.loads(row_h[0]) if row_h[0] else {}
                 st.session_state["vision"]  = row_h[1] or ""
+                st.session_state["images"]  = []  # actual photos not in DB, vision text is
                 # Restore competitor AI results if saved
                 if row_h[2]:
                     comps_h = json.loads(row_h[2])
@@ -963,7 +965,7 @@ def page_history():
                         st.session_state[f"comp_ai_{_ci}"] = {"overall_score": f"{_ch.get('overall',0)}%"}
                 st.session_state["_hist_loaded"] = sel_hist
                 st.session_state["page"] = "🏠 Обзор"
-                st.success(f"✅ Загружен анализ от {sel_hist} — перехожу на Обзор")
+                st.success(f"✅ Загружен анализ от {sel_hist} → Обзор (фото недоступны — только текст)")
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Ошибка: {e}")
@@ -1187,15 +1189,42 @@ if page == "🏠 Обзор":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "📸 Фото":
     st.title("📸 Vision анализ фотографий")
-    if not imgs:
-        st.warning("Фото не загружены"); st.stop()
 
-    # Split by markers, skip any block without a score (intro text)
-    _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v)
+    # Split vision text into blocks regardless of whether images are loaded
+    _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v) if v else []
     blocks = [b.strip() for b in _all_blocks if b.strip() and re.search(r"\d+/10", b)]
-    # Fallback: if filtering removed all blocks, use raw split
     if not blocks:
         blocks = [b.strip() for b in _all_blocks if b.strip()]
+
+    # History mode: no images but vision text available
+    if not imgs and blocks:
+        st.info("📅 История: фото не сохраняются в БД — показан текстовый анализ Vision")
+        for i, text in enumerate(blocks):
+            sm = re.search(r"(\d+)/10", text)
+            score = int(sm.group(1)) if sm else 0
+            bc = "#22c55e" if score>=8 else ("#f59e0b" if score>=6 else "#ef4444")
+            slbl = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
+            typ  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", text)
+            strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
+            weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
+            _strip = lambda s: s.strip().strip("*").strip()
+            ptype = _strip(typ.group(1)) if typ else ""
+            stxt  = _strip(strg.group(1)) if strg else ""
+            wtxt  = _strip(weak.group(1)) if weak else ""
+            if wtxt and any(x in wtxt.lower() for x in ["none","n/a","no weakness","нет слабостей"]):
+                wtxt = ""
+            with st.container(border=True):
+                _head = f"Фото #{i+1}" + (f" — {ptype}" if ptype else "")
+                st.markdown(f"**{_head}**")
+                if score > 0:
+                    st.markdown(f'<span style="font-size:2rem;font-weight:800;color:{bc}">{score}/10</span> <span style="color:{bc}">{slbl}</span>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="background:#e5e7eb;border-radius:4px;height:8px"><div style="background:{bc};width:{score*10}%;height:8px;border-radius:4px"></div></div>', unsafe_allow_html=True)
+                if stxt: st.success(f"✅ {stxt}")
+                if wtxt: st.warning(f"⚠️ {wtxt}")
+        st.stop()
+
+    if not imgs:
+        st.warning("Фото не загружены"); st.stop()
 
     for i, img in enumerate(imgs):
         text = blocks[i] if i < len(blocks) else ""
