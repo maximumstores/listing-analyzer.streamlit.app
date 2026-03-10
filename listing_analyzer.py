@@ -839,11 +839,13 @@ def page_history():
             try:
                 _tc = get_db()
                 if _tc:
-                    rows = _tc.run("SELECT COUNT(*) FROM listing_analysis")
-                    cnt = rows[0][0]
+                    _cur = _tc.cursor()
+                    _cur.execute("SELECT COUNT(*) FROM listing_analysis")
+                    cnt = _cur.fetchone()[0]
+                    _tc.close()
                     st.success(f"✅ Подключение ОК | Записей в таблице: {cnt}")
                 else:
-                    st.error("❌ get_db() вернул None — проверь URL и pg8000")
+                    st.error("❌ get_db() вернул None")
             except Exception as e:
                 st.error(f"❌ Ошибка БД: {e}")
 
@@ -1845,4 +1847,4 @@ elif _is_competitor_page:
         _csizes  = c.get("customization_options",{}).get("size",[])
         _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
         st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
-        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}") 
+        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
