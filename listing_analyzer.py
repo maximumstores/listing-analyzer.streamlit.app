@@ -938,6 +938,11 @@ def page_history():
         if conn_h:
             try:
                 cur_h = conn_h.cursor()
+                # Add column if missing
+                try:
+                    cur_h.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS competitors_json TEXT")
+                    conn_h.commit()
+                except Exception: pass
                 cur_h.execute("""
                     SELECT result_json, vision_text, competitors_json
                     FROM listing_analysis
