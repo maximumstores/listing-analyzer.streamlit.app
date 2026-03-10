@@ -169,7 +169,7 @@ MAIN IMAGE AMAZON REQUIREMENTS (apply strictly for photo #1):
 ✅ REQUIRED: No mannequins (except apparel where required)
 ✅ REQUIRED: No multiple product variants shown
 If any requirement is violated → deduct 1-2 pts and mention it in Weakness."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 4 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength of this photo]\nWeakness: [REQUIRED — 1 specific improvement: what exactly to add or change, even if photo is good. Never write 'None' or 'No weakness']"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 4 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength of this photo]\nWeakness: [REQUIRED — 1 specific improvement based ONLY on what you actually see in THIS image. Never suggest adding something already visible in the photo. Focus on: frame fill %, background issues, missing product details, non-product items visible, text/watermarks. Never write 'None'.]"
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
 
@@ -196,7 +196,7 @@ If any requirement is violated → deduct 1-2 pts and mention it in Weakness."""
 ✅ Без манекенов (кроме одежды где необходимо)
 ✅ Не показывать несколько вариаций товара
 Если какое-то требование нарушено → снять 1-2 балла и указать нарушение в Слабости."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона этого фото]\nСлабость: [ОБЯЗАТЕЛЬНО 1 конкретное улучшение — что именно добавить или изменить, даже если фото хорошее]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона этого фото]\nСлабость: [ОБЯЗАТЕЛЬНО 1 конкретное улучшение только на основе ТОГО ЧТО ВИДИШЬ на этом фото. НИКОГДА не предлагай добавить то что уже есть на фото. Смотри на: заполнение кадра %, фон, лишние предметы не являющиеся товаром, текст/водяные знаки. Никогда не пиши 'Нет'.]"
 
     blocks = [{"type":"text","text": intro}]
     for i,img in enumerate(images):
