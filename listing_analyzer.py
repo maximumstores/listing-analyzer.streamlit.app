@@ -99,7 +99,8 @@ def db_save(asin, result, vision_text, our_title):
         conn.commit()
         conn.close()
         return True
-    except Exception:
+    except Exception as _e:
+        st.session_state["_db_save_err"] = str(_e)
         return False
 
 def db_history(asin, limit=10):
@@ -810,18 +811,15 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     # Save to DB history
                     try:
                         _od = st.session_state.get("our_data", {})
-                        db_save(get_asin_from_data(_od), result,
+                        _saved = db_save(get_asin_from_data(_od), result,
                                 st.session_state.get("vision",""),
-                                _od.get("title",""), listing_type="наш")
-                        log("💾 Сохранено в историю")
-                        # Save competitors too
-                        for _ci, _cd in enumerate(st.session_state.get("comp_data_list",[])):
-                            _cai = st.session_state.get(f"comp_ai_{_ci}")
-                            if _cai:
-                                _casin = get_asin_from_data(_cd)
-                                db_save(_casin, _cai, st.session_state.get(f"comp_vision_{_ci}",("",""))[1],
-                                        _cd.get("title",""), listing_type="конкурент")
-                    except Exception: pass
+                                _od.get("title",""))
+                        if _saved:
+                            log("💾 Сохранено в историю")
+                        else:
+                            log(f"⚠️ БД ошибка: {st.session_state.get('_db_save_err','?')}")
+                    except Exception as _dbe:
+                        log(f"⚠️ БД исключение: {_dbe}")
 
                 _main_prog.progress(100, text="✅ Анализ завершён!")
                 st.rerun()
