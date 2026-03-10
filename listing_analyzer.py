@@ -844,6 +844,15 @@ def page_history():
                     cnt = _cur.fetchone()[0]
                     _tc.close()
                     st.success(f"✅ Подключение ОК | Записей в таблице: {cnt}")
+                    # Show what ASINs are stored
+                    _tc2 = get_db()
+                    if _tc2:
+                        _cur2 = _tc2.cursor()
+                        _cur2.execute("SELECT asin, our_title, overall_score, analyzed_at FROM listing_analysis ORDER BY analyzed_at DESC LIMIT 5")
+                        _rows2 = _cur2.fetchall()
+                        _tc2.close()
+                        for _r in _rows2:
+                            st.code(f"asin={_r[0]} | title={str(_r[1])[:40]} | score={_r[2]} | date={_r[3]}")
                 else:
                     st.error("❌ get_db() вернул None")
             except Exception as e:
