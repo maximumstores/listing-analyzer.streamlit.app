@@ -1190,12 +1190,6 @@ if page == "🏠 Обзор":
 elif page == "📸 Фото":
     st.title("📸 Vision анализ фотографий")
 
-    # Debug: show vision length in history mode
-    if not imgs and st.session_state.get("_hist_loaded"):
-        st.caption(f"🔍 Debug: vision={len(v)} симв, images={len(imgs)}")
-        if v:
-            st.caption(f"Первые 200 симв: {v[:200]}")
-
     # Split vision text into blocks regardless of whether images are loaded
     _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v) if v else []
     blocks = [b.strip() for b in _all_blocks if b.strip() and re.search(r"\d+/10", b)]
