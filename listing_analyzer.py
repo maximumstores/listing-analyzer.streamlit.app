@@ -161,14 +161,14 @@ SCORE MEANINGS: 9-10=excellent, 7-8=good, 5-6=needs improvement, 1-4=poor/replac
 PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | comparison | packaging
 
 MAIN IMAGE AMAZON REQUIREMENTS (apply strictly for photo #1):
-✅ REQUIRED: Pure white background RGB(255,255,255) — no shadows, no grey
-✅ REQUIRED: Product fills ≥85% of frame
-✅ REQUIRED: No text, logos, watermarks, promo graphics, badges
-✅ REQUIRED: Minimum 1000px long side (ideally 2000-3000px) for zoom
-✅ REQUIRED: JPEG format, real photo (not illustration)
-✅ REQUIRED: No mannequins (except apparel where required)
-✅ REQUIRED: No multiple product variants shown
-If any requirement is violated → deduct 1-2 pts and mention it in Weakness."""
+✅ Pure white background RGB(255,255,255) — no shadows, no grey
+✅ Product fills ≥85% of frame — estimate visually in %
+✅ No text, logos, watermarks, promo graphics, badges
+✅ Minimum 1000px long side (ideally 2000-3000px) for zoom
+✅ Real photo (not illustration)
+✅ ONLY the sold product — FORBIDDEN: other clothing on model (pants, shorts, shoes of different color), accessories, props not included in purchase
+✅ For apparel: the sold item must be the primary focus, other clothing/body parts must not distract
+IMPORTANT: Look carefully — are there any items in the photo that are NOT the sold product? If yes — this is a violation, deduct 2 pts and name exactly what violates the rule."""
         block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 4 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength of this photo]\nWeakness: [REQUIRED — 1 specific improvement based ONLY on what you actually see in THIS image. Never suggest adding something already visible in the photo. Focus on: frame fill %, background issues, missing product details, non-product items visible, text/watermarks. Never write 'None'.]"
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
@@ -189,13 +189,13 @@ If any requirement is violated → deduct 1-2 pts and mention it in Weakness."""
 
 ТРЕБОВАНИЯ AMAZON К ГЛАВНОМУ ФОТО (применяй строго к фото #1):
 ✅ Фон исключительно белый RGB(255,255,255) — без теней, без серого
-✅ Товар занимает ≥85% площади кадра
+✅ Товар занимает ≥85% площади кадра — оцени визуально в процентах
 ✅ Нет текста, логотипов, водяных знаков, промо-графики, бейджей
 ✅ Минимум 1000px по длинной стороне (идеально 2000-3000px) для зума
-✅ Формат JPEG, реальная фотография (не иллюстрация)
-✅ Без манекенов (кроме одежды где необходимо)
-✅ Не показывать несколько вариаций товара
-Если какое-то требование нарушено → снять 1-2 балла и указать нарушение в Слабости."""
+✅ Реальная фотография (не иллюстрация)
+✅ ТОЛЬКО продаваемый товар — ЗАПРЕЩЕНЫ: другая одежда на модели (брюки, шорты, обувь другого цвета), аксессуары, реквизит не входящий в комплект
+✅ Для одежды: товар должен быть главным фокусом, другие части тела/одежды не должны отвлекать
+ВАЖНО: Посмотри внимательно — есть ли на фото предметы которые НЕ являются продаваемым товаром? Если да — это нарушение, снять 2 балла и написать конкретно что именно нарушает правило."""
         block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона этого фото]\nСлабость: [ОБЯЗАТЕЛЬНО 1 конкретное улучшение только на основе ТОГО ЧТО ВИДИШЬ на этом фото. НИКОГДА не предлагай добавить то что уже есть на фото. Смотри на: заполнение кадра %, фон, лишние предметы не являющиеся товаром, текст/водяные знаки. Никогда не пиши 'Нет'.]"
 
     blocks = [{"type":"text","text": intro}]
@@ -802,7 +802,7 @@ elif page == "📸 Фото":
         stxt  = strg.group(1).strip() if strg else ""
         wtxt  = weak.group(1).strip() if weak else ""
         # Filter useless "no weakness" answers
-        if wtxt and any(x in wtxt.lower() for x in ["нет.", "no.", "none", "n/a", "отсутствует", "полностью соответствует"]):
+        if wtxt and any(x in wtxt.lower() for x in ["none", "n/a", "no weakness", "no notable weakness", "нет слабостей", "полностью соответствует требованиям"]):
             wtxt = ""
 
         with st.container(border=True):
