@@ -57,7 +57,7 @@ def anthropic_call(system, user, max_tokens=3000):
     if system: payload["system"] = system
     r = requests.post(ANTHROPIC_URL,
         headers={"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"},
-        json=payload, timeout=120)
+        json=payload, timeout=300)
     if not r.ok: raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
     return r.json()["content"][0]["text"]
 
@@ -68,7 +68,7 @@ def anthropic_vision(content_blocks, max_tokens=3000):
         headers={"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"},
         json={"model": ANTHROPIC_MODEL_VISION, "max_tokens": max_tokens,
               "messages": [{"role":"user","content":content_blocks}]},
-        timeout=120)
+        timeout=300)
     if not r.ok: raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
     return r.json()["content"][0]["text"]
 
@@ -258,8 +258,36 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang=
             f"A+ Content: {str(data.get('aplus_content','нет данных'))[:3000]}",
         ])
 
-    our_text = fmt(our_data)
-    comp_text = "\n\n".join([f"COMPETITOR {{i+1}}:\n{{fmt(d)}}" for i,d in enumerate(competitor_data_list) if d])
+    # Send full our data but cap at 3000 chars
+    # Pre-compute factual stats so AI cannot hallucinate them
+    _title_text   = our_data.get("title", "")
+    _bullets      = our_data.get("feature_bullets", [])
+    _title_len    = len(_title_text)
+    _bullet_bytes = [len(b.encode()) for b in _bullets]
+    _facts = f"""
+FACTUAL STATS (do NOT contradict these):
+- Title length: {_title_len} characters (limit: 125)
+- Title is {'OVER limit' if _title_len > 125 else 'within limit'}
+- Number of bullets: {len(_bullets)}
+- Bullet byte lengths: {_bullet_bytes}
+- Any bullet over 250 bytes: {'YES - ' + str([i+1 for i,x in enumerate(_bullet_bytes) if x>250]) if any(x>250 for x in _bullet_bytes) else 'NO'}
+- Description present: {'YES' if our_data.get('description') else 'NO - score must be 0%'}
+- A+ present: {'YES' if our_data.get('aplus_content') else 'NO'}
+"""
+    our_text = _facts + "\n" + fmt(our_data)[:2500]
+    def fmt_comp(d):
+        pi = d.get("product_information", {})
+        buls = d.get("feature_bullets", [])
+        parts = [
+            f"Title: {d.get('title','')}",
+            f"Price: {d.get('price','')} | Rating: {d.get('average_rating','')} | Reviews: {pi.get('Customer Reviews',{}).get('ratings_count','')}",
+            f"BSR: {str(pi.get('Best Sellers Rank',''))[:80]}",
+            f"A+: {'Yes' if d.get('aplus_content') else 'No'} | Sizes: {len(d.get('customization_options',{}).get('size',[]))}",
+        ]
+        if buls: parts.append("Bullets:\n" + "\n".join(f"- {b[:120]}" for b in buls[:5]))
+        if d.get("description"): parts.append(f"Description: {str(d['description'])[:200]}")
+        return "\n".join(filter(None, parts))
+    comp_text = "\n\n".join([f"COMPETITOR {i+1}:\n{fmt_comp(d)}" for i,d in enumerate(competitor_data_list) if d])
     vision_section = f"\nPHOTO VISION ANALYSIS:\n{{vision_result[:1500]}}" if vision_result else ""
     lang_name = "Russian" if lang == "ru" else "English"
 
@@ -292,11 +320,12 @@ Analyze the listing above and score each component. Use ONLY real data from the 
 - 50-69%: Walls of text, no benefits
 - 0-49%: Missing bullets
 
-### DESCRIPTION — HTML formatted, covers Benefits/Features/Care/Usage
-- 90-100%: ≤2000 words, HTML, storytelling, all sections covered
-- 70-89%: Decent but poor formatting or short
-- 0-49%: Missing or duplicate of bullets
-- CRITICAL: If description field is empty or missing → description_score MUST be "0%". No exceptions.
+### DESCRIPTION — Plain text or limited HTML (only <br><b><p><ul><li> allowed by Amazon)
+- IMPORTANT: If seller has A+ content → description is hidden from buyers, so description_score impact is low
+- 90-100%: 300-2000 chars, covers features/care/use cases, no duplicate of bullets
+- 70-89%: Short but decent, or has A+ compensating
+- 0%: Empty or missing — score MUST be "0%". No exceptions.
+- description_gaps: if empty, write ONLY ["Описание отсутствует"]. Do NOT write long HTML structure advice — that belongs in actions field.
 
 ### IMAGES — Evaluate: main image (40%), gallery completeness (30%), OCR readability for Rufus (30%)
 - IMPORTANT: If vision analysis shows main image has violations (non-product items, wrong background) → images_score MAX 70%
@@ -870,9 +899,10 @@ elif page == "📝 Контент":
             col = "red" if (cl and ct>cl) else "gray"
             st.markdown(f"<small style='color:{col}'>📝 {ct} симв{f' / {cl} лимит' if cl else ''}</small>", unsafe_allow_html=True)
             with st.expander("Показать текст"): st.markdown(f"> {kw['raw_text']}")
-        if gaps and isinstance(gaps, list):
-            with st.expander(f"⚠️ ({len(gaps)})"): 
-                for g in gaps: st.markdown(f"- {g}")
+        _real_gaps = [g for g in gaps if g and str(g).strip()] if isinstance(gaps, list) else []
+        if _real_gaps:
+            with st.expander(f"⚠️ ({len(_real_gaps)})"):
+                for g in _real_gaps: st.markdown(f"- {g}")
         if rec: st.info(f"💡 {rec}")
 
     # ── Title ──────────────────────────────────────────────────────────────────
