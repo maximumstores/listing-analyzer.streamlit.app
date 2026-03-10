@@ -158,7 +158,17 @@ SCORING RUBRIC (each photo scored 1-10):
 
 SCORE MEANINGS: 9-10=excellent, 7-8=good, 5-6=needs improvement, 1-4=poor/replace
 
-PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | comparison | packaging"""
+PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | comparison | packaging
+
+MAIN IMAGE AMAZON REQUIREMENTS (apply strictly for photo #1):
+✅ REQUIRED: Pure white background RGB(255,255,255) — no shadows, no grey
+✅ REQUIRED: Product fills ≥85% of frame
+✅ REQUIRED: No text, logos, watermarks, promo graphics, badges
+✅ REQUIRED: Minimum 1000px long side (ideally 2000-3000px) for zoom
+✅ REQUIRED: JPEG format, real photo (not illustration)
+✅ REQUIRED: No mannequins (except apparel where required)
+✅ REQUIRED: No multiple product variants shown
+If any requirement is violated → deduct 1-2 pts and mention it in Weakness."""
         block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 4 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength of this photo]\nWeakness: [REQUIRED — 1 specific improvement: what exactly to add or change, even if photo is good. Never write 'None' or 'No weakness']"
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
@@ -175,7 +185,17 @@ PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | 
 
 ЗНАЧЕНИЯ: 9-10=отлично, 7-8=хорошо, 5-6=требует улучшения, 1-4=слабо/заменить
 
-ТИПЫ ФОТ: главное | lifestyle | инфографика | размерная-сетка | детали | A+-баннер | сравнение | упаковка"""
+ТИПЫ ФОТ: главное | lifestyle | инфографика | размерная-сетка | детали | A+-баннер | сравнение | упаковка
+
+ТРЕБОВАНИЯ AMAZON К ГЛАВНОМУ ФОТО (применяй строго к фото #1):
+✅ Фон исключительно белый RGB(255,255,255) — без теней, без серого
+✅ Товар занимает ≥85% площади кадра
+✅ Нет текста, логотипов, водяных знаков, промо-графики, бейджей
+✅ Минимум 1000px по длинной стороне (идеально 2000-3000px) для зума
+✅ Формат JPEG, реальная фотография (не иллюстрация)
+✅ Без манекенов (кроме одежды где необходимо)
+✅ Не показывать несколько вариаций товара
+Если какое-то требование нарушено → снять 1-2 балла и указать нарушение в Слабости."""
         block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона этого фото]\nСлабость: [ОБЯЗАТЕЛЬНО 1 конкретное улучшение — что именно добавить или изменить, даже если фото хорошее]"
 
     blocks = [{"type":"text","text": intro}]
@@ -293,12 +313,12 @@ CRITICAL RULES:
 - Use REAL data from the listing — no placeholder text
 - overall_score = weighted average of all 17 scores
 - images_score = 40% main + 30% gallery + 30% OCR combined
-- title_gaps: list of 2-3 specific issues with the title
-- bullets_gaps: list of 2-3 specific issues with the bullets
-- description_gaps: list of 1-2 specific issues with the description
-- aplus_gaps: list of 1-2 specific issues with the A+ content
-- images_gaps: list of 1-2 specific issues with the images
-- Each gap must be specific to THAT section, not generic
+- title_gaps: 1-3 REAL issues in the ACTUAL title text. NEVER suggest adding what is already there. Score >=85% = max 1 gap or [].
+- bullets_gaps: 1-3 REAL issues in the ACTUAL bullets. NEVER suggest adding what is already present.
+- description_gaps: if no description exists write ["Описание отсутствует — добавить HTML 300-500 слов"], else real issues only.
+- aplus_gaps: if no A+ exists write ["A+ контент отсутствует — создать"], else real issues only.
+- images_gaps: 1-2 issues based on vision analysis results above.
+- CRITICAL: Read the actual listing text before writing gaps. Never hallucinate missing elements that are already present in the text.
 
 {SCHEMA}"""
 
