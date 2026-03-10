@@ -4,7 +4,8 @@ from PIL import Image
 import io
 
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL = "claude-3-haiku-20240307"
+ANTHROPIC_MODEL      = "claude-3-haiku-20240307"   # text analysis (fast+cheap)
+ANTHROPIC_MODEL_VISION = "claude-3-5-sonnet-20241022"  # vision (accurate)
 
 SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
 
@@ -65,7 +66,7 @@ def anthropic_vision(content_blocks, max_tokens=3000):
     if not key: raise Exception("ANTHROPIC_API_KEY не задан")
     r = requests.post(ANTHROPIC_URL,
         headers={"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"},
-        json={"model": ANTHROPIC_MODEL, "max_tokens": max_tokens,
+        json={"model": ANTHROPIC_MODEL_VISION, "max_tokens": max_tokens,
               "messages": [{"role":"user","content":content_blocks}]},
         timeout=120)
     if not r.ok: raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
