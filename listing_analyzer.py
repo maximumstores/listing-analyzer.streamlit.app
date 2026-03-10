@@ -247,12 +247,12 @@ def scrapingdog_product(asin, log):
                         elif isinstance(obj, str) and obj.startswith("http") and any(x in obj.lower() for x in [".jpg",".png",".jpeg",".webp"]):
                             _aplus_imgs.append(obj)
                     _extract_urls(adata)
-                    data["aplus_image_urls"] = list(dict.fromkeys(_aplus_imgs))[:6]
-                    log(f"  ✅ A+ контент получен ({len(str(adata))} chars) | найдено изображений: {len(data['aplus_image_urls'])}")
-                    if data["aplus_image_urls"]:
-                        log(f"  🖼 A+ URLs: {data['aplus_image_urls'][0][:80]}...")
-                    else:
-                        log(f"  ⚠️ A+ изображения не найдены. Первые 300 симв ответа: {str(adata)[:300]}")
+                    # A+ banners at /images/S/, product photos at /images/I/
+                    _aplus_banners = [u for u in _aplus_imgs if "/images/S/" in u]
+                    data["aplus_image_urls"] = list(dict.fromkeys(_aplus_banners))[:6]
+                    log(f"  ✅ A+ ({len(str(adata))} chars) | /S/ баннеров: {len(data['aplus_image_urls'])} из {len(_aplus_imgs)}")
+                    for _u in data["aplus_image_urls"][:2]:
+                        log(f"  🖼 {_u[:90]}")
             except: pass
         # Extract image URLs
         urls = []
