@@ -32,6 +32,7 @@ def db_init():
             CREATE TABLE IF NOT EXISTS listing_analysis (
                 id SERIAL PRIMARY KEY,
                 asin TEXT NOT NULL,
+                listing_type TEXT DEFAULT 'наш',
                 analyzed_at TIMESTAMP DEFAULT NOW(),
                 overall_score INT,
                 title_score INT,
@@ -42,10 +43,17 @@ def db_init():
                 rufus_score INT,
                 result_json TEXT,
                 vision_text TEXT,
-                our_title TEXT
+                our_title TEXT,
+                competitors_json TEXT
             )
         """)
         conn.commit()
+        # Migration: add listing_type if missing
+        try:
+            cur.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS listing_type TEXT DEFAULT 'наш'")
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
     except Exception:
         pass
@@ -57,12 +65,26 @@ def db_save(asin, result, vision_text, our_title):
     try:
         cosmo = pct(result.get("cosmo_analysis",{}).get("score",0)) if isinstance(result.get("cosmo_analysis"),dict) else 0
         rufus = pct(result.get("rufus_analysis",{}).get("score",0)) if isinstance(result.get("rufus_analysis"),dict) else 0
+        # Collect competitor snapshot
+        comp_list = st.session_state.get("comp_data_list", [])
+        comp_snap = []
+        for _i, _cd in enumerate(comp_list):
+            if not _cd: continue
+            _cai = st.session_state.get(f"comp_ai_{_i}", {})
+            comp_snap.append({
+                "asin": get_asin_from_data(_cd),
+                "title": _cd.get("title","")[:80],
+                "overall": pct(_cai.get("overall_score",0)) if _cai else 0,
+                "price": _cd.get("price",""),
+                "rating": _cd.get("average_rating",""),
+                "reviews": _cd.get("reviews_count",""),
+            })
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO listing_analysis
               (asin, overall_score, title_score, bullets_score, images_score,
-               aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title, competitors_json)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (asin,
               pct(result.get("overall_score",0)),
               pct(result.get("title_score",0)),
@@ -72,7 +94,8 @@ def db_save(asin, result, vision_text, our_title):
               cosmo, rufus,
               json.dumps(result, ensure_ascii=False),
               vision_text or "",
-              our_title or ""))
+              our_title or "",
+              json.dumps(comp_snap, ensure_ascii=False)))
         conn.commit()
         conn.close()
         return True
@@ -108,13 +131,13 @@ def db_all_asins():
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at
+            SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at, listing_type
             FROM listing_analysis
             ORDER BY asin, analyzed_at DESC
         """)
         rows = cur.fetchall()
         conn.close()
-        return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3]} for r in rows]
+        return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3], "type": r[4]} for r in rows]
     except Exception:
         return []
 
@@ -789,8 +812,15 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                         _od = st.session_state.get("our_data", {})
                         db_save(get_asin_from_data(_od), result,
                                 st.session_state.get("vision",""),
-                                _od.get("title",""))
+                                _od.get("title",""), listing_type="наш")
                         log("💾 Сохранено в историю")
+                        # Save competitors too
+                        for _ci, _cd in enumerate(st.session_state.get("comp_data_list",[])):
+                            _cai = st.session_state.get(f"comp_ai_{_ci}")
+                            if _cai:
+                                _casin = get_asin_from_data(_cd)
+                                db_save(_casin, _cai, st.session_state.get(f"comp_vision_{_ci}",("",""))[1],
+                                        _cd.get("title",""), listing_type="конкурент")
                     except Exception: pass
 
                 _main_prog.progress(100, text="✅ Анализ завершён!")
@@ -825,7 +855,7 @@ def page_history():
         return
 
     # ASIN selector
-    asin_opts = [f"{a['asin']} — {(a['title'] or '')[:50]}" for a in all_asins]
+    asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
     sel = st.selectbox("ASIN", asin_opts)
     sel_asin = sel.split(" — ")[0]
 
@@ -870,9 +900,10 @@ def page_history():
 
     # Full history table
     st.divider()
-    st.subheader("Все запуски")
     amz_url = f"https://www.amazon.com/dp/{sel_asin}"
-    st.markdown(f"🔗 **Amazon:** [открыть листинг {sel_asin}]({amz_url})", unsafe_allow_html=False)
+    st.markdown(f"🔗 [Открыть листинг на Amazon ↗]({amz_url})")
+
+    st.subheader("Все запуски")
     import pandas as pd
     df = pd.DataFrame([{
         "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
@@ -885,6 +916,75 @@ def page_history():
         "Rufus": h["rufus"],
     } for h in history])
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.subheader("🔍 Загрузить полный анализ из истории")
+    hist_opts = [f"{h['date'].strftime('%d.%m.%Y %H:%M')} — Overall: {h['overall']}%" for h in history]
+    sel_hist = st.selectbox("Выбери запуск", hist_opts, key="hist_sel")
+    sel_hist_idx = hist_opts.index(sel_hist)
+
+    if st.button("📂 Открыть этот анализ", type="primary", use_container_width=True):
+        # Load full result_json + competitors_json from DB
+        conn_h = get_db()
+        if conn_h:
+            try:
+                cur_h = conn_h.cursor()
+                cur_h.execute("""
+                    SELECT result_json, vision_text, competitors_json
+                    FROM listing_analysis
+                    WHERE asin = %s
+                    ORDER BY analyzed_at DESC
+                    LIMIT %s
+                """, (sel_asin, len(history)))
+                rows_h = cur_h.fetchall()
+                conn_h.close()
+                row_h = rows_h[sel_hist_idx]
+                # Restore session state
+                st.session_state["result"]  = json.loads(row_h[0]) if row_h[0] else {}
+                st.session_state["vision"]  = row_h[1] or ""
+                # Restore competitor AI results if saved
+                if row_h[2]:
+                    comps_h = json.loads(row_h[2])
+                    for _ci, _ch in enumerate(comps_h):
+                        st.session_state[f"comp_ai_{_ci}"] = {"overall_score": f"{_ch.get('overall',0)}%"}
+                st.session_state["_hist_loaded"] = sel_hist
+                st.session_state["page"] = "🏠 Обзор"
+                st.success(f"✅ Загружен анализ от {sel_hist} — перехожу на Обзор")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Ошибка: {e}")
+
+    # Show if currently viewing historical snapshot
+    if st.session_state.get("_hist_loaded"):
+        _hl = st.session_state["_hist_loaded"]
+        st.info(f"📅 Просматриваешь: {_hl} | Для возврата нажми 🔄 Перезапустить анализ")
+
+    # Show competitor snapshot from latest analysis
+    if history:
+        conn2 = get_db()
+        if conn2:
+            try:
+                cur2 = conn2.cursor()
+                cur2.execute("SELECT competitors_json FROM listing_analysis WHERE asin=%s ORDER BY analyzed_at DESC LIMIT 1", (sel_asin,))
+                row = cur2.fetchone()
+                conn2.close()
+                if row and row[0]:
+                    comps = json.loads(row[0])
+                    if comps:
+                        st.divider()
+                        st.subheader("🔴 Конкуренты на момент последнего анализа")
+                        import pandas as pd
+                        cdf = pd.DataFrame([{
+                            "ASIN": c.get("asin",""),
+                            "Title": c.get("title",""),
+                            "Overall": c.get("overall",0),
+                            "Цена": c.get("price",""),
+                            "Рейтинг": c.get("rating",""),
+                            "Отзывы": c.get("reviews",""),
+                        } for c in comps])
+                        st.dataframe(cdf, use_container_width=True, hide_index=True)
+            except Exception:
+                pass
 
 # Init DB on startup
 db_init()
