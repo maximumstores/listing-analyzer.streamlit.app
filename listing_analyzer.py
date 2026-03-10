@@ -229,21 +229,29 @@ def scrapingdog_product(asin, log):
                 if ra.ok:
                     adata = ra.json()
                     data["aplus_content"] = str(adata)[:2000]
-                    # Extract A+ image URLs from response
+                    # Log top-level keys to understand structure
+                    _top_keys = list(adata.keys()) if isinstance(adata, dict) else f"type={type(adata).__name__}"
+                    log(f"  🔍 A+ keys: {_top_keys}")
+                    # Extract ALL image URLs recursively
                     _aplus_imgs = []
-                    def _extract_urls(obj):
+                    def _extract_urls(obj, depth=0):
+                        if depth > 10: return
                         if isinstance(obj, dict):
                             for k, v in obj.items():
-                                if k in ("image","img","url","src") and isinstance(v,str) and v.startswith("http") and any(x in v for x in [".jpg",".png",".jpeg",".webp"]):
+                                if isinstance(v, str) and v.startswith("http") and any(x in v.lower() for x in [".jpg",".png",".jpeg",".webp"]):
                                     _aplus_imgs.append(v)
-                                else: _extract_urls(v)
+                                else: _extract_urls(v, depth+1)
                         elif isinstance(obj, list):
-                            for i in obj: _extract_urls(i)
-                        elif isinstance(obj, str) and obj.startswith("http") and any(x in obj for x in [".jpg",".png",".jpeg"]):
+                            for i in obj: _extract_urls(i, depth+1)
+                        elif isinstance(obj, str) and obj.startswith("http") and any(x in obj.lower() for x in [".jpg",".png",".jpeg",".webp"]):
                             _aplus_imgs.append(obj)
                     _extract_urls(adata)
                     data["aplus_image_urls"] = list(dict.fromkeys(_aplus_imgs))[:6]
-                    log(f"  ✅ A+ контент получен ({len(str(adata))} chars) | {len(data['aplus_image_urls'])} A+ изображений")
+                    log(f"  ✅ A+ контент получен ({len(str(adata))} chars) | найдено изображений: {len(data['aplus_image_urls'])}")
+                    if data["aplus_image_urls"]:
+                        log(f"  🖼 A+ URLs: {data['aplus_image_urls'][0][:80]}...")
+                    else:
+                        log(f"  ⚠️ A+ изображения не найдены. Первые 300 симв ответа: {str(adata)[:300]}")
             except: pass
         # Extract image URLs
         urls = []
