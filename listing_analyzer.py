@@ -666,6 +666,15 @@ with st.sidebar:
         st.session_state["page"] = "📈 История"
         st.rerun()
 
+    # Return from history button — always visible when in history mode
+    if st.session_state.get("_hist_loaded"):
+        if st.sidebar.button("↩️ Новый анализ", type="primary", use_container_width=True):
+            for _k in ["_hist_loaded", "result", "vision", "images", "our_data",
+                       "comp_data_list"] + [f"comp_ai_{i}" for i in range(5)]:
+                st.session_state.pop(_k, None)
+            st.session_state["page"] = "🏠 Обзор"
+            st.rerun()
+
     st.divider()
     st.markdown("**🗄️ DB**")
     if st.button("🧪 Тест БД", key="db_test"):
@@ -901,12 +910,15 @@ def page_history():
     if len(history) > 1:
         st.divider()
         st.subheader("📊 Динамика Overall Score")
-        import json as _json
-        dates = [h["date"].strftime("%d.%m") for h in reversed(history)]
-        scores = [h["overall"] or 0 for h in reversed(history)]
-        chart_data = {"Дата": dates, "Overall %": scores}
         import pandas as pd
-        st.line_chart(pd.DataFrame(chart_data).set_index("Дата"))
+        _hist_rev = list(reversed(history))
+        dates  = [h["date"].strftime("%d.%m %H:%M") for h in _hist_rev]
+        scores = [h["overall"] or 0 for h in _hist_rev]
+        df_chart = pd.DataFrame({"Overall %": scores}, index=dates)
+        if len(scores) <= 3:
+            st.bar_chart(df_chart, color="#3b82f6")
+        else:
+            st.line_chart(df_chart)
 
     # Full history table
     st.divider()
@@ -973,7 +985,11 @@ def page_history():
     # Show if currently viewing historical snapshot
     if st.session_state.get("_hist_loaded"):
         _hl = st.session_state["_hist_loaded"]
-        st.info(f"📅 Просматриваешь: {_hl} | Для возврата нажми 🔄 Перезапустить анализ")
+        st.info(f"📅 Просматриваешь: {_hl}")
+        if st.button("↩️ Вернуться к текущему анализу", type="primary", use_container_width=True):
+            st.session_state.pop("_hist_loaded", None)
+            st.session_state["page"] = "🏠 Обзор"
+            st.rerun()
 
     # Show competitor snapshot from latest analysis
     if history:
