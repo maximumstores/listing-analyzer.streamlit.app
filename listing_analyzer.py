@@ -230,9 +230,6 @@ def scrapingdog_product(asin, log):
                 if ra.ok:
                     adata = ra.json()
                     data["aplus_content"] = str(adata)[:2000]
-                    # Log top-level keys to understand structure
-                    _top_keys = list(adata.keys()) if isinstance(adata, dict) else f"type={type(adata).__name__}"
-                    log(f"  🔍 A+ keys: {_top_keys}")
                     # Extract ALL image URLs recursively
                     _aplus_imgs = []
                     def _extract_urls(obj, depth=0):
@@ -247,13 +244,30 @@ def scrapingdog_product(asin, log):
                         elif isinstance(obj, str) and obj.startswith("http") and any(x in obj.lower() for x in [".jpg",".png",".jpeg",".webp"]):
                             _aplus_imgs.append(obj)
                     _extract_urls(adata)
-                    # A+ banners at /images/S/, product photos at /images/I/
                     _aplus_banners = [u for u in _aplus_imgs if "/images/S/" in u]
                     data["aplus_image_urls"] = list(dict.fromkeys(_aplus_banners))[:6]
-                    log(f"  ✅ A+ ({len(str(adata))} chars) | /S/ баннеров: {len(data['aplus_image_urls'])} из {len(_aplus_imgs)}")
-                    for _u in data["aplus_image_urls"][:2]:
-                        log(f"  🖼 {_u[:90]}")
+                    log(f"  ✅ A+ API: /S/ баннеров: {len(data['aplus_image_urls'])}")
             except: pass
+
+            # Fallback: scrape HTML page directly to find /images/S/ A+ banner URLs
+            if not data.get("aplus_image_urls"):
+                try:
+                    log("  🔍 Fallback: парсю HTML страницы для A+ баннеров...")
+                    rh = requests.get("https://api.scrapingdog.com/scrape",
+                        params={"api_key": sd_key, "url": f"https://www.amazon.com/dp/{asin}", "dynamic": "false"}, timeout=60)
+                    if rh.ok:
+                        html = rh.text
+                        # Find all /images/S/ URLs in HTML
+                        import re as _re2
+                        _pat = r"https://m\.media-amazon\.com/images/S/[^\s\"'<>]+\.jpg"
+                        _s_urls = _re2.findall(_pat, html)
+                        _s_urls = [u for u in _s_urls if "aplus" in u.lower() or len(u) > 60]
+                        data["aplus_image_urls"] = list(dict.fromkeys(_s_urls))[:6]
+                        log(f"  ✅ HTML fallback: найдено /S/ баннеров: {len(data['aplus_image_urls'])}")
+                        for _u in data["aplus_image_urls"][:2]:
+                            log(f"  🖼 {_u[:90]}")
+                except Exception as _fe:
+                    log(f"  ⚠️ HTML fallback: {_fe}")
         # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin","images"]:
@@ -2021,4 +2035,4 @@ elif _is_competitor_page:
         _csizes  = c.get("customization_options",{}).get("size",[])
         _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
         st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
-        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}") 
+        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
