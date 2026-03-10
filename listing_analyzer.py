@@ -631,6 +631,14 @@ with st.sidebar:
         for icon, label in NAV_ITEMS:
             st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
 
+    # История — всегда видна в сайдбаре
+    st.divider()
+    _cur3 = st.session_state.get("page","")
+    if st.button("📈  История", key="nav_history", use_container_width=True,
+                 type="primary" if _cur3=="📈 История" else "secondary"):
+        st.session_state["page"] = "📈 История"
+        st.rerun()
+
     st.divider()
     st.markdown("**🔑 API**")
     if st.button("🧪 Anthropic", key="api_test"):
@@ -1694,4 +1702,4 @@ elif _is_competitor_page:
         _csizes  = c.get("customization_options",{}).get("size",[])
         _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
         st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
-        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}") 
+        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
