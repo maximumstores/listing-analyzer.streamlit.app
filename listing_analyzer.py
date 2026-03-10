@@ -4,8 +4,8 @@ from PIL import Image
 import io
 
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL      = "claude-3-haiku-20240307"   # text analysis (fast+cheap)
-ANTHROPIC_MODEL_VISION = "claude-sonnet-4-5"  # vision (accurate)
+ANTHROPIC_MODEL        = "claude-sonnet-4-5"  # text analysis
+ANTHROPIC_MODEL_VISION = "claude-sonnet-4-5"  # vision
 
 SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
 
@@ -294,10 +294,12 @@ Analyze the listing above and score each component. Use ONLY real data from the 
 
 ### DESCRIPTION — HTML formatted, covers Benefits/Features/Care/Usage
 - 90-100%: ≤2000 words, HTML, storytelling, all sections covered
-- 70-89%: Decent but poor formatting
+- 70-89%: Decent but poor formatting or short
 - 0-49%: Missing or duplicate of bullets
+- CRITICAL: If description field is empty or missing → description_score MUST be "0%". No exceptions.
 
 ### IMAGES — Evaluate: main image (40%), gallery completeness (30%), OCR readability for Rufus (30%)
+- IMPORTANT: If vision analysis shows main image has violations (non-product items, wrong background) → images_score MAX 70%
 - Main 90-100%: Unique angle, shows product in action, clear at thumbnail
 - Gallery 90-100%: 6+ images: lifestyle, infographics, size/scale, packaging, variants
 - OCR 90-100%: Dark text on white background, sans-serif, horizontal layout
@@ -887,7 +889,15 @@ elif page == "📝 Контент":
         ("Нет повторов (≥3×)",   "10%", not _has_repeat,  "повтор найден" if _has_repeat else ""),
         ("Читаемость / цель",    "30%", True,             ""),
     ]
+    _ai_title_score = pct(r.get("title_score", 0))
+    _auto_title_score = sum(int(_ok) * int(_wt.strip("%")) for _,_wt,_ok,_ in _title_rubric)
     with st.expander("📐 Рубрика оценки Title"):
+        _sc1, _sc2 = st.columns(2)
+        _sc1.metric("🤖 AI оценка", f"{_ai_title_score}%")
+        _sc2.metric("🔧 Авто-проверка", f"{_auto_title_score}%",
+                    delta=f"{_ai_title_score - _auto_title_score:+d}%" if _ai_title_score != _auto_title_score else None,
+                    delta_color="normal")
+        st.divider()
         _th = st.columns([4,1,1,3])
         for _h,_lbl in zip(_th,["Критерий","Вес","Статус","Детали"]): _h.caption(f"**{_lbl}**")
         for _crit,_wt,_ok,_det in _title_rubric:
@@ -910,7 +920,15 @@ elif page == "📝 Контент":
         ("Нет ALL CAPS блоков",     "15%", not any(b[:15].isupper() for b in our_bullets), ""),
         ("Покрывает возражения",    "10%", True, "уход, размер, совместимость"),
     ]
+    _ai_bul_score = pct(r.get("bullets_score", 0))
+    _auto_bul_score = sum(int(_ok) * int(_wt.strip("%")) for _,_wt,_ok,_ in _bul_rubric)
     with st.expander("📐 Рубрика оценки Bullets"):
+        _bs1, _bs2 = st.columns(2)
+        _bs1.metric("🤖 AI оценка", f"{_ai_bul_score}%")
+        _bs2.metric("🔧 Авто-проверка", f"{_auto_bul_score}%",
+                    delta=f"{_ai_bul_score - _auto_bul_score:+d}%" if _ai_bul_score != _auto_bul_score else None,
+                    delta_color="normal")
+        st.divider()
         _bh = st.columns([4,1,1,3])
         for _h,_lbl in zip(_bh,["Критерий","Вес","Статус","Детали"]): _h.caption(f"**{_lbl}**")
         for _crit,_wt,_ok,_det in _bul_rubric:
@@ -1417,12 +1435,13 @@ elif _is_competitor_page:
                     _ptyp = re.search(r"(?:[Тт]ип|Type):\s*(.+)", _ptext)
                     _pstrg = re.search(r"(?:[Сс]ильная сторона|Strength):\s*(.+)", _ptext)
                     _pweak = re.search(r"(?:[Сс]лабость|Weakness):\s*(.+)", _ptext)
+                    _cstrip = lambda s: s.strip().strip("*").strip() if s else ""
                     with st.container(border=True):
                         _pc1,_pc2 = st.columns([1,2])
                         with _pc1:
                             st.image(__import__("base64").b64decode(_pimg["b64"]), use_container_width=True)
                         with _pc2:
-                            st.markdown(f"**Фото #{_pi3+1} — {_ptyp.group(1).strip() if _ptyp else ''}**")
+                            st.markdown(f"**Фото #{_pi3+1} — {_cstrip(_ptyp.group(1)) if _ptyp else ''}**")
                             st.markdown(
                                 f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">'
                                 f'<div style="font-size:2rem;font-weight:800;color:{_pbc}">{_pscore}/10</div>'
@@ -1430,8 +1449,8 @@ elif _is_competitor_page:
                                 f'<div style="background:{_pbc};width:{_pscore*10}%;height:10px;border-radius:6px"></div>'
                                 f'</div><div style="color:{_pbc};font-size:0.8rem;margin-top:2px">{_pslbl}</div></div></div>',
                                 unsafe_allow_html=True)
-                            if _pstrg: st.success(f"✅ {_pstrg.group(1).strip()}")
-                            if _pweak: st.warning(f"⚠️ {_pweak.group(1).strip()}")
+                            if _pstrg: st.success(f"✅ {_cstrip(_pstrg.group(1))}")
+                            if _pweak: st.warning(f"⚠️ {_cstrip(_pweak.group(1))}")
             else:
                 # Show photos without analysis
                 for _rs in range(0, min(len(_cimgs),9), 3):
