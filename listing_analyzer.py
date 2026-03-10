@@ -8,11 +8,19 @@ from datetime import datetime
 def get_db():
     """Get DB connection from Streamlit secrets"""
     try:
-        import psycopg2
+        import pg8000.native
         db_url = st.secrets.get("DATABASE_URL","")
         if not db_url: return None
-        return psycopg2.connect(db_url, sslmode="require")
-    except Exception:
+        # Parse postgresql://user:pass@host:port/db
+        import re as _re
+        m = _re.match(r"postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)", db_url)
+        if not m: return None
+        return pg8000.native.Connection(
+            user=m.group(1), password=m.group(2),
+            host=m.group(3), port=int(m.group(4)),
+            database=m.group(5), ssl_context=True
+        )
+    except Exception as _e:
         return None
 
 def db_init():
@@ -20,101 +28,84 @@ def db_init():
     conn = get_db()
     if not conn: return
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS listing_analysis (
-                    id SERIAL PRIMARY KEY,
-                    asin TEXT NOT NULL,
-                    analyzed_at TIMESTAMP DEFAULT NOW(),
-                    overall_score INT,
-                    title_score INT,
-                    bullets_score INT,
-                    images_score INT,
-                    aplus_score INT,
-                    cosmo_score INT,
-                    rufus_score INT,
-                    result_json TEXT,
-                    vision_text TEXT,
-                    our_title TEXT
-                )
-            """)
-            conn.commit()
-    except Exception as e:
+        conn.run("""
+            CREATE TABLE IF NOT EXISTS listing_analysis (
+                id SERIAL PRIMARY KEY,
+                asin TEXT NOT NULL,
+                analyzed_at TIMESTAMP DEFAULT NOW(),
+                overall_score INT,
+                title_score INT,
+                bullets_score INT,
+                images_score INT,
+                aplus_score INT,
+                cosmo_score INT,
+                rufus_score INT,
+                result_json TEXT,
+                vision_text TEXT,
+                our_title TEXT
+            )
+        """)
+    except Exception:
         pass
-    finally:
-        conn.close()
 
 def db_save(asin, result, vision_text, our_title):
     """Save analysis result to DB"""
     conn = get_db()
     if not conn: return False
     try:
-        with conn.cursor() as cur:
-            cosmo = pct(result.get("cosmo_analysis",{}).get("score",0)) if isinstance(result.get("cosmo_analysis"),dict) else 0
-            rufus = pct(result.get("rufus_analysis",{}).get("score",0)) if isinstance(result.get("rufus_analysis"),dict) else 0
-            cur.execute("""
-                INSERT INTO listing_analysis
-                  (asin, overall_score, title_score, bullets_score, images_score, 
-                   aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (
-                asin,
-                pct(result.get("overall_score",0)),
-                pct(result.get("title_score",0)),
-                pct(result.get("bullets_score",0)),
-                pct(result.get("images_score",0)),
-                pct(result.get("aplus_score",0)),
-                cosmo, rufus,
-                json.dumps(result, ensure_ascii=False),
-                vision_text or "",
-                our_title or ""
-            ))
-            conn.commit()
+        cosmo = pct(result.get("cosmo_analysis",{}).get("score",0)) if isinstance(result.get("cosmo_analysis"),dict) else 0
+        rufus = pct(result.get("rufus_analysis",{}).get("score",0)) if isinstance(result.get("rufus_analysis"),dict) else 0
+        conn.run("""
+            INSERT INTO listing_analysis
+              (asin, overall_score, title_score, bullets_score, images_score,
+               aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title)
+            VALUES (:asin,:overall,:title,:bullets,:images,:aplus,:cosmo,:rufus,:rjson,:vision,:our_title)
+        """, asin=asin,
+             overall=pct(result.get("overall_score",0)),
+             title=pct(result.get("title_score",0)),
+             bullets=pct(result.get("bullets_score",0)),
+             images=pct(result.get("images_score",0)),
+             aplus=pct(result.get("aplus_score",0)),
+             cosmo=cosmo, rufus=rufus,
+             rjson=json.dumps(result, ensure_ascii=False),
+             vision=vision_text or "",
+             our_title=our_title or "")
         return True
-    except Exception as e:
+    except Exception:
         return False
-    finally:
-        conn.close()
 
 def db_history(asin, limit=10):
     """Get analysis history for ASIN"""
     conn = get_db()
     if not conn: return []
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT analyzed_at, overall_score, title_score, bullets_score,
-                       images_score, aplus_score, cosmo_score, rufus_score, our_title
-                FROM listing_analysis
-                WHERE asin = %s
-                ORDER BY analyzed_at DESC
-                LIMIT %s
-            """, (asin, limit))
-            rows = cur.fetchall()
-            return [{"date": r[0], "overall": r[1], "title": r[2], "bullets": r[3],
-                     "images": r[4], "aplus": r[5], "cosmo": r[6], "rufus": r[7], "our_title": r[8]}
-                    for r in rows]
+        rows = conn.run("""
+            SELECT analyzed_at, overall_score, title_score, bullets_score,
+                   images_score, aplus_score, cosmo_score, rufus_score, our_title
+            FROM listing_analysis
+            WHERE asin = :asin
+            ORDER BY analyzed_at DESC
+            LIMIT :limit
+        """, asin=asin, limit=limit)
+        return [{"date": r[0], "overall": r[1], "title": r[2], "bullets": r[3],
+                 "images": r[4], "aplus": r[5], "cosmo": r[6], "rufus": r[7], "our_title": r[8]}
+                for r in rows]
     except Exception:
         return []
-    finally:
-        conn.close()
 
 def db_all_asins():
     """List all ASINs with latest score"""
     conn = get_db()
     if not conn: return []
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at
-                FROM listing_analysis
-                ORDER BY asin, analyzed_at DESC
-            """)
-            return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3]} for r in cur.fetchall()]
+        rows = conn.run("""
+            SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at
+            FROM listing_analysis
+            ORDER BY asin, analyzed_at DESC
+        """)
+        return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3]} for r in rows]
     except Exception:
         return []
-    finally:
-        conn.close()
 
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL        = "claude-sonnet-4-5"  # text analysis
@@ -640,6 +631,24 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
+    st.markdown("**🗄️ DB**")
+    if st.button("🧪 Тест БД", key="db_test"):
+        db_url = st.secrets.get("DATABASE_URL","")
+        if not db_url:
+            st.sidebar.error("❌ DATABASE_URL не найден")
+        else:
+            conn = get_db()
+            if not conn:
+                st.sidebar.error("❌ get_db() = None")
+            else:
+                try:
+                    db_init()
+                    rows = conn.run("SELECT COUNT(*) FROM listing_analysis")
+                    st.sidebar.success(f"✅ БД OK | {rows[0][0]} записей")
+                except Exception as e:
+                    st.sidebar.error(f"❌ {e}")
+
+    st.divider()
     st.markdown("**🔑 API**")
     if st.button("🧪 Anthropic", key="api_test"):
         try:
@@ -776,6 +785,25 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
 
 def page_history():
     st.title("📈 История анализов")
+
+    # Debug: test DB connection
+    with st.expander("🔧 Диагностика БД"):
+        db_url = st.secrets.get("DATABASE_URL","")
+        if not db_url:
+            st.error("❌ DATABASE_URL не найден в Secrets")
+        else:
+            st.success(f"✅ DATABASE_URL найден ({db_url[:30]}...)")
+            try:
+                _tc = get_db()
+                if _tc:
+                    rows = _tc.run("SELECT COUNT(*) FROM listing_analysis")
+                    cnt = rows[0][0]
+                    st.success(f"✅ Подключение ОК | Записей в таблице: {cnt}")
+                else:
+                    st.error("❌ get_db() вернул None — проверь URL и pg8000")
+            except Exception as e:
+                st.error(f"❌ Ошибка БД: {e}")
+
     all_asins = db_all_asins()
     if not all_asins:
         st.info("История пуста — запусти первый анализ")
