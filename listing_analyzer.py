@@ -1483,7 +1483,7 @@ elif page == "📝 Контент":
                     else:
                         st.markdown(f"**Баннер #{_bi+1}**")
                         st.markdown(_block)
-    elif our_data.get("aplus"):
+    elif st.session_state.get("our_data",{}).get("aplus"):
         st.info("🎨 A+ есть, но баннеры не загружены. Перезапусти анализ для Vision A+.")
 
     st.divider()
