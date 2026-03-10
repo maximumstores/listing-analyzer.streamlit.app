@@ -866,7 +866,7 @@ def page_history():
     # ASIN selector
     asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
     sel = st.selectbox("ASIN", asin_opts)
-    sel_asin = sel.split(" — ")[0]
+    sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
 
     history = db_history(sel_asin, limit=20)
     if not history:
