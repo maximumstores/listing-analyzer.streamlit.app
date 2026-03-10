@@ -344,7 +344,7 @@ CRITICAL RULES:
 {SCHEMA}"""
 
     sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text in {lang_name}."
-    raw = anthropic_call(sys_prompt, prompt, max_tokens=4000)
+    raw = anthropic_call(sys_prompt, prompt, max_tokens=8000)
     log(f"✅ JSON: {len(raw)} chars")
 
     s = raw.strip().replace("```json","").replace("```","").strip()
