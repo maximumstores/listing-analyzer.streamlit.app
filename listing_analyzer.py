@@ -229,7 +229,21 @@ def scrapingdog_product(asin, log):
                 if ra.ok:
                     adata = ra.json()
                     data["aplus_content"] = str(adata)[:2000]
-                    log(f"  ✅ A+ контент получен ({len(str(adata))} chars)")
+                    # Extract A+ image URLs from response
+                    _aplus_imgs = []
+                    def _extract_urls(obj):
+                        if isinstance(obj, dict):
+                            for k, v in obj.items():
+                                if k in ("image","img","url","src") and isinstance(v,str) and v.startswith("http") and any(x in v for x in [".jpg",".png",".jpeg",".webp"]):
+                                    _aplus_imgs.append(v)
+                                else: _extract_urls(v)
+                        elif isinstance(obj, list):
+                            for i in obj: _extract_urls(i)
+                        elif isinstance(obj, str) and obj.startswith("http") and any(x in obj for x in [".jpg",".png",".jpeg"]):
+                            _aplus_imgs.append(obj)
+                    _extract_urls(adata)
+                    data["aplus_image_urls"] = list(dict.fromkeys(_aplus_imgs))[:6]
+                    log(f"  ✅ A+ контент получен ({len(str(adata))} chars) | {len(data['aplus_image_urls'])} A+ изображений")
             except: pass
         # Extract image URLs
         urls = []
@@ -364,6 +378,65 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
     result = "\n\n".join(results)
     log(f"✅ Vision готово: {len(images)} фото")
     return result
+
+# ── A+ Vision ─────────────────────────────────────────────────────────────────
+def analyze_aplus_vision(aplus_urls, product_data, log, lang=None):
+    """Download A+ banner images and analyze with Vision"""
+    if not aplus_urls: return ""
+    if lang is None:
+        lang = st.session_state.get("analysis_lang", "ru")
+
+    images = []
+    for i, url in enumerate(aplus_urls[:6]):
+        try:
+            r = requests.get(url, timeout=15, headers={"User-Agent":"Mozilla/5.0"})
+            if r.ok and len(r.content) > 1000:
+                data_img, mt = compress_image(r.content)
+                images.append({"b64": base64.b64encode(data_img).decode(), "media_type": mt})
+                log(f"  📥 A+ баннер {i+1}: {len(data_img)//1024}KB ✅")
+        except Exception as e:
+            log(f"  ⚠️ A+ баннер {i+1}: {e}")
+    if not images: return ""
+
+    title = product_data.get("title","")
+    if lang == "en":
+        sys_prompt = f"""You are an Amazon A+ Content expert. Analyze each A+ banner/module.
+Product: {title}
+
+For each image output EXACTLY:
+APLUS_BLOCK_{{i}}
+Module: [comparison-table | lifestyle | feature-highlight | brand-story | size-guide | product-range | other]
+Summary: [what this module shows — 1-2 sentences]
+Score: X/10
+Strength: [1 specific strength]
+Gap: [1 concrete improvement]"""
+    else:
+        sys_prompt = f"""Ты эксперт по Amazon A+ Content. Анализируй каждый A+ баннер.
+Товар: {title}
+
+Для каждого изображения выводи СТРОГО:
+APLUS_BLOCK_{{i}}
+Модуль: [сравнительная-таблица | lifestyle | highlight-фич | brand-story | таблица-размеров | линейка-продуктов | другой]
+Содержание: [что показывает — 1-2 предложения]
+Оценка: X/10
+Сильная сторона: [1 конкретная]
+Улучшение: [1 конкретное]"""
+
+    msg_content = []
+    for i, img in enumerate(images):
+        msg_content.append({"type":"text","text":f"{'A+ banner' if lang=='en' else 'A+ баннер'} #{i+1}:"})
+        msg_content.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
+
+    try:
+        client = anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY",""), timeout=120)
+        resp = client.messages.create(
+            model=ANTHROPIC_MODEL_VISION, max_tokens=2000,
+            system=sys_prompt,
+            messages=[{"role":"user","content":msg_content}]
+        )
+        return resp.content[0].text if resp.content else ""
+    except Exception as e:
+        log(f"⚠️ A+ Vision: {e}"); return ""
 
 # ── Text analysis ─────────────────────────────────────────────────────────────
 def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang="ru"):
@@ -548,6 +621,19 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     _prog(30, "👁️ Vision анализ фото...")
     vision_result = analyze_vision(images, our_data, asin, log, lang=_lang) if images else ""
     if not images: log("⚠️ Фото не загружены")
+
+    # A+ Vision — analyze A+ banners if available
+    _aplus_urls = our_data.get("aplus_image_urls", [])
+    if _aplus_urls:
+        _prog(35, f"🎨 A+ Vision: {len(_aplus_urls)} баннеров...")
+        aplus_vision = analyze_aplus_vision(_aplus_urls, our_data, log, lang=_lang)
+        st.session_state["aplus_vision"] = aplus_vision
+        st.session_state["aplus_img_urls"] = _aplus_urls
+        log(f"✅ A+ Vision: {len(_aplus_urls)} баннеров проанализировано")
+    else:
+        st.session_state["aplus_vision"] = ""
+        st.session_state["aplus_img_urls"] = []
+        log("ℹ️ A+ баннеры не найдены (нет aplus_image_urls)")
 
     # Competitors — full analysis (scrape + vision + AI) for each
     active = [u.strip() for u in competitor_urls if u.strip()]
@@ -1375,6 +1461,31 @@ elif page == "📝 Контент":
     _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
     st.divider()
     _sec("A+",          "aplus_score")
+
+    # A+ Vision banners analysis
+    _av = st.session_state.get("aplus_vision","")
+    _av_urls = st.session_state.get("aplus_img_urls",[])
+    if _av:
+        with st.expander("🎨 A+ Vision — визуальный анализ баннеров", expanded=True):
+            _av_blocks = re.split(r"APLUS_BLOCK_\d+", _av)
+            _av_blocks = [b.strip() for b in _av_blocks if b.strip()]
+            for _bi, _block in enumerate(_av_blocks):
+                with st.container(border=True):
+                    cols_av = st.columns([1,2]) if _bi < len(_av_urls) else [None, None]
+                    if _av_urls and _bi < len(_av_urls):
+                        with cols_av[0]:
+                            st.image(_av_urls[_bi], use_container_width=True)
+                        with cols_av[1]:
+                            st.markdown(f"**Баннер #{_bi+1}**")
+                            for _line in _block.split("\n"):
+                                if _line.strip():
+                                    st.markdown(_line)
+                    else:
+                        st.markdown(f"**Баннер #{_bi+1}**")
+                        st.markdown(_block)
+    elif our_data.get("aplus"):
+        st.info("🎨 A+ есть, но баннеры не загружены. Перезапусти анализ для Vision A+.")
+
     st.divider()
     _sec("Фото",        "images_score")
 
