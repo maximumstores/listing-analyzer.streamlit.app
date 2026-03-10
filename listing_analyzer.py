@@ -1,8 +1,4 @@
-"""
-listing_analyzer.py — Amazon Listing Analyzer
-ScrapingDog Product API → фото → Claude Vision + текстовый анализ
-Secrets: ANTHROPIC_API_KEY, SCRAPINGDOG_API_KEY
-"""
+# Amazon Listing Analyzer v2 — MR.EQUIPP
 import json, re, base64, requests, streamlit as st
 from PIL import Image
 import io
@@ -10,21 +6,9 @@ import io
 ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-3-haiku-20240307"
 
-SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
+SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
 
-"""
-listing_analyzer.py — Amazon Listing Analyzer
-ScrapingDog Product API → фото → Claude Vision + текстовый анализ
-Secrets: ANTHROPIC_API_KEY, SCRAPINGDOG_API_KEY
-"""
-import json, re, base64, requests, streamlit as st
-from PIL import Image
-import io
 
-ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL = "claude-3-haiku-20240307"
-
-SCHEMA = '{"overall_score":"72%","title_score":"85%","bullets_score":"70%","description_score":"0%","images_score":"75%","qa_score":"50%","reviews_score":"80%","aplus_score":"65%","price_score":"70%","availability_score":"90%","average_rating_score":"80%","total_reviews_score":"70%","bsr_score":"60%","keywords_score":"50%","prime_score":"100%","returns_score":"70%","customization_score":"80%","first_available_score":"60%","images_breakdown":{"main_image":"80% - модель на белом фоне, хорошая видимость товара","gallery":"70% - 5 фото, нет размерной сетки и lifestyle","ocr_readability":"75% - текст читаем, но мелкий шрифт на баннере"},"cosmo_analysis":{"score":"65%","signals_present":["Use Cases: базовый слой для спорта","Audience: мужчины","Material: 100% merino wool","Gender: мужской"],"signals_missing":["Season: не указан температурный диапазон","Compatibility: нет упоминания совместимости с другой одеждой","Skill Level: нет указания на уровень активности"]},"rufus_analysis":{"score":"60%","issues":["Нет ответов на вопрос об уходе за изделием","Инструкция по стирке отсутствует","Нет сравнения с синтетическими аналогами"]},"priority_improvements":["1. Добавить описание товара с HTML-разметкой","2. Добавить инструкцию по уходу в буллеты","3. Улучшить OCR читаемость инфографики — крупный шрифт, белый фон"],"missing_chars":[{"name":"Инструкция по уходу","how_competitors_use":"Конкуренты пишут машинная стирка 30°C в буллете #5","priority":"HIGH"}],"tech_params":[{"param":"Вес ткани (GSM)","competitor_value":"160 GSM у топ-конкурентов","our_gap":"GSM не указан нигде в листинге"}],"actions":[{"action":"Написать описание товара","impact":"HIGH","effort":"LOW","details":"300-500 слов с HTML: заголовки, сценарии использования, FAQ"},{"action":"Добавить GSM в title","impact":"HIGH","effort":"LOW","details":"Вставить 160GSM после Merino Wool в заголовок"}]}'
 def get_asin(url):
     m = re.search(r'/dp/([A-Z0-9]{10})', url)
     return m.group(1) if m else None
@@ -309,6 +293,12 @@ CRITICAL RULES:
 - Use REAL data from the listing — no placeholder text
 - overall_score = weighted average of all 17 scores
 - images_score = 40% main + 30% gallery + 30% OCR combined
+- title_gaps: list of 2-3 specific issues with the title
+- bullets_gaps: list of 2-3 specific issues with the bullets
+- description_gaps: list of 1-2 specific issues with the description
+- aplus_gaps: list of 1-2 specific issues with the A+ content
+- images_gaps: list of 1-2 specific issues with the images
+- Each gap must be specific to THAT section, not generic
 
 {SCHEMA}"""
 
@@ -469,15 +459,17 @@ with st.sidebar:
 # ── Input always visible at top ───────────────────────────────────────────────
 with st.expander("📎 Листинги", expanded=("result" not in st.session_state)):
     our_url = st.text_input("🔵 НАШ листинг", value=st.session_state.get("our_url_saved","https://www.amazon.com/dp/B0D6WBQ7G1"))
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4, c5 = st.columns(5)
     comp1 = c1.text_input("Конкурент 1", key="c0", value=st.session_state.get("c0_saved",""), placeholder="https://www.amazon.com/dp/...")
     comp2 = c2.text_input("Конкурент 2", key="c1", value=st.session_state.get("c1_saved",""), placeholder="https://www.amazon.com/dp/...")
     comp3 = c3.text_input("Конкурент 3", key="c2", value=st.session_state.get("c2_saved",""), placeholder="https://www.amazon.com/dp/...")
-    competitor_urls = [comp1, comp2, comp3]
+    comp4 = c4.text_input("Конкурент 4", key="c3", value=st.session_state.get("c3_saved",""), placeholder="https://www.amazon.com/dp/...")
+    comp5 = c5.text_input("Конкурент 5", key="c4", value=st.session_state.get("c4_saved",""), placeholder="https://www.amazon.com/dp/...")
+    competitor_urls = [comp1, comp2, comp3, comp4, comp5]
 
     # Detect what changed
     prev_url  = st.session_state.get("our_url_saved","")
-    prev_comp = [st.session_state.get(f"c{i}_saved","") for i in range(3)]
+    prev_comp = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
     curr_comp = competitor_urls
     our_changed  = (our_url.strip() != prev_url.strip())
     new_comps    = [u for u,p in zip(curr_comp,prev_comp) if u.strip() and u.strip()!=p.strip()]
@@ -549,6 +541,8 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     st.session_state["c0_saved"] = comp1
                     st.session_state["c1_saved"] = comp2
                     st.session_state["c2_saved"] = comp3
+                    st.session_state["c3_saved"] = comp4
+                    st.session_state["c4_saved"] = comp5
                     st.session_state["ai_context_saved"] = st.session_state.get("ai_context","")
                 else:
                     # Only fetch new competitors
@@ -585,7 +579,61 @@ page = st.session_state.get("page", "🏠 Обзор")
 _is_competitor_page = page.startswith("🔴 Конкурент")
 
 if "result" not in st.session_state:
-    st.markdown("## 👈 Введи ссылки и нажми «Запустить анализ»")
+    st.markdown("""
+<div style="max-width:720px;margin:40px auto 0">
+<h1 style="font-size:2rem;font-weight:800;margin-bottom:4px">🔍 Amazon Listing Analyzer</h1>
+<p style="color:#64748b;font-size:1rem;margin-bottom:32px">Listing 3.0 — AI-анализ на основе COSMO + Rufus + Vision</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px">
+
+<div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #3b82f6">
+<div style="font-weight:700;margin-bottom:8px">⚡ Что делает инструмент</div>
+<div style="font-size:0.88rem;color:#475569;line-height:1.6">
+• Загружает данные листинга через ScrapingDog API<br>
+• Анализирует <b>17 метрик</b> по рубрику Listing 3.0<br>
+• Vision AI оценивает каждое фото по 6 критериям<br>
+• Проверяет как Cosmo и Rufus понимают товар<br>
+• Сравнивает до 5 конкурентов
+</div>
+</div>
+
+<div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #10b981">
+<div style="font-weight:700;margin-bottom:8px">🚀 Как запустить</div>
+<div style="font-size:0.88rem;color:#475569;line-height:1.6">
+1. Вставь ссылку на <b>наш листинг</b> (Amazon URL)<br>
+2. Добавь ссылки на <b>конкурентов</b> (до 5 штук)<br>
+3. Выбери язык и фокус анализа<br>
+4. Нажми <b>🚀 Запустить анализ</b><br>
+5. Подожди ~2-3 мин — анализ всех листингов
+</div>
+</div>
+
+<div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #f59e0b">
+<div style="font-weight:700;margin-bottom:8px">📊 Что получишь</div>
+<div style="font-size:0.88rem;color:#475569;line-height:1.6">
+• <b>Overall Score</b> — итоговый балл листинга<br>
+• <b>Vision анализ</b> — оценка каждого фото 1-10<br>
+• <b>Benchmark</b> — подиум vs конкуренты<br>
+• <b>COSMO / Rufus</b> — AI-видимость товара<br>
+• <b>Приоритетные действия</b> — что улучшить
+</div>
+</div>
+
+<div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #8b5cf6">
+<div style="font-weight:700;margin-bottom:8px">💡 Советы</div>
+<div style="font-size:0.88rem;color:#475569;line-height:1.6">
+• Используй <b>Русский</b> для внутреннего анализа<br>
+• <b>English</b> — для листингов на .com рынке<br>
+• Заполни <b>Фокус анализа</b> для точных рек.<br>
+• Кнопка <b>🗑️ Сброс</b> — полная очистка данных<br>
+• Анализ кэшируется — можно листать без перезапуска
+</div>
+</div>
+
+</div>
+<p style="text-align:center;color:#94a3b8;font-size:0.8rem">👈 Введи ссылку на листинг в форме выше и нажми «Запустить анализ»</p>
+</div>
+""", unsafe_allow_html=True)
     st.stop()
 
 r  = st.session_state["result"]
@@ -768,7 +816,8 @@ elif page == "📝 Контент":
 
     def _sec(label, key, **kw):
         val = pct(r.get(key, 0))
-        gaps = r.get(key.replace("_score","_gaps"), r.get("priority_improvements",[]))
+        # Use section-specific gaps only — no fallback to priority_improvements
+        gaps = r.get(key.replace("_score","_gaps"), [])
         rec  = r.get(key.replace("_score","_rec"), "")
         sc2  = sc_pct(val)
         c1,c2 = st.columns([4,1])
@@ -784,10 +833,51 @@ elif page == "📝 Контент":
                 for g in gaps: st.markdown(f"- {g}")
         if rec: st.info(f"💡 {rec}")
 
-    _sec("Title",       "title_score",       raw_text=our_title, char_limit=125)
+    # ── Title ──────────────────────────────────────────────────────────────────
+    _sec("Title", "title_score", raw_text=our_title, char_limit=125)
+    _tlen = len(our_title)
+    _twords = [w.lower() for w in our_title.split() if len(w)>3]
+    _has_repeat = any(_twords.count(w)>=3 for w in _twords)
+    _has_spec = any(c in our_title for c in "!$?{}^¬¦")
+    _has_kw = any(w in our_title.lower() for w in ["merino","wool","tank","men","undershirt","shirt","layer"])
+    _title_rubric = [
+        ("Длина ≤125 симв.",     "15%", _tlen<=125,       f"{_tlen} симв."),
+        ("Бренд+тип+материал",   "35%", _has_kw,          "ключевые слова есть" if _has_kw else "❌ нет ключевых слов"),
+        ("Нет спецсимволов",     "10%", not _has_spec,    "есть ! $ ?" if _has_spec else ""),
+        ("Нет повторов (≥3×)",   "10%", not _has_repeat,  "повтор найден" if _has_repeat else ""),
+        ("Читаемость / цель",    "30%", True,             ""),
+    ]
+    with st.expander("📐 Рубрика оценки Title"):
+        _th = st.columns([4,1,1,3])
+        for _h,_lbl in zip(_th,["Критерий","Вес","Статус","Детали"]): _h.caption(f"**{_lbl}**")
+        for _crit,_wt,_ok,_det in _title_rubric:
+            _rc = st.columns([4,1,1,3])
+            _rc[0].write(_crit); _rc[1].write(f"`{_wt}`"); _rc[2].write("✅" if _ok else "❌")
+            if _det: _rc[3].caption(_det)
+        st.divider()
+        _ex1,_ex2 = st.columns(2)
+        _ex1.success("✅ **Пример хорошего**\nMerino Wool Tank Top Men – Lightweight Base Layer for Hiking & Sport\n• <125 симв.  • бренд+матер+тип  • нет повторов")
+        _ex2.error("⛔ **Пример плохого**\nBEST WOOL TANK! WOOL WOOL FOR MEN - SUPER!\n• спецсимволы !  • повтор WOOL  • кричащий стиль")
+
     st.divider()
+    # ── Bullets ─────────────────────────────────────────────────────────────────
     bullets_text = "\n".join([f"• {b}" for b in our_bullets]) if our_bullets else ""
-    _sec("Bullets",     "bullets_score",     raw_text=bullets_text)
+    _sec("Bullets", "bullets_score", raw_text=bullets_text)
+    _bul_rubric = [
+        ("5 буллетов",              "20%", len(our_bullets)==5,                      f"{len(our_bullets)} шт."),
+        ("Формат «Фича: Выгода.»",  "30%", sum(1 for b in our_bullets if ":" in b)>=3, f"{sum(1 for b in our_bullets if ':' in b)}/5 с двоеточием"),
+        ("≤250 байт каждый",        "25%", all(len(b.encode())<250 for b in our_bullets), ""),
+        ("Нет ALL CAPS блоков",     "15%", not any(b[:15].isupper() for b in our_bullets), ""),
+        ("Покрывает возражения",    "10%", True, "уход, размер, совместимость"),
+    ]
+    with st.expander("📐 Рубрика оценки Bullets"):
+        _bh = st.columns([4,1,1,3])
+        for _h,_lbl in zip(_bh,["Критерий","Вес","Статус","Детали"]): _h.caption(f"**{_lbl}**")
+        for _crit,_wt,_ok,_det in _bul_rubric:
+            _rc = st.columns([4,1,1,3])
+            _rc[0].write(_crit); _rc[1].write(f"`{_wt}`"); _rc[2].write("✅" if _ok else "❌")
+            if _det: _rc[3].caption(_det)
+
     st.divider()
     _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
     st.divider()
