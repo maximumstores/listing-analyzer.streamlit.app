@@ -199,13 +199,31 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 ВАЖНО: Посмотри внимательно — есть ли на фото предметы которые НЕ являются продаваемым товаром? Если да — это нарушение, снять 2 балла и написать конкретно что именно нарушает правило."""
         block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона этого фото]\nСлабость: [ОБЯЗАТЕЛЬНО 1 конкретное улучшение только на основе ТОГО ЧТО ВИДИШЬ на этом фото. НИКОГДА не предлагай добавить то что уже есть на фото. Смотри на: заполнение кадра %, фон, лишние предметы не являющиеся товаром, текст/водяные знаки. Никогда не пиши 'Нет'.]"
 
-    blocks = [{"type":"text","text": intro}]
-    for i,img in enumerate(images):
-        blocks.append({"type":"text","text": block_fmt.format(i=i+1)})
-        blocks.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
+    # Analyze each photo individually for live progress
+    results = []
+    for i, img in enumerate(images):
+        log(f"👁️ Фото {i+1}/{len(images)} {'🔵' * (i+1)}{'⚪' * (len(images)-i-1)}")
+        is_main = (i == 0)
+        # For main image: include full checklist. For others: just rubric
+        if is_main:
+            photo_intro = intro
+        else:
+            # Shorter intro without main image checklist for non-main photos
+            if lang == "en":
+                photo_intro = f"You are an Amazon photo expert. Score this product photo (photo #{i+1}) using the rubric: +2 clarity, +2 background, +2 info value, +2 Amazon compliance, +1 appeal, +1 uniqueness. Product: {title}"
+            else:
+                photo_intro = f"Ты эксперт Amazon фотографий. Оцени это фото (#{i+1}) по рубрику: +2 чёткость, +2 фон, +2 инфоценность, +2 соответствие Amazon, +1 appeal, +1 уникальность. Товар: {title}"
 
-    result = anthropic_vision(blocks, max_tokens=2000)
-    log(f"✅ Vision: {len(result)} символов")
+        blocks = [
+            {"type":"text","text": photo_intro},
+            {"type":"text","text": block_fmt.format(i=i+1)},
+            {"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}}
+        ]
+        res = anthropic_vision(blocks, max_tokens=400)
+        results.append("PHOTO_BLOCK_" + str(i+1) + "\n" + res)
+
+    result = "\n\n".join(results)
+    log(f"✅ Vision готово: {len(images)} фото")
     return result
 
 # ── Text analysis ─────────────────────────────────────────────────────────────
@@ -799,9 +817,10 @@ elif page == "📸 Фото":
         # Broad regex: match Strength/Weakness labels + content on same line (3+ chars)
         strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
         weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
-        ptype = typ.group(1).strip().rstrip(".") if typ else ""
-        stxt  = strg.group(1).strip() if strg else ""
-        wtxt  = weak.group(1).strip() if weak else ""
+        _strip = lambda s: s.strip().strip("*").strip()
+        ptype = _strip(typ.group(1)) if typ else ""
+        stxt  = _strip(strg.group(1)) if strg else ""
+        wtxt  = _strip(weak.group(1)) if weak else ""
         # Filter useless "no weakness" answers
         if wtxt and any(x in wtxt.lower() for x in ["none", "n/a", "no weakness", "no notable weakness", "нет слабостей", "полностью соответствует требованиям"]):
             wtxt = ""
