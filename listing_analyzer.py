@@ -240,6 +240,9 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang=
     vision_section = f"\nPHOTO VISION ANALYSIS:\n{{vision_result[:1500]}}" if vision_result else ""
     lang_name = "Russian" if lang == "ru" else "English"
 
+    _ctx = st.session_state.get("ai_context_saved", st.session_state.get("ai_context","")).strip()
+    context_section = f"\n\n## BRAND CONTEXT (provided by seller):\n{_ctx}" if _ctx else ""
+
     prompt = f"""You are an expert Amazon listing analyst specializing in the Listing 3.0 era where AI visibility (Cosmo + Rufus) determines 50% of success.
 
 OUR LISTING (ASIN {asin}):
@@ -247,6 +250,7 @@ OUR LISTING (ASIN {asin}):
 
 {comp_text}
 {vision_section}
+{context_section}
 
 ## YOUR TASK
 Analyze the listing above and score each component. Use ONLY real data from the listing provided.
@@ -490,6 +494,37 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
     lang = st.radio("🌐 Язык анализа", ["🇷🇺 Русский", "🇺🇸 English"], horizontal=True, key="lang_sel")
     st.session_state["analysis_lang"] = "ru" if "Русский" in lang else "en"
 
+    with st.expander("🎯 Фокус анализа (необязательно)", expanded=False):
+        st.caption("Помогает AI расставить приоритеты")
+        _fa1, _fa2, _fa3 = st.columns(3)
+        with _fa1:
+            goal = st.radio("🎯 Цель", [
+                "Полный аудит",
+                "Поднять конверсию",
+                "Выйти в топ поиска",
+                "Победить конкурента",
+            ], key="goal_sel")
+        with _fa2:
+            audience = st.radio("👥 Аудитория", [
+                "Не указано",
+                "Спортсмены",
+                "Outdoor / туризм",
+                "Everyday / офис",
+                "Business casual",
+            ], key="aud_sel")
+        with _fa3:
+            positioning = st.radio("💰 Позиционирование", [
+                "Не указано",
+                "Бюджет",
+                "Средний сегмент",
+                "Премиум",
+            ], key="pos_sel")
+
+        _ctx_parts = [f"Analysis goal: {goal}"]
+        if audience != "Не указано":   _ctx_parts.append(f"Target audience: {audience}")
+        if positioning != "Не указано": _ctx_parts.append(f"Brand positioning: {positioning}")
+        st.session_state["ai_context"] = " | ".join(_ctx_parts)
+
     _bcol1, _bcol2 = st.columns([3, 1])
     with _bcol1:
         _run_btn = st.button(btn_label, type="primary", disabled=not our_url.strip(), use_container_width=True)
@@ -514,6 +549,7 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     st.session_state["c0_saved"] = comp1
                     st.session_state["c1_saved"] = comp2
                     st.session_state["c2_saved"] = comp3
+                    st.session_state["ai_context_saved"] = st.session_state.get("ai_context","")
                 else:
                     # Only fetch new competitors
                     existing = st.session_state.get("comp_data_list", [])
