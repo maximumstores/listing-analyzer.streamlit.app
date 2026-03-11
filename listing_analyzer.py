@@ -1364,9 +1364,11 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     story.append(Spacer(1, 10*mm))
     _asin_val = asin or our_data.get("parent_asin","") or "—"
+    story.append(Spacer(1, 8*mm))
     story.append(Paragraph("Amazon Listing Audit", S["title"]))
+    story.append(Spacer(1, 3*mm))
     story.append(HRFlowable(width=W, thickness=2, color=colors.HexColor("#3b82f6")))
-    story.append(Spacer(1, 4*mm))
+    story.append(Spacer(1, 5*mm))
 
     _asin_link_p = Paragraph(
         f'<link href="https://www.amazon.com/dp/{_asin_val}" color="#1d4ed8"><b>{_asin_val}</b></link>',
@@ -1403,7 +1405,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         ("PADDING", (0,0), (-1,-1), 10),
     ]))
     story.append(ov_tbl)
-    story.append(Spacer(1, 4*mm))
+    story.append(Spacer(1, 6*mm))
 
     # Score breakdown table
     def _get_score(r, key):
