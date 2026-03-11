@@ -223,7 +223,8 @@ def gemini_call(prompt, max_tokens=3000):
     import time
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан в Secrets")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+    _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
     payload = {"contents":[{"parts":[{"text":prompt}]}],
                "generationConfig":{"maxOutputTokens":max_tokens}}
     for attempt in range(3):
@@ -241,12 +242,19 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
     import time
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+    _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
     parts = []
     # Add images
     if image_urls:
         for img_url in image_urls:
-            parts.append({"file_data": {"mime_type": "image/jpeg", "file_uri": img_url}})
+            try:
+                r_img = requests.get(img_url, timeout=15)
+                if r_img.ok:
+                    import base64 as _b64
+                    parts.append({"inline_data": {"mime_type": "image/jpeg",
+                        "data": _b64.b64encode(r_img.content).decode()}})
+            except: pass
     if image_b64_list:
         for b64, mime in image_b64_list:
             parts.append({"inline_data": {"mime_type": mime or "image/jpeg", "data": b64}})
@@ -876,6 +884,14 @@ with st.sidebar:
         horizontal=True, key="model_choice", label_visibility="collapsed"
     )
     st.session_state["use_gemini"] = "Gemini" in _model_choice
+    if st.session_state.get("use_gemini"):
+        _gem_model = st.selectbox("Gemini модель", [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash-lite",
+            "gemma-3-27b-it",
+        ], key="gemini_model_sel", label_visibility="collapsed")
+        st.session_state["gemini_model"] = _gem_model
 
     st.divider()
     st.markdown("**🔑 API**")
