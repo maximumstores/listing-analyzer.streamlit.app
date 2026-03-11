@@ -1289,6 +1289,11 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
         if s >= 50: return colors.HexColor("#d97706")
         return colors.HexColor("#dc2626")
 
+    def hex_str(c):
+        """Convert reportlab color to hex string like #1a2b3c"""
+        return '#{:02x}{:02x}{:02x}'.format(
+            int(c.red*255), int(c.green*255), int(c.blue*255))
+
     def score_label(s):
         if s >= 75: return "Хорошо"
         if s >= 50: return "Требует улучшений"
@@ -1333,7 +1338,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
 
     # Overall score big display
     ov_tbl = Table([[
-        Paragraph(f"<font size=36 color='#{ov_col.hexval()[1:]}'><b>{ov_pct}%</b></font>", S["center"]),
+        Paragraph(f"<font size=36 color='#{hex_str(ov_col)}'><b>{ov_pct}%</b></font>", S["center"]),
         Paragraph(f"<b>Overall Score</b><br/>{score_label(ov_pct)}", S["h2"])
     ]], colWidths=[40*mm, W-40*mm])
     ov_tbl.setStyle(TableStyle([
@@ -1358,7 +1363,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
     def _sc(raw):
         v = pct(raw)
         c = score_color(v)
-        return Paragraph(f"<font color='#{c.hexval()[1:]}'><b>{v}%</b></font>", S["center"])
+        return Paragraph(f"<font color='#{hex_str(c)}'><b>{v}%</b></font>", S["center"])
 
     score_rows = [["Метрика", "Оценка", "Метрика", "Оценка"]]
     pairs = [(score_map[i], score_map[i+1] if i+1 < len(score_map) else None)
@@ -1439,7 +1444,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
 
             info_content = [
                 Paragraph(f"<b>Фото #{i+1}</b> — {typ_txt}", S["h2"]),
-                Paragraph(f"<font color='#{sc_col.hexval()[1:]}'><b>{sc_val}/10</b></font>  {sc_lbl}", S["body"]),
+                Paragraph(f"<font color='#{hex_str(sc_col)}'><b>{sc_val}/10</b></font>  {sc_lbl}", S["body"]),
             ]
             if str_txt:  info_content.append(Paragraph(f"+ {str_txt}", S["green"]))
             if weak_txt: info_content.append(Paragraph(f"! {weak_txt}", S["orange"]))
@@ -1468,7 +1473,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
         sc_v = pct(sec.get("score",0))
         sc_c = score_color(sc_v)
         story.append(Paragraph(
-            f"{sec_name}  <font color='#{sc_c.hexval()[1:]}'><b>{sc_v}%</b></font>", S["h2"]))
+            f"{sec_name}  <font color='#{hex_str(sc_c)}'><b>{sc_v}%</b></font>", S["h2"]))
         if sec.get("gaps"):
             for g in sec["gaps"][:3]:
                 story.append(Paragraph(f"! {g}", S["orange"]))
