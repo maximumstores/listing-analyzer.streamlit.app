@@ -886,12 +886,9 @@ with st.sidebar:
     st.session_state["use_gemini"] = "Gemini" in _model_choice
     if st.session_state.get("use_gemini"):
         _gem_model = st.selectbox("Gemini модель", [
-            "gemini-2.5-flash-preview-04-17",
-            "gemini-2.5-pro-preview-03-25",
-            "gemini-2.0-flash",
             "gemini-1.5-flash",
             "gemini-1.5-pro",
-            "gemma-3-27b-it",
+            "gemini-1.0-pro",
         ], key="gemini_model_sel", label_visibility="collapsed")
         st.session_state["gemini_model"] = _gem_model
 
