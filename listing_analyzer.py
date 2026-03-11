@@ -448,32 +448,38 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 ВАЖНО: Посмотри внимательно — есть ли на фото предметы которые НЕ являются продаваемым товаром? Если да — это нарушение, снять 2 балла и написать конкретно что именно нарушает правило."""
         block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 5 строк:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона]\nСлабость: [1 конкретная проблема — ТОЛЬКО то что видишь на фото]\nДействие: [1 конкретное исправление начиная с глагола: Переснять / Убрать / Обрезать / Заменить / Уменьшить. Конкретно что сделать.]"
 
-    # Analyze each photo individually for live progress
+    # Analyze photos: batch for Gemini (1 call), individual for Claude
     results = []
-    for i, img in enumerate(images):
-        log(f"👁️ Фото {i+1}/{len(images)} {'🔵' * (i+1)}{'⚪' * (len(images)-i-1)}")
-        is_main = (i == 0)
-        # For main image: include full checklist. For others: just rubric
-        if is_main:
-            photo_intro = intro
-        else:
-            # Shorter intro without main image checklist for non-main photos
-            if lang == "en":
-                photo_intro = f"You are an Amazon photo expert. Score this product photo (photo #{i+1}) using the rubric: +2 clarity, +2 background, +2 info value, +2 Amazon compliance, +1 appeal, +1 uniqueness. Product: {title}"
+    if st.session_state.get("use_gemini"):
+        log(f"👁️ Фото 1-{len(images)} → Gemini (batch)...")
+        # Build batch prompt with all photos
+        batch_prompt = intro + "\n\nАнализируй каждое фото СТРОГО по формату ниже.\n"
+        batch_prompt += block_fmt.format(i=1).replace("PHOTO_BLOCK_1", "PHOTO_BLOCK_{N}")
+        batch_prompt += f"\n\nВсего {len(images)} фото. Для каждого напиши блок PHOTO_BLOCK_N (N=1..{len(images)})."
+        b64_list = [(img["b64"], img.get("media_type","image/jpeg")) for img in images]
+        batch_res = gemini_vision_call(batch_prompt, image_b64_list=b64_list, max_tokens=2000)
+        # Split result into blocks
+        raw_blocks = re.split(r"PHOTO_BLOCK_\d+", batch_res)
+        raw_blocks = [b.strip() for b in raw_blocks if b.strip()]
+        for i, blk in enumerate(raw_blocks[:len(images)]):
+            results.append(f"PHOTO_BLOCK_{i+1}\n{blk}")
+        # Fill missing blocks
+        for i in range(len(results), len(images)):
+            results.append(f"PHOTO_BLOCK_{i+1}\nТип: фото\nОценка: 0/10\nСильная сторона: —\nСлабость: не проанализировано\nДействие: повторить анализ")
+    else:
+        for i, img in enumerate(images):
+            log(f"👁️ Фото {i+1}/{len(images)} {'🔵' * (i+1)}{'⚪' * (len(images)-i-1)}")
+            if i == 0:
+                photo_intro = intro
             else:
-                photo_intro = f"Ты эксперт Amazon фотографий. Оцени это фото (#{i+1}) по рубрику: +2 чёткость, +2 фон, +2 инфоценность, +2 соответствие Amazon, +1 appeal, +1 уникальность. Товар: {title}"
-
-        _full_prompt = photo_intro + "\n" + block_fmt.format(i=i+1)
-        if i > 0 and st.session_state.get("use_gemini"):
-            import time; time.sleep(7)  # Gemini free tier: ~10 RPM
-        res = ai_vision_call(
-            prompt=_full_prompt,
-            image_b64=img["b64"],
-            image_url=img.get("url"),
-            media_type=img.get("media_type","image/jpeg"),
-            max_tokens=400
-        )
-        results.append("PHOTO_BLOCK_" + str(i+1) + "\n" + res)
+                if lang == "en":
+                    photo_intro = f"You are an Amazon photo expert. Score photo #{i+1}: +2 clarity, +2 background, +2 info value, +2 Amazon compliance, +1 appeal, +1 uniqueness. Product: {title}"
+                else:
+                    photo_intro = f"Ты эксперт Amazon фотографий. Оцени фото #{i+1}: +2 чёткость, +2 фон, +2 инфоценность, +2 Amazon, +1 appeal, +1 уникальность. Товар: {title}"
+            _full_prompt = photo_intro + "\n" + block_fmt.format(i=i+1)
+            res = ai_vision_call(prompt=_full_prompt, image_b64=img["b64"],
+                image_url=img.get("url"), media_type=img.get("media_type","image/jpeg"), max_tokens=400)
+            results.append("PHOTO_BLOCK_" + str(i+1) + "\n" + res)
 
     result = "\n\n".join(results)
     log(f"✅ Vision готово: {len(images)} фото")
