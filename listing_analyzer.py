@@ -231,11 +231,11 @@ def gemini_call(prompt, max_tokens=3000):
         r = requests.post(url, json=payload, timeout=120)
         if r.ok:
             return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        if r.status_code == 429:
-            time.sleep(15*(attempt+1))
-            continue
+        if r.status_code in (429, 503):
+            wait = 20*(attempt+1)
+            import time; time.sleep(wait); continue
         raise Exception(f"Gemini {r.status_code}: {r.text[:200]}")
-    raise Exception("Gemini перегружен")
+    raise Exception("Gemini перегружен после 3 попыток")
 
 def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=2000):
     """Gemini vision - supports both URL and base64 images"""
@@ -265,10 +265,11 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
         r = requests.post(url, json=payload, timeout=120)
         if r.ok:
             return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        if r.status_code == 429:
-            time.sleep(15*(attempt+1)); continue
+        if r.status_code in (429, 503):
+            wait = 20*(attempt+1)
+            import time; time.sleep(wait); continue
         raise Exception(f"Gemini Vision {r.status_code}: {r.text[:200]}")
-    raise Exception("Gemini Vision перегружен")
+    raise Exception("Gemini Vision перегружен после 3 попыток")
 
 def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=400, system=None):
     """Route vision call to Gemini or Claude"""
@@ -463,6 +464,8 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
                 photo_intro = f"Ты эксперт Amazon фотографий. Оцени это фото (#{i+1}) по рубрику: +2 чёткость, +2 фон, +2 инфоценность, +2 соответствие Amazon, +1 appeal, +1 уникальность. Товар: {title}"
 
         _full_prompt = photo_intro + "\n" + block_fmt.format(i=i+1)
+        if i > 0 and st.session_state.get("use_gemini"):
+            import time; time.sleep(7)  # Gemini free tier: ~10 RPM
         res = ai_vision_call(
             prompt=_full_prompt,
             image_b64=img["b64"],
