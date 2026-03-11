@@ -268,10 +268,10 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
             return r.json()["candidates"][0]["content"]["parts"][0]["text"]
         if r.status_code in (429, 503, 500):
             wait = 60*(attempt+1)
-            st.toast(f"⏳ Gemini Vision лимит, жду {wait}с... ({attempt+1}/3)")
+            st.toast(f"⏳ Gemini Vision {r.status_code}, жду {wait}с... ({attempt+1}/3)")
             import time; time.sleep(wait); continue
-        raise Exception(f"Gemini Vision {r.status_code}: {r.text[:200]}")
-    raise Exception("Gemini Vision перегружен после 3 попыток — попробуй через 2 мин")
+        raise Exception(f"Gemini Vision {r.status_code}: {r.text[:300]}")
+    raise Exception("Gemini Vision: все 3 попытки исчерпаны")
 
 def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=400, system=None):
     """Route vision call to Gemini or Claude"""
@@ -538,13 +538,11 @@ APLUS_BLOCK_{{i}}
         msg_content.append({"type":"text","text":f"{'A+ banner' if lang=='en' else 'A+ баннер'} #{i+1}:"})
         msg_content.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
 
+    if st.session_state.get("use_gemini"):
+        log("⏭️ A+ Vision пропущен (Gemini режим)")
+        return ""
     try:
-        if st.session_state.get("use_gemini"):
-            _aplus_prompt = (sys_prompt or "") + "\n\n" + next((p["text"] for p in msg_content if p.get("type")=="text"), "")
-            _aplus_imgs = [(p["source"]["data"], p["source"].get("media_type","image/jpeg")) for p in msg_content if p.get("type")=="image"]
-            result = gemini_vision_call(_aplus_prompt, image_b64_list=_aplus_imgs, max_tokens=2000)
-        else:
-            result = anthropic_vision(msg_content, max_tokens=2000, system=sys_prompt)
+        result = anthropic_vision(msg_content, max_tokens=2000, system=sys_prompt)
         return result
     except Exception as e:
         log(f"⚠️ A+ Vision: {e}"); return ""
