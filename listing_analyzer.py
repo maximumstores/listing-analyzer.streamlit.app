@@ -1277,33 +1277,45 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
         """Download font if not cached, return path"""
         cache = os.path.join(tempfile.gettempdir(), name)
         if not os.path.exists(cache):
-            try: urllib.request.urlretrieve(url, cache)
+            try:
+                r = requests.get(url, timeout=20)
+                if r.ok: open(cache, "wb").write(r.content)
             except: return None
-        return cache
+        return cache if os.path.exists(cache) else None
 
-    _base = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/"
-    _fonts = {
-        "DV":           "DejaVuSans.ttf",
-        "DV-Bold":      "DejaVuSans-Bold.ttf",
-        "DV-Oblique":   "DejaVuSans-Oblique.ttf",
-        "DV-BoldOblique":"DejaVuSans-BoldOblique.ttf",
-    }
-    # Also try local system path first
-    _local = "/usr/share/fonts/truetype/dejavu/"
-    _registered = True
-    for _fname, _ffile in _fonts.items():
-        try:
-            _local_path = _local + _ffile
-            if os.path.exists(_local_path):
-                pdfmetrics.registerFont(TTFont(_fname, _local_path))
-            else:
-                _dl = _get_font(_ffile, _base + _ffile)
-                if _dl: pdfmetrics.registerFont(TTFont(_fname, _dl))
-                else: _registered = False
-        except: pass
+    # Try multiple CDN sources for NotoSans (full Cyrillic support)
+    _SOURCES = [
+        ("NotoSans-Regular.ttf", "https://fonts.gstatic.com/s/notosans/v36/o-0NIpQlx3QUlC5A4PNjXhFVadyBx2pqPIif.woff2"),
+        ("NotoSans-Regular.ttf", "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"),
+        ("NotoSans-Regular.ttf", "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"),
+    ]
+    _SOURCES_BOLD = [
+        ("NotoSans-Bold.ttf", "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSans/NotoSans-Bold.ttf"),
+        ("NotoSans-Bold.ttf", "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Bold.ttf"),
+    ]
 
-    if _registered:
-        _F, _FB, _FO, _FBO = "DV", "DV-Bold", "DV-Oblique", "DV-BoldOblique"
+    def _try_load(font_name, sources):
+        # First try system path
+        _sys = "/usr/share/fonts/truetype/dejavu/DejaVuSans" + ("-Bold" if "Bold" in font_name else "") + ".ttf"
+        if os.path.exists(_sys):
+            try:
+                pdfmetrics.registerFont(TTFont(font_name, _sys))
+                return True
+            except: pass
+        for _fname, _url in sources:
+            _p = _get_font(_fname, _url)
+            if _p:
+                try:
+                    pdfmetrics.registerFont(TTFont(font_name, _p))
+                    return True
+                except: pass
+        return False
+
+    _ok_r = _try_load("DV",      _SOURCES)
+    _ok_b = _try_load("DV-Bold", _SOURCES_BOLD)
+
+    if _ok_r and _ok_b:
+        _F, _FB, _FO, _FBO = "DV", "DV-Bold", "DV", "DV-Bold"
     else:
         _F, _FB, _FO, _FBO = "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique"
 
