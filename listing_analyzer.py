@@ -189,28 +189,33 @@ def section(label, score, gaps, rec, raw_text="", char_limit=0):
             for g in gaps: st.markdown(f"- {g}")
     if rec: st.info(f"💡 {rec}")
 
-def anthropic_call(system, user, max_tokens=3000):
+def _anthropic_post(payload, retries=3):
+    import time
     key = st.secrets.get("ANTHROPIC_API_KEY","")
     if not key: raise Exception("ANTHROPIC_API_KEY не задан")
+    headers = {"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"}
+    for attempt in range(retries):
+        r = requests.post(ANTHROPIC_URL, headers=headers, json=payload, timeout=300)
+        if r.ok:
+            return r.json()["content"][0]["text"]
+        if r.status_code == 529:
+            wait = 20 * (attempt + 1)
+            st.toast(f"⏳ Anthropic перегружен, жду {wait}с... ({attempt+1}/{retries})")
+            time.sleep(wait)
+            continue
+        raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
+    raise Exception("Anthropic перегружен — попробуй через минуту")
+
+def anthropic_call(system, user, max_tokens=3000):
     payload = {"model": ANTHROPIC_MODEL, "max_tokens": max_tokens, "messages": [{"role":"user","content":user}]}
     if system: payload["system"] = system
-    r = requests.post(ANTHROPIC_URL,
-        headers={"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"},
-        json=payload, timeout=300)
-    if not r.ok: raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
-    return r.json()["content"][0]["text"]
+    return _anthropic_post(payload)
 
 def anthropic_vision(content_blocks, max_tokens=3000, system=None):
-    key = st.secrets.get("ANTHROPIC_API_KEY","")
-    if not key: raise Exception("ANTHROPIC_API_KEY не задан")
     payload = {"model": ANTHROPIC_MODEL_VISION, "max_tokens": max_tokens,
                "messages": [{"role":"user","content":content_blocks}]}
     if system: payload["system"] = system
-    r = requests.post(ANTHROPIC_URL,
-        headers={"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"},
-        json=payload, timeout=300)
-    if not r.ok: raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
-    return r.json()["content"][0]["text"]
+    return _anthropic_post(payload)
 
 # ── ScrapingDog ───────────────────────────────────────────────────────────────
 def scrapingdog_product(asin, log):
@@ -249,25 +254,13 @@ def scrapingdog_product(asin, log):
                     log(f"  ✅ A+ API: /S/ баннеров: {len(data['aplus_image_urls'])}")
             except: pass
 
-            # Fallback: scrape HTML page directly to find /images/S/ A+ banner URLs
+            # Fallback: A+ banners are in images array AFTER first 7 product photos
             if not data.get("aplus_image_urls"):
-                try:
-                    log("  🔍 Fallback: парсю HTML страницы для A+ баннеров...")
-                    rh = requests.get("https://api.scrapingdog.com/scrape",
-                        params={"api_key": sd_key, "url": f"https://www.amazon.com/dp/{asin}", "dynamic": "false"}, timeout=60)
-                    if rh.ok:
-                        html = rh.text
-                        # Find all /images/S/ URLs in HTML
-                        import re as _re2
-                        _pat = r"https://m\.media-amazon\.com/images/S/[^\s\"'<>]+\.jpg"
-                        _s_urls = _re2.findall(_pat, html)
-                        _s_urls = [u for u in _s_urls if "aplus" in u.lower() or len(u) > 60]
-                        data["aplus_image_urls"] = list(dict.fromkeys(_s_urls))[:6]
-                        log(f"  ✅ HTML fallback: найдено /S/ баннеров: {len(data['aplus_image_urls'])}")
-                        for _u in data["aplus_image_urls"][:2]:
-                            log(f"  🖼 {_u[:90]}")
-                except Exception as _fe:
-                    log(f"  ⚠️ HTML fallback: {_fe}")
+                _all_imgs = data.get("images", [])
+                if isinstance(_all_imgs, list) and len(_all_imgs) > 7:
+                    _aplus_candidates = [u for u in _all_imgs[7:] if isinstance(u, str)][:6]
+                    data["aplus_image_urls"] = _aplus_candidates
+                    log(f"  ✅ A+ баннеры из images[7+]: {len(_aplus_candidates)} шт")
         # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin","images"]:
@@ -1341,6 +1334,9 @@ elif page == "📸 Фото":
                     st.markdown(f'<div style="background:#e5e7eb;border-radius:4px;height:8px"><div style="background:{bc};width:{score*10}%;height:8px;border-radius:4px"></div></div>', unsafe_allow_html=True)
                 if stxt: st.success(f"✅ {stxt}")
                 if wtxt: st.warning(f"⚠️ {wtxt}")
+                if score > 0 and score < 8 and wtxt:
+                    with st.expander("🛠 Что делать"):
+                        st.markdown(f"→ {wtxt}")
         st.stop()
 
     if not imgs:
@@ -1380,6 +1376,41 @@ elif page == "📸 Фото":
                     st.warning("⚠️ Оценка не распознана")
                 if stxt: st.success(f"✅ {stxt}")
                 if wtxt: st.warning(f"⚠️ {wtxt}")
+                # Action block based on score
+                if score > 0 and score < 8:
+                    with st.expander("🛠 Что делать"):
+                        if i == 0:  # Main image
+                            issues = []
+                            t_low = text.lower()
+                            if "серый фон" in t_low or "grey" in t_low or "gray" in t_low or "фон" in t_low:
+                                issues.append("📸 Переснять на чисто белом фоне RGB(255,255,255) — lightbox или студия")
+                            if "штан" in t_low or "шорт" in t_low or "брюк" in t_low or "pants" in t_low or "shorts" in t_low:
+                                issues.append("✂️ Кадрировать по пояс или переснять без лишней одежды на модели")
+                            if "85%" in t_low or "заполнен" in t_low or "fill" in t_low:
+                                issues.append("🔍 Товар должен занимать ≥85% кадра — приблизить или обрезать отступы")
+                            if "текст" in t_low or "логотип" in t_low or "watermark" in t_low:
+                                issues.append("🚫 Убрать текст/логотипы/водяные знаки с главного фото")
+                            if not issues and wtxt:
+                                issues.append(f"→ {wtxt}")
+                            for _issue in issues:
+                                st.markdown(f"- {_issue}")
+                            if score <= 5:
+                                st.error("🔴 Приоритет ВЫСОКИЙ — риск suppression листинга Amazon")
+                        else:  # Gallery photos
+                            t_low = text.lower()
+                            actions = []
+                            if "текст" in t_low and ("мелк" in t_low or "small" in t_low or "ocr" in t_low):
+                                actions.append("🔡 Увеличить шрифт до ≥36pt, тёмный текст на белом фоне")
+                            if "инфографик" in t_low or "infographic" in t_low:
+                                actions.append("📊 Добавить инфографику: 17.5μ vs 21μ, temperature range, anti-odor days")
+                            if "lifestyle" in t_low or "лайфстайл" in t_low:
+                                actions.append("🏃 Добавить lifestyle: travel/office/hiking — показать use cases")
+                            if "size" in t_low or "размер" in t_low:
+                                actions.append("📏 Добавить size chart с измерениями в дюймах и см")
+                            if not actions and wtxt:
+                                actions.append(f"→ {wtxt}")
+                            for _a in actions:
+                                st.markdown(f"- {_a}")
                 # Debug: show raw if strength missing
                 if not stxt and text:
                     with st.expander("🔧 Raw (Strength не распознан)"):
