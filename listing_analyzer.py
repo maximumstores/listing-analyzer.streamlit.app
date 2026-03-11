@@ -1365,14 +1365,14 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     story.append(Spacer(1, 10*mm))
     _asin_val = asin or our_data.get("parent_asin","") or "—"
     story.append(Paragraph("Amazon Listing Audit", S["title"]))
-    story.append(Paragraph(
-        f'<link href="https://www.amazon.com/dp/{_asin_val}" color="#1d4ed8">'
-        f'amazon.com/dp/{_asin_val}</link>', S["small"]))
     story.append(HRFlowable(width=W, thickness=2, color=colors.HexColor("#3b82f6")))
     story.append(Spacer(1, 4*mm))
 
+    _asin_link_p = Paragraph(
+        f'<link href="https://www.amazon.com/dp/{_asin_val}" color="#1d4ed8"><b>{_asin_val}</b></link>',
+        S["body"])
     cover_data = [
-        ["ASIN", _asin_val, "Дата", date_str],
+        ["ASIN", _asin_link_p, "Дата", date_str],
         ["Цена", price, "Рейтинг", f"{rating} ({reviews})"],
         ["Заголовок", Paragraph(title_val, S["body"]), "", ""],
     ]
@@ -1406,14 +1406,22 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     story.append(Spacer(1, 4*mm))
 
     # Score breakdown table
+    def _get_score(r, key):
+        """Get score handling both flat keys and nested dicts"""
+        v = r.get(key, 0)
+        if isinstance(v, str) and "%" in v: return int(v.replace("%","").strip())
+        if isinstance(v, (int,float)): return v
+        return 0
+    _cosmo_sc = pct(_get_score(result.get("cosmo_analysis",{}), "score")) or _get_score(result, "cosmo_score")
+    _rufus_sc = pct(_get_score(result.get("rufus_analysis",{}), "score")) or _get_score(result, "rufus_score")
     score_map = [
-        ("Title",       result.get("title_score",0)),
-        ("Bullets",     result.get("bullets_score",0)),
-        ("Description", result.get("description_score",0)),
-        ("Images",      result.get("images_score",0)),
-        ("A+",          result.get("aplus_score",0)),
-        ("COSMO",       result.get("cosmo_score",0)),
-        ("Rufus",       result.get("rufus_score",0)),
+        ("Title",       _get_score(result, "title_score")),
+        ("Bullets",     _get_score(result, "bullets_score")),
+        ("Description", _get_score(result, "description_score")),
+        ("Images",      _get_score(result, "images_score")),
+        ("A+",          _get_score(result, "aplus_score")),
+        ("COSMO",       _cosmo_sc),
+        ("Rufus",       _rufus_sc),
     ]
     def _sc(raw):
         v = pct(raw)
@@ -1550,6 +1558,59 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         if rec:
             story.append(Paragraph(f"> {rec}", S["action"]))
         story.append(Spacer(1, 2*mm))
+
+    # ── COSMO / RUFUS PAGE ─────────────────────────────────────────────────
+    _cosmo = result.get("cosmo_analysis", {})
+    _rufus = result.get("rufus_analysis", {})
+    if _cosmo or _rufus:
+        story.append(PageBreak())
+        story.append(Paragraph("COSMO / Rufus анализ", S["h1"]))
+        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
+        story.append(Spacer(1, 3*mm))
+
+        # Scores row
+        _cs = pct(_cosmo.get("score",0)) if isinstance(_cosmo,dict) else 0
+        _rs = pct(_rufus.get("score",0)) if isinstance(_rufus,dict) else 0
+        _sc_tbl = Table([[
+            Paragraph(f"<font color='{hex_str(score_color(_cs))}'><b>{_cs}%</b></font> COSMO Score", S["h2"]),
+            Paragraph(f"<font color='{hex_str(score_color(_rs))}'><b>{_rs}%</b></font> Rufus Score", S["h2"]),
+        ]], colWidths=[W/2, W/2])
+        _sc_tbl.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f8fafc")),
+            ("PADDING",(0,0),(-1,-1),8),
+            ("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#e2e8f0")),
+        ]))
+        story.append(_sc_tbl)
+        story.append(Spacer(1, 3*mm))
+
+        # COSMO signals present
+        if isinstance(_cosmo, dict):
+            _present = _cosmo.get("signals_present", [])
+            _missing = _cosmo.get("signals_missing", [])
+            if _present:
+                story.append(Paragraph("✅ COSMO — присутствуют сигналы", S["h2"]))
+                for s in _present[:8]:
+                    story.append(Paragraph(f"+ {s}", S["green"]))
+                story.append(Spacer(1, 2*mm))
+            if _missing:
+                story.append(Paragraph("❌ COSMO — отсутствуют сигналы", S["h2"]))
+                for s in _missing[:5]:
+                    story.append(Paragraph(f"! {s}", S["orange"]))
+                story.append(Spacer(1, 2*mm))
+
+        # Rufus issues
+        if isinstance(_rufus, dict):
+            _issues = _rufus.get("issues", [])
+            _recs   = _rufus.get("recommendations", [])
+            if _issues:
+                story.append(Paragraph("❌ Rufus — проблемы", S["h2"]))
+                for s in _issues[:5]:
+                    story.append(Paragraph(f"! {s}", S["orange"]))
+                story.append(Spacer(1, 2*mm))
+            if _recs:
+                story.append(Paragraph("→ Рекомендации Rufus", S["h2"]))
+                for s in _recs[:5]:
+                    story.append(Paragraph(f"> {s}", S["action"]))
 
     # ── COMPETITORS PAGE ────────────────────────────────────────────────────
     if comp_data and any(comp_data):
