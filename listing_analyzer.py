@@ -1468,7 +1468,8 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     if vision_text and images:
         blocks = _re.split(r"PHOTO_BLOCK_\d+", vision_text)
-        blocks = [b.strip() for b in blocks if b.strip()]
+        blocks = [b.strip() for b in blocks if b.strip()]  # removes empty first element
+        # blocks[0] = photo #1, blocks[1] = photo #2, etc.
         for i, (img_d, blk) in enumerate(zip(images[:5], blocks[:5])):
             # Parse block
             typ_m  = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
@@ -1488,15 +1489,16 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
             # Photo thumbnail
             try:
-                img_bytes = base64.b64decode(img_d["b64"])
+                _b64_data = img_d.get("b64","") if isinstance(img_d, dict) else img_d
+                img_bytes = base64.b64decode(_b64_data)
                 pil_img   = PILImage.open(io.BytesIO(img_bytes))
                 pil_img.thumbnail((200, 200))
                 thumb_buf = io.BytesIO()
                 pil_img.save(thumb_buf, format="JPEG", quality=70)
                 thumb_buf.seek(0)
                 rl_img = RLImage(thumb_buf, width=35*mm, height=35*mm)
-            except:
-                rl_img = Paragraph("(фото)", S["small"])
+            except Exception as _pe:
+                rl_img = Paragraph(f"(фото {i+1})", S["small"])
 
             info_content = [
                 Paragraph(f"<b>Фото #{i+1}</b> — {typ_txt}", S["h2"]),
@@ -1505,6 +1507,9 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
             if str_txt:  info_content.append(Paragraph(f"+ {str_txt}", S["green"]))
             if weak_txt: info_content.append(Paragraph(f"! {weak_txt}", S["orange"]))
             if act_txt:  info_content.append(Paragraph(f"> {act_txt}", S["action"]))
+            # Fallback: show raw block if nothing parsed
+            if not str_txt and not weak_txt and blk:
+                info_content.append(Paragraph(blk[:300], S["small"]))
 
             from reportlab.platypus import KeepTogether
             row_tbl = Table([[rl_img, info_content]], colWidths=[40*mm, W-40*mm])
