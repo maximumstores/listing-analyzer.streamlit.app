@@ -1467,10 +1467,12 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     _clean = lambda s: _re.sub(r"\*+", "", s).strip()
 
     if vision_text and images:
-        blocks = _re.split(r"PHOTO_BLOCK_\d+", vision_text)
-        blocks = [b.strip() for b in blocks if b.strip()]  # removes empty first element
-        # blocks[0] = photo #1, blocks[1] = photo #2, etc.
-        for i, (img_d, blk) in enumerate(zip(images[:5], blocks[:5])):
+        # Extract blocks by number to avoid alignment issues
+        _all_blocks = {}
+        for _m in _re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", vision_text, _re.DOTALL):
+            _all_blocks[int(_m.group(1))] = _m.group(2).strip()
+        for i, img_d in enumerate(images[:5]):
+            blk = _all_blocks.get(i+1, "")
             # Parse block
             typ_m  = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
             sc_m   = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", blk)
