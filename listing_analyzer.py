@@ -339,7 +339,7 @@ MAIN IMAGE AMAZON REQUIREMENTS (apply strictly for photo #1):
 ✅ ONLY the sold product — FORBIDDEN: other clothing on model (pants, shorts, shoes of different color), accessories, props not included in purchase
 ✅ For apparel: the sold item must be the primary focus, other clothing/body parts must not distract
 IMPORTANT: Look carefully — are there any items in the photo that are NOT the sold product? If yes — this is a violation, deduct 2 pts and name exactly what violates the rule."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 4 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength of this photo]\nWeakness: [REQUIRED — 1 specific improvement based ONLY on what you actually see in THIS image. Never suggest adding something already visible in the photo. Focus on: frame fill %, background issues, missing product details, non-product items visible, text/watermarks. Never write 'None'.]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 5 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength]\nWeakness: [1 specific problem — ONLY what you actually see]\nAction: [1 fix starting with a verb: Reshoot / Remove / Crop / Replace / Reduce. Be specific about what to do.]"
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
 
@@ -366,7 +366,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 ✅ ТОЛЬКО продаваемый товар — ЗАПРЕЩЕНЫ: другая одежда на модели (брюки, шорты, обувь другого цвета), аксессуары, реквизит не входящий в комплект
 ✅ Для одежды: товар должен быть главным фокусом, другие части тела/одежды не должны отвлекать
 ВАЖНО: Посмотри внимательно — есть ли на фото предметы которые НЕ являются продаваемым товаром? Если да — это нарушение, снять 2 балла и написать конкретно что именно нарушает правило."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 4 строки:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона этого фото]\nСлабость: [ОБЯЗАТЕЛЬНО 1 конкретное улучшение только на основе ТОГО ЧТО ВИДИШЬ на этом фото. НИКОГДА не предлагай добавить то что уже есть на фото. Смотри на: заполнение кадра %, фон, лишние предметы не являющиеся товаром, текст/водяные знаки. Никогда не пиши 'Нет'.]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 5 строк:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона]\nСлабость: [1 конкретная проблема — ТОЛЬКО то что видишь на фото]\nДействие: [1 конкретное исправление начиная с глагола: Переснять / Убрать / Обрезать / Заменить / Уменьшить. Конкретно что сделать.]"
 
     # Analyze each photo individually for live progress
     results = []
@@ -1320,10 +1320,12 @@ elif page == "📸 Фото":
             typ  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", text)
             strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
             weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
+            actn = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]?\s*(.{3,})", text)
             _strip = lambda s: s.strip().strip("*").strip()
             ptype = _strip(typ.group(1)) if typ else ""
             stxt  = _strip(strg.group(1)) if strg else ""
             wtxt  = _strip(weak.group(1)) if weak else ""
+            atxt  = _strip(actn.group(1)) if actn else ""
             if wtxt and any(x in wtxt.lower() for x in ["none","n/a","no weakness","нет слабостей"]):
                 wtxt = ""
             with st.container(border=True):
@@ -1334,9 +1336,9 @@ elif page == "📸 Фото":
                     st.markdown(f'<div style="background:#e5e7eb;border-radius:4px;height:8px"><div style="background:{bc};width:{score*10}%;height:8px;border-radius:4px"></div></div>', unsafe_allow_html=True)
                 if stxt: st.success(f"✅ {stxt}")
                 if wtxt: st.warning(f"⚠️ {wtxt}")
-                if score > 0 and score < 8 and wtxt:
+                if score > 0 and score < 8 and (atxt or wtxt):
                     with st.expander("🛠 Что делать"):
-                        st.markdown(f"→ {wtxt}")
+                        st.markdown(f"→ {atxt or wtxt}")
         st.stop()
 
     if not imgs:
@@ -1353,10 +1355,12 @@ elif page == "📸 Фото":
         # Broad regex: match Strength/Weakness labels + content on same line (3+ chars)
         strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
         weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
+        actn = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]?\s*(.{3,})", text)
         _strip = lambda s: s.strip().strip("*").strip()
         ptype = _strip(typ.group(1)) if typ else ""
         stxt  = _strip(strg.group(1)) if strg else ""
         wtxt  = _strip(weak.group(1)) if weak else ""
+        atxt  = _strip(actn.group(1)) if actn else ""
         # Filter useless "no weakness" answers
         if wtxt and any(x in wtxt.lower() for x in ["none", "n/a", "no weakness", "no notable weakness", "нет слабостей", "полностью соответствует требованиям"]):
             wtxt = ""
@@ -1376,11 +1380,9 @@ elif page == "📸 Фото":
                     st.warning("⚠️ Оценка не распознана")
                 if stxt: st.success(f"✅ {stxt}")
                 if wtxt: st.warning(f"⚠️ {wtxt}")
-                # Action block based on score
-                if score > 0 and score < 8:
+                if score > 0 and score < 8 and (atxt or wtxt):
                     with st.expander("🛠 Что делать"):
-                        if wtxt:
-                            st.markdown(f"→ {wtxt}")
+                        st.markdown(f"→ {atxt or wtxt}")
                         if score <= 5 and i == 0:
                             st.error("🔴 Приоритет ВЫСОКИЙ — риск suppression листинга Amazon")
                 # Debug: show raw if strength missing
