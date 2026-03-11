@@ -1249,7 +1249,7 @@ def health_card():
 # ══════════════════════════════════════════════════════════════════════════════
 # PDF REPORT GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
-def generate_pdf_report(result, our_data, vision_text, images, asin):
+def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=None):
     """Generate full PDF audit report with photos and scores"""
     import io, base64, re as _re
     from datetime import datetime
@@ -1461,6 +1461,8 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
     story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
     story.append(Spacer(1, 3*mm))
 
+    _clean = lambda s: _re.sub(r"\*+", "", s).strip()
+
     if vision_text and images:
         blocks = _re.split(r"PHOTO_BLOCK_\d+", vision_text)
         blocks = [b.strip() for b in blocks if b.strip()]
@@ -1473,10 +1475,10 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
             act_m  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.+)", blk)
 
             sc_val  = int(sc_m.group(1)) if sc_m else 0
-            typ_txt = typ_m.group(1).strip() if typ_m else ""
-            str_txt = str_m.group(1).strip() if str_m else ""
-            weak_txt= weak_m.group(1).strip() if weak_m else ""
-            act_txt = act_m.group(1).strip() if act_m else ""
+            typ_txt = _clean(typ_m.group(1)) if typ_m else ""
+            str_txt = _clean(str_m.group(1)) if str_m else ""
+            weak_txt= _clean(weak_m.group(1)) if weak_m else ""
+            act_txt = _clean(act_m.group(1)) if act_m else ""
 
             sc_col  = colors.HexColor("#15803d") if sc_val>=8 else (colors.HexColor("#d97706") if sc_val>=6 else colors.HexColor("#dc2626"))
             sc_lbl  = "Отлично" if sc_val>=8 else ("Хорошо" if sc_val>=6 else "Слабо")
@@ -1531,6 +1533,51 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
         if sec.get("recommendation"):
             story.append(Paragraph(f"> {sec['recommendation']}", S["action"]))
         story.append(Spacer(1, 2*mm))
+
+    # ── COMPETITORS PAGE ────────────────────────────────────────────────────
+    if comp_data and any(comp_data):
+        story.append(PageBreak())
+        story.append(Paragraph("Анализ конкурентов", S["h1"]))
+        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
+        story.append(Spacer(1, 3*mm))
+
+        # Comparison table header
+        _hdr = ["Метрика", "МЫ"]
+        for _cd in comp_data[:3]:
+            if _cd: _hdr.append(_cd.get("asin","Конкурент")[:12])
+        _rows = [_hdr]
+
+        def _cv(d, k): return f"{pct(d.get(k,0))}%" if d else "—"
+
+        for _metric, _key in [("Title","title_score"),("Bullets","bullets_score"),
+                               ("Images","images_score"),("A+","aplus_score"),
+                               ("COSMO","cosmo_score"),("Цена","price")]:
+            _row = [_metric]
+            if _key == "price":
+                _row.append(str(our_data.get("price",""))[:12])
+                for _cd in comp_data[:3]:
+                    _row.append(str(_cd.get("price",""))[:12] if _cd else "—")
+            else:
+                _row.append(_cv(result, _key))
+                for _cd in comp_data[:3]:
+                    _row.append(_cv(_cd.get("ai_result",{}), _key) if _cd else "—")
+            _rows.append(_row)
+
+        _cw = [35*mm] + [(W-35*mm)/max(len(_hdr)-1,1)] * (len(_hdr)-1)
+        _ct = Table(_rows, colWidths=_cw)
+        _ct.setStyle(TableStyle([
+            ("FONTNAME",   (0,0), (-1,0),  _FB),
+            ("FONTNAME",   (0,1), (-1,-1), _F),
+            ("FONTSIZE",   (0,0), (-1,-1), 9),
+            ("BACKGROUND", (0,0), (-1,0),  colors.HexColor("#1e293b")),
+            ("TEXTCOLOR",  (0,0), (-1,0),  colors.white),
+            ("BACKGROUND", (1,1), (1,-1),  colors.HexColor("#dbeafe")),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#f8fafc"), colors.white]),
+            ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+            ("PADDING",    (0,0), (-1,-1), 6),
+            ("ALIGN",      (1,0), (-1,-1), "CENTER"),
+        ]))
+        story.append(_ct)
 
     # ── FOOTER ──────────────────────────────────────────────────────────────
     story.append(Spacer(1, 6*mm))
@@ -1608,7 +1655,8 @@ if page == "🏠 Обзор":
                         our_data=od,
                         vision_text=st.session_state.get("vision",""),
                         images=st.session_state.get("images",[]),
-                        asin=st.session_state.get("our_asin","")
+                        asin=st.session_state.get("our_asin",""),
+                        comp_data=st.session_state.get("comp_data_list",[])
                     )
                     st.session_state["_pdf_bytes"] = _pdf_bytes
                     st.success("✅ PDF готов — нажми скачать")
