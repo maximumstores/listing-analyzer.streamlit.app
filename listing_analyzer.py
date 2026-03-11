@@ -425,7 +425,8 @@ Module: [comparison-table | lifestyle | feature-highlight | brand-story | size-g
 Summary: [what this module shows — 1-2 sentences]
 Score: X/10
 Strength: [1 specific strength]
-Gap: [1 concrete improvement]"""
+Weakness: [1 specific problem you see]
+Action: [1 concrete fix starting with a verb: Redesign / Remove / Add / Replace / Simplify]"""
     else:
         sys_prompt = f"""Ты эксперт по Amazon A+ Content. Анализируй каждый A+ баннер.
 Товар: {title}
@@ -436,7 +437,8 @@ APLUS_BLOCK_{{i}}
 Содержание: [что показывает — 1-2 предложения]
 Оценка: X/10
 Сильная сторона: [1 конкретная]
-Улучшение: [1 конкретное]"""
+Слабость: [1 конкретная проблема которую видишь]
+Действие: [1 конкретный фикс начиная с глагола: Переделать / Убрать / Добавить / Заменить / Упростить]"""
 
     msg_content = []
     for i, img in enumerate(images):
@@ -1243,6 +1245,246 @@ def health_card():
         cc = "#22c55e" if p2>=75 else ("#f59e0b" if p2>=50 else "#ef4444")
         col.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid {cc}"><div style="font-size:1.2rem;font-weight:700;color:{cc}">{p2}%</div><div style="font-size:0.68rem;color:#64748b">{lbl}</div></div>', unsafe_allow_html=True)
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PDF REPORT GENERATOR
+# ══════════════════════════════════════════════════════════════════════════════
+def generate_pdf_report(result, our_data, vision_text, images, asin):
+    """Generate full PDF audit report with photos and scores"""
+    import io, base64, re as _re
+    from datetime import datetime
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+        Table, TableStyle, HRFlowable, PageBreak, Image as RLImage)
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from PIL import Image as PILImage
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+        leftMargin=20*mm, rightMargin=20*mm,
+        topMargin=20*mm, bottomMargin=20*mm)
+
+    W = A4[0] - 40*mm
+    styles = getSampleStyleSheet()
+
+    # Custom styles
+    S = {
+        "title":    ParagraphStyle("t",  fontSize=24, fontName="Helvetica-Bold",   textColor=colors.HexColor("#0f172a"), spaceAfter=4),
+        "h1":       ParagraphStyle("h1", fontSize=16, fontName="Helvetica-Bold",   textColor=colors.HexColor("#1e293b"), spaceBefore=12, spaceAfter=4),
+        "h2":       ParagraphStyle("h2", fontSize=13, fontName="Helvetica-Bold",   textColor=colors.HexColor("#334155"), spaceBefore=8,  spaceAfter=3),
+        "body":     ParagraphStyle("b",  fontSize=9,  fontName="Helvetica",        textColor=colors.HexColor("#475569"), spaceAfter=3, leading=14),
+        "small":    ParagraphStyle("s",  fontSize=8,  fontName="Helvetica",        textColor=colors.HexColor("#64748b"), spaceAfter=2),
+        "green":    ParagraphStyle("g",  fontSize=9,  fontName="Helvetica",        textColor=colors.HexColor("#15803d"), spaceAfter=2),
+        "red":      ParagraphStyle("r",  fontSize=9,  fontName="Helvetica",        textColor=colors.HexColor("#dc2626"), spaceAfter=2),
+        "orange":   ParagraphStyle("o",  fontSize=9,  fontName="Helvetica",        textColor=colors.HexColor("#d97706"), spaceAfter=2),
+        "center":   ParagraphStyle("c",  fontSize=9,  fontName="Helvetica",        alignment=TA_CENTER, spaceAfter=2),
+        "action":   ParagraphStyle("a",  fontSize=9,  fontName="Helvetica-BoldOblique", textColor=colors.HexColor("#1d4ed8"), spaceAfter=2),
+    }
+
+    def score_color(s):
+        if s >= 75: return colors.HexColor("#15803d")
+        if s >= 50: return colors.HexColor("#d97706")
+        return colors.HexColor("#dc2626")
+
+    def score_label(s):
+        if s >= 75: return "Хорошо"
+        if s >= 50: return "Требует улучшений"
+        return "Критично"
+
+    story = []
+
+    # ── COVER PAGE ──────────────────────────────────────────────────────────
+    title_val  = our_data.get("title", asin)[:80]
+    price      = our_data.get("price", "")
+    rating     = our_data.get("average_rating", "")
+    reviews    = our_data.get("total_reviews", "")
+    date_str   = datetime.now().strftime("%d.%m.%Y %H:%M")
+    overall    = result.get("overall_score", 0)
+    ov_pct     = pct(overall)
+    ov_col     = score_color(ov_pct)
+
+    story.append(Spacer(1, 10*mm))
+    story.append(Paragraph("Amazon Listing Audit", S["title"]))
+    story.append(HRFlowable(width=W, thickness=2, color=colors.HexColor("#3b82f6")))
+    story.append(Spacer(1, 4*mm))
+
+    cover_data = [
+        ["ASIN", asin, "Дата", date_str],
+        ["Цена", price, "Рейтинг", f"{rating} ({reviews})"],
+        ["Заголовок", Paragraph(title_val, S["body"]), "", ""],
+    ]
+    cover_tbl = Table(cover_data, colWidths=[25*mm, 65*mm, 25*mm, 55*mm])
+    cover_tbl.setStyle(TableStyle([
+        ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
+        ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
+        ("FONTNAME", (2,0), (2,-1), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 9),
+        ("TEXTCOLOR", (0,0), (-1,-1), colors.HexColor("#334155")),
+        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f8fafc")),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+        ("PADDING", (0,0), (-1,-1), 6),
+        ("SPAN", (1,2), (3,2)),
+    ]))
+    story.append(cover_tbl)
+    story.append(Spacer(1, 6*mm))
+
+    # Overall score big display
+    ov_tbl = Table([[
+        Paragraph(f"<font size=36 color='#{ov_col.hexval()[1:]}'><b>{ov_pct}%</b></font>", S["center"]),
+        Paragraph(f"<b>Overall Score</b><br/>{score_label(ov_pct)}", S["h2"])
+    ]], colWidths=[40*mm, W-40*mm])
+    ov_tbl.setStyle(TableStyle([
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f1f5f9")),
+        ("ROUNDEDCORNERS", [6]),
+        ("PADDING", (0,0), (-1,-1), 10),
+    ]))
+    story.append(ov_tbl)
+    story.append(Spacer(1, 4*mm))
+
+    # Score breakdown table
+    score_map = [
+        ("Title",       result.get("title_score",0)),
+        ("Bullets",     result.get("bullets_score",0)),
+        ("Description", result.get("description_score",0)),
+        ("Images",      result.get("images_score",0)),
+        ("A+",          result.get("aplus_score",0)),
+        ("COSMO",       result.get("cosmo_score",0)),
+        ("Rufus",       result.get("rufus_score",0)),
+    ]
+    def _sc(raw):
+        v = pct(raw)
+        c = score_color(v)
+        return Paragraph(f"<font color='#{c.hexval()[1:]}'><b>{v}%</b></font>", S["center"])
+
+    score_rows = [["Метрика", "Оценка", "Метрика", "Оценка"]]
+    pairs = [(score_map[i], score_map[i+1] if i+1 < len(score_map) else None)
+             for i in range(0, len(score_map), 2)]
+    for left, right in pairs:
+        row = [left[0], _sc(left[1])]
+        if right: row += [right[0], _sc(right[1])]
+        else:     row += ["", ""]
+        score_rows.append(row)
+
+    sc_tbl = Table(score_rows, colWidths=[40*mm, 25*mm, 40*mm, 25*mm])
+    sc_tbl.setStyle(TableStyle([
+        ("FONTNAME",   (0,0), (-1,0),  "Helvetica-Bold"),
+        ("FONTNAME",   (0,1), (-1,-1), "Helvetica"),
+        ("FONTSIZE",   (0,0), (-1,-1), 9),
+        ("BACKGROUND", (0,0), (-1,0),  colors.HexColor("#1e293b")),
+        ("TEXTCOLOR",  (0,0), (-1,0),  colors.white),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#f8fafc"), colors.white]),
+        ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+        ("PADDING",    (0,0), (-1,-1), 6),
+        ("ALIGN",      (1,0), (1,-1), "CENTER"),
+        ("ALIGN",      (3,0), (3,-1), "CENTER"),
+    ]))
+    story.append(sc_tbl)
+    story.append(Spacer(1, 4*mm))
+
+    # Summary
+    if result.get("summary"):
+        story.append(Paragraph("Резюме", S["h2"]))
+        story.append(Paragraph(result["summary"], S["body"]))
+
+    # Priority actions
+    actions = result.get("priority_improvements", []) or [
+        a.get("action","") for a in result.get("actions",[]) if isinstance(a, dict)]
+    if actions:
+        story.append(Paragraph("Приоритетные действия", S["h2"]))
+        for i, a in enumerate(actions[:6]):
+            story.append(Paragraph(f"{i+1}. {a}", S["action"]))
+
+    story.append(PageBreak())
+
+    # ── PHOTOS PAGE ─────────────────────────────────────────────────────────
+    story.append(Paragraph("Анализ фотографий", S["h1"]))
+    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
+    story.append(Spacer(1, 3*mm))
+
+    if vision_text and images:
+        blocks = _re.split(r"PHOTO_BLOCK_\d+", vision_text)
+        blocks = [b.strip() for b in blocks if b.strip()]
+        for i, (img_d, blk) in enumerate(zip(images[:5], blocks[:5])):
+            # Parse block
+            typ_m  = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
+            sc_m   = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", blk)
+            str_m  = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.+)", blk)
+            weak_m = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.+)", blk)
+            act_m  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.+)", blk)
+
+            sc_val  = int(sc_m.group(1)) if sc_m else 0
+            typ_txt = typ_m.group(1).strip() if typ_m else ""
+            str_txt = str_m.group(1).strip() if str_m else ""
+            weak_txt= weak_m.group(1).strip() if weak_m else ""
+            act_txt = act_m.group(1).strip() if act_m else ""
+
+            sc_col  = colors.HexColor("#15803d") if sc_val>=8 else (colors.HexColor("#d97706") if sc_val>=6 else colors.HexColor("#dc2626"))
+            sc_lbl  = "Отлично" if sc_val>=8 else ("Хорошо" if sc_val>=6 else "Слабо")
+
+            # Photo thumbnail
+            try:
+                img_bytes = base64.b64decode(img_d["b64"])
+                pil_img   = PILImage.open(io.BytesIO(img_bytes))
+                pil_img.thumbnail((200, 200))
+                thumb_buf = io.BytesIO()
+                pil_img.save(thumb_buf, format="JPEG", quality=70)
+                thumb_buf.seek(0)
+                rl_img = RLImage(thumb_buf, width=35*mm, height=35*mm)
+            except:
+                rl_img = Paragraph("(фото)", S["small"])
+
+            info_content = [
+                Paragraph(f"<b>Фото #{i+1}</b> — {typ_txt}", S["h2"]),
+                Paragraph(f"<font color='#{sc_col.hexval()[1:]}'><b>{sc_val}/10</b></font>  {sc_lbl}", S["body"]),
+            ]
+            if str_txt:  info_content.append(Paragraph(f"+ {str_txt}", S["green"]))
+            if weak_txt: info_content.append(Paragraph(f"! {weak_txt}", S["orange"]))
+            if act_txt:  info_content.append(Paragraph(f"> {act_txt}", S["action"]))
+
+            from reportlab.platypus import KeepTogether
+            row_tbl = Table([[rl_img, info_content]], colWidths=[40*mm, W-40*mm])
+            row_tbl.setStyle(TableStyle([
+                ("VALIGN",     (0,0), (-1,-1), "TOP"),
+                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f8fafc")),
+                ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+                ("PADDING",    (0,0), (-1,-1), 6),
+            ]))
+            story.append(KeepTogether([row_tbl, Spacer(1, 3*mm)]))
+
+    story.append(PageBreak())
+
+    # ── CONTENT PAGE ────────────────────────────────────────────────────────
+    story.append(Paragraph("Анализ контента", S["h1"]))
+    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
+    story.append(Spacer(1, 3*mm))
+
+    for sec_key, sec_name in [("title","Заголовок"), ("bullets","Bullets"), ("description","Description"), ("aplus","A+ Контент")]:
+        sec = result.get(sec_key, {})
+        if not sec: continue
+        sc_v = pct(sec.get("score",0))
+        sc_c = score_color(sc_v)
+        story.append(Paragraph(
+            f"{sec_name}  <font color='#{sc_c.hexval()[1:]}'><b>{sc_v}%</b></font>", S["h2"]))
+        if sec.get("gaps"):
+            for g in sec["gaps"][:3]:
+                story.append(Paragraph(f"! {g}", S["orange"]))
+        if sec.get("recommendation"):
+            story.append(Paragraph(f"> {sec['recommendation']}", S["action"]))
+        story.append(Spacer(1, 2*mm))
+
+    # ── FOOTER ──────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 6*mm))
+    story.append(HRFlowable(width=W, thickness=0.5, color=colors.HexColor("#cbd5e1")))
+    story.append(Paragraph(f"Сгенерировано: {date_str} | ASIN: {asin} | Amazon Listing Analyzer", S["small"]))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Обзор
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1296,6 +1538,37 @@ if page == "🏠 Обзор":
                 col1.markdown(f"**{ch.get('name','')}**")
                 col1.caption(ch.get("how_competitors_use",""))
                 col2.markdown(badge(ch.get("priority","MEDIUM")))
+
+    # PDF Download button
+    st.divider()
+    st.subheader("📥 Скачать PDF отчёт")
+    _pdf_col1, _pdf_col2 = st.columns([2,4])
+    with _pdf_col1:
+        if st.button("📄 Сгенерировать PDF", type="primary", use_container_width=True):
+            with st.spinner("Генерирую PDF отчёт..."):
+                try:
+                    _pdf_bytes = generate_pdf_report(
+                        result=r,
+                        our_data=od,
+                        vision_text=st.session_state.get("vision",""),
+                        images=st.session_state.get("images",[]),
+                        asin=st.session_state.get("our_asin","")
+                    )
+                    st.session_state["_pdf_bytes"] = _pdf_bytes
+                    st.success("✅ PDF готов — нажми скачать")
+                except Exception as _pe:
+                    st.error(f"Ошибка PDF: {_pe}")
+    with _pdf_col2:
+        if st.session_state.get("_pdf_bytes"):
+            _asin_dl = st.session_state.get("our_asin","listing")
+            _date_dl = __import__("datetime").datetime.now().strftime("%Y%m%d")
+            st.download_button(
+                label="⬇️ Скачать PDF",
+                data=st.session_state["_pdf_bytes"],
+                file_name=f"amazon_audit_{_asin_dl}_{_date_dl}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Фото
@@ -1493,19 +1766,38 @@ elif page == "📝 Контент":
             _av_blocks = re.split(r"APLUS_BLOCK_\d+", _av)
             _av_blocks = [b.strip() for b in _av_blocks if b.strip()]
             for _bi, _block in enumerate(_av_blocks):
+                # Parse fields
+                _av_score_m = re.search(r"(?:Оценка|Score)\s*[:\-]?\s*(\d+)", _block)
+                _av_score = int(_av_score_m.group(1)) if _av_score_m else 0
+                _av_mod_m = re.search(r"(?:Модуль|Module)\s*[:\-]?\s*(.+)", _block)
+                _av_sum_m = re.search(r"(?:Содержание|Summary)\s*[:\-]?\s*(.+)", _block)
+                _av_str_m = re.search(r"(?:Сильная сторона|Strength)\s*[:\-]?\s*(.{3,})", _block)
+                _av_weak_m = re.search(r"(?:Слабость|Weakness)\s*[:\-]?\s*(.{3,})", _block)
+                _av_act_m = re.search(r"(?:Действие|Action)\s*[:\-]?\s*(.{3,})", _block)
+                _av_mod  = _av_mod_m.group(1).strip() if _av_mod_m else ""
+                _av_sum  = _av_sum_m.group(1).strip() if _av_sum_m else ""
+                _av_str  = _av_str_m.group(1).strip() if _av_str_m else ""
+                _av_weak = _av_weak_m.group(1).strip() if _av_weak_m else ""
+                _av_act  = _av_act_m.group(1).strip() if _av_act_m else ""
+                _av_bc = "#22c55e" if _av_score>=8 else ("#f59e0b" if _av_score>=6 else "#ef4444")
+                _av_sl = "Отлично" if _av_score>=8 else ("Хорошо" if _av_score>=6 else "Слабо")
+
                 with st.container(border=True):
-                    cols_av = st.columns([1,2]) if _bi < len(_av_urls) else [None, None]
+                    c_img, c_txt = st.columns([1,2])
                     if _av_urls and _bi < len(_av_urls):
-                        with cols_av[0]:
+                        with c_img:
                             st.image(_av_urls[_bi], use_container_width=True)
-                        with cols_av[1]:
-                            st.markdown(f"**Баннер #{_bi+1}**")
-                            for _line in _block.split("\n"):
-                                if _line.strip():
-                                    st.markdown(_line)
-                    else:
-                        st.markdown(f"**Баннер #{_bi+1}**")
-                        st.markdown(_block)
+                    with c_txt:
+                        _av_head = f"Баннер #{_bi+1}" + (f" — {_av_mod}" if _av_mod else "")
+                        st.markdown(f"**{_av_head}**")
+                        if _av_sum: st.caption(_av_sum)
+                        if _av_score:
+                            st.markdown(f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0"><div style="font-size:2rem;font-weight:800;color:{_av_bc}">{_av_score}/10</div><div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px"><div style="background:{_av_bc};width:{_av_score*10}%;height:10px;border-radius:6px"></div></div><div style="color:{_av_bc};font-size:0.8rem;margin-top:2px">{_av_sl}</div></div></div>', unsafe_allow_html=True)
+                        if _av_str:  st.success(f"✅ {_av_str}")
+                        if _av_weak: st.warning(f"⚠️ {_av_weak}")
+                        if _av_score < 8 and (_av_act or _av_weak):
+                            with st.expander("🛠 Что делать"):
+                                st.markdown(f"→ {_av_act or _av_weak}")
     elif st.session_state.get("our_data",{}).get("aplus"):
         st.info("🎨 A+ есть, но баннеры не загружены. Перезапусти анализ для Vision A+.")
 
