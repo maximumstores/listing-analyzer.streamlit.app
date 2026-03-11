@@ -217,6 +217,76 @@ def anthropic_vision(content_blocks, max_tokens=3000, system=None):
     if system: payload["system"] = system
     return _anthropic_post(payload)
 
+# ── Gemini AI ─────────────────────────────────────────────────────────────────
+def gemini_call(prompt, max_tokens=3000):
+    """Call Google Gemini as fallback model"""
+    import time
+    key = st.secrets.get("GEMINI_API_KEY","")
+    if not key: raise Exception("GEMINI_API_KEY не задан в Secrets")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+    payload = {"contents":[{"parts":[{"text":prompt}]}],
+               "generationConfig":{"maxOutputTokens":max_tokens}}
+    for attempt in range(3):
+        r = requests.post(url, json=payload, timeout=120)
+        if r.ok:
+            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        if r.status_code == 429:
+            time.sleep(15*(attempt+1))
+            continue
+        raise Exception(f"Gemini {r.status_code}: {r.text[:200]}")
+    raise Exception("Gemini перегружен")
+
+def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=2000):
+    """Gemini vision - supports both URL and base64 images"""
+    import time
+    key = st.secrets.get("GEMINI_API_KEY","")
+    if not key: raise Exception("GEMINI_API_KEY не задан")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+    parts = []
+    # Add images
+    if image_urls:
+        for img_url in image_urls:
+            parts.append({"file_data": {"mime_type": "image/jpeg", "file_uri": img_url}})
+    if image_b64_list:
+        for b64, mime in image_b64_list:
+            parts.append({"inline_data": {"mime_type": mime or "image/jpeg", "data": b64}})
+    parts.append({"text": prompt})
+    payload = {"contents": [{"parts": parts}],
+               "generationConfig": {"maxOutputTokens": max_tokens}}
+    for attempt in range(3):
+        r = requests.post(url, json=payload, timeout=120)
+        if r.ok:
+            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        if r.status_code == 429:
+            time.sleep(15*(attempt+1)); continue
+        raise Exception(f"Gemini Vision {r.status_code}: {r.text[:200]}")
+    raise Exception("Gemini Vision перегружен")
+
+def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=400, system=None):
+    """Route vision call to Gemini or Claude"""
+    if st.session_state.get("use_gemini"):
+        full = f"{system}\n\n{prompt}" if system else prompt
+        if image_url:
+            return gemini_vision_call(full, image_urls=[image_url], max_tokens=max_tokens)
+        elif image_b64:
+            return gemini_vision_call(full, image_b64_list=[(image_b64, media_type)], max_tokens=max_tokens)
+    else:
+        blocks = []
+        if system: pass  # passed separately
+        if image_b64:
+            blocks = [
+                {"type":"text","text": prompt},
+                {"type":"image","source":{"type":"base64","media_type":media_type,"data":image_b64}}
+            ]
+        return anthropic_vision(blocks, max_tokens=max_tokens, system=system)
+
+def ai_call(system, user, max_tokens=3000):
+    """Route to Gemini or Claude based on user choice"""
+    if st.session_state.get("use_gemini"):
+        full = f"{system}\n\n{user}" if system else user
+        return gemini_call(full, max_tokens)
+    return anthropic_call(system, user, max_tokens)
+
 # ── ScrapingDog ───────────────────────────────────────────────────────────────
 def scrapingdog_product(asin, log):
     sd_key = st.secrets.get("SCRAPINGDOG_API_KEY","")
@@ -383,12 +453,14 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
             else:
                 photo_intro = f"Ты эксперт Amazon фотографий. Оцени это фото (#{i+1}) по рубрику: +2 чёткость, +2 фон, +2 инфоценность, +2 соответствие Amazon, +1 appeal, +1 уникальность. Товар: {title}"
 
-        blocks = [
-            {"type":"text","text": photo_intro},
-            {"type":"text","text": block_fmt.format(i=i+1)},
-            {"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}}
-        ]
-        res = anthropic_vision(blocks, max_tokens=400)
+        _full_prompt = photo_intro + "\n" + block_fmt.format(i=i+1)
+        res = ai_vision_call(
+            prompt=_full_prompt,
+            image_b64=img["b64"],
+            image_url=img.get("url"),
+            media_type=img.get("media_type","image/jpeg"),
+            max_tokens=400
+        )
         results.append("PHOTO_BLOCK_" + str(i+1) + "\n" + res)
 
     result = "\n\n".join(results)
@@ -600,7 +672,7 @@ CRITICAL RULES:
 {SCHEMA}"""
 
     sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text in {lang_name}."
-    raw = anthropic_call(sys_prompt, prompt, max_tokens=8000)
+    raw = ai_call(sys_prompt, prompt, max_tokens=8000)
     log(f"✅ JSON: {len(raw)} chars")
 
     s = raw.strip().replace("```json","").replace("```","").strip()
@@ -797,11 +869,27 @@ with st.sidebar:
                     st.sidebar.error(f"❌ {e}")
 
     st.divider()
+    st.markdown("**🤖 Модель AI**")
+    _model_choice = st.radio(
+        "Выбор модели",
+        ["⚡ Claude (Anthropic)", "🟢 Gemini (Google)"],
+        horizontal=True, key="model_choice", label_visibility="collapsed"
+    )
+    st.session_state["use_gemini"] = "Gemini" in _model_choice
+
+    st.divider()
     st.markdown("**🔑 API**")
-    if st.button("🧪 Anthropic", key="api_test"):
+    _ac1, _ac2 = st.columns(2)
+    if _ac1.button("🧪 Claude", key="api_test"):
         try:
             res = anthropic_call(None, "Say: OK", max_tokens=5)
-            st.success(f"✅ {res}")
+            st.success(f"✅ Claude: {res}")
+        except Exception as e:
+            st.error(f"❌ {str(e)[:60]}")
+    if _ac2.button("🧪 Gemini", key="api_test_gem"):
+        try:
+            res = gemini_call("Say: OK")
+            st.success(f"✅ Gemini: {res[:30]}")
         except Exception as e:
             st.error(f"❌ {str(e)[:60]}")
 
@@ -1395,9 +1483,9 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     # Overall score big display
     ov_tbl = Table([[
-        Paragraph(f"<font size=28 color='{hex_str(ov_col)}'><b>{ov_pct}%</b></font>", S["center"]),
+        Paragraph(f"<font size=32 color='{hex_str(ov_col)}'><b>{ov_pct}%</b></font>", S["center"]),
         Paragraph(f"<b>Overall Score</b><br/>{score_label(ov_pct)}", S["h2"])
-    ]], colWidths=[45*mm, W-45*mm])
+    ]], colWidths=[55*mm, W-55*mm])
     ov_tbl.setStyle(TableStyle([
         ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
         ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f1f5f9")),
@@ -1409,19 +1497,23 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     # Score breakdown table
     def _get_score(r, key):
-        """Get score handling both flat keys and nested dicts"""
         v = r.get(key, 0)
         if isinstance(v, str) and "%" in v: return int(v.replace("%","").strip())
-        if isinstance(v, (int,float)): return v
+        if isinstance(v, (int,float)): return int(v)
         return 0
     _cosmo_sc = pct(_get_score(result.get("cosmo_analysis",{}), "score")) or _get_score(result, "cosmo_score")
     _rufus_sc = pct(_get_score(result.get("rufus_analysis",{}), "score")) or _get_score(result, "rufus_score")
     score_map = [
         ("Title",       _get_score(result, "title_score")),
         ("Bullets",     _get_score(result, "bullets_score")),
-        ("Description", _get_score(result, "description_score")),
-        ("Images",      _get_score(result, "images_score")),
+        ("Описание",    _get_score(result, "description_score")),
+        ("Фото",        _get_score(result, "images_score")),
         ("A+",          _get_score(result, "aplus_score")),
+        ("Отзывы",      _get_score(result, "reviews_score")),
+        ("BSR",         _get_score(result, "bsr_score")),
+        ("Цена",        _get_score(result, "price_score")),
+        ("Варианты",    _get_score(result, "customization_score")),
+        ("Prime",       _get_score(result, "prime_score")),
         ("COSMO",       _cosmo_sc),
         ("Rufus",       _rufus_sc),
     ]
