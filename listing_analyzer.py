@@ -383,7 +383,8 @@ def analyze_vision(images, product_data, asin, log, lang=None):
     if not images: return ""
     if lang is None:
         lang = st.session_state.get("analysis_lang", "ru")
-    log(f"👁️ Vision: {len(images)} фото → Anthropic...")
+    _vision_model = st.session_state.get("gemini_model","gemini-2.5-flash") if st.session_state.get("use_gemini") else ANTHROPIC_MODEL_VISION
+    log(f"👁️ Vision: {len(images)} фото → {'Gemini '+_vision_model if st.session_state.get('use_gemini') else 'Claude'} ...")
 
     title  = product_data.get("title","")
     price  = product_data.get("price","")
@@ -526,7 +527,12 @@ APLUS_BLOCK_{{i}}
         msg_content.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
 
     try:
-        result = anthropic_vision(msg_content, max_tokens=2000, system=sys_prompt)
+        if st.session_state.get("use_gemini"):
+            _aplus_prompt = (sys_prompt or "") + "\n\n" + next((p["text"] for p in msg_content if p.get("type")=="text"), "")
+            _aplus_imgs = [(p["source"]["data"], p["source"].get("media_type","image/jpeg")) for p in msg_content if p.get("type")=="image"]
+            result = gemini_vision_call(_aplus_prompt, image_b64_list=_aplus_imgs, max_tokens=2000)
+        else:
+            result = anthropic_vision(msg_content, max_tokens=2000, system=sys_prompt)
         return result
     except Exception as e:
         log(f"⚠️ A+ Vision: {e}"); return ""
