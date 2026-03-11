@@ -224,7 +224,7 @@ def gemini_call(prompt, max_tokens=3000):
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан в Secrets")
     _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1/models/{_gmodel}:generateContent?key={key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
     payload = {"contents":[{"parts":[{"text":prompt}]}],
                "generationConfig":{"maxOutputTokens":max_tokens}}
     for attempt in range(3):
@@ -243,7 +243,7 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан")
     _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1/models/{_gmodel}:generateContent?key={key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
     parts = []
     # Add images
     if image_urls:
@@ -886,9 +886,11 @@ with st.sidebar:
     st.session_state["use_gemini"] = "Gemini" in _model_choice
     if st.session_state.get("use_gemini"):
         _gem_model = st.selectbox("Gemini модель", [
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-1.0-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-2.5-pro",
         ], key="gemini_model_sel", label_visibility="collapsed")
         st.session_state["gemini_model"] = _gem_model
 
