@@ -1363,12 +1363,15 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     ov_col     = score_color(ov_pct)
 
     story.append(Spacer(1, 10*mm))
-    story.append(Paragraph("Amazon Listing Audit", S["title"]))
+    story.append(Paragraph("<b>Amazon Listing Audit</b>", S["title"]))
+    _asin_link = f'<link href="https://www.amazon.com/dp/{_asin_val}" color="#1d4ed8">https://www.amazon.com/dp/{_asin_val}</link>'
+    story.append(Paragraph(_asin_link, S["small"]))
     story.append(HRFlowable(width=W, thickness=2, color=colors.HexColor("#3b82f6")))
     story.append(Spacer(1, 4*mm))
 
+    _asin_val = asin or our_data.get("parent_asin","") or "—"
     cover_data = [
-        ["ASIN", asin, "Дата", date_str],
+        ["ASIN", _asin_val, "Дата", date_str],
         ["Цена", price, "Рейтинг", f"{rating} ({reviews})"],
         ["Заголовок", Paragraph(title_val, S["body"]), "", ""],
     ]
@@ -1475,7 +1478,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
             act_m  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.+)", blk)
 
             sc_val  = int(sc_m.group(1)) if sc_m else 0
-            typ_txt = _clean(typ_m.group(1)) if typ_m else ""
+            typ_txt = _clean(typ_m.group(1)) if typ_m else ("главное" if i == 0 else "")
             str_txt = _clean(str_m.group(1)) if str_m else ""
             weak_txt= _clean(weak_m.group(1)) if weak_m else ""
             act_txt = _clean(act_m.group(1)) if act_m else ""
@@ -1655,7 +1658,7 @@ if page == "🏠 Обзор":
                         our_data=od,
                         vision_text=st.session_state.get("vision",""),
                         images=st.session_state.get("images",[]),
-                        asin=st.session_state.get("our_asin",""),
+                        asin=od.get("parent_asin","") or od.get("asin",""),
                         comp_data=st.session_state.get("comp_data_list",[])
                     )
                     st.session_state["_pdf_bytes"] = _pdf_bytes
@@ -1664,7 +1667,7 @@ if page == "🏠 Обзор":
                     st.error(f"Ошибка PDF: {_pe}")
     with _pdf_col2:
         if st.session_state.get("_pdf_bytes"):
-            _asin_dl = st.session_state.get("our_asin","listing")
+            _asin_dl = od.get("parent_asin","") or od.get("asin","listing")
             _date_dl = __import__("datetime").datetime.now().strftime("%Y%m%d")
             st.download_button(
                 label="⬇️ Скачать PDF",
@@ -2437,4 +2440,3 @@ elif _is_competitor_page:
         _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
         st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
         st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
- 
