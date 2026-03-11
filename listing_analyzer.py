@@ -2437,3 +2437,4 @@ elif _is_competitor_page:
         _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
         st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
         st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
+ 
