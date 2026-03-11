@@ -689,15 +689,29 @@ CRITICAL RULES:
     raw = ai_call(sys_prompt, prompt, max_tokens=8000)
     log(f"✅ JSON: {len(raw)} chars")
 
-    s = raw.strip().replace("```json","").replace("```","").strip()
-    start,end = s.find("{"),s.rfind("}")
-    if start==-1: start,end = s.find("{"),s.rfind("}")
-    if start==-1: raise ValueError(f"JSON not found: {{raw[:200]}}")
-    s = re.sub(r",\s*([}\]])", r"\1", s[start:end+1])
-    try: return json.loads(s)
-    except:
-        s2 = re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace('\n',' ')+'"', s)
-        return json.loads(re.sub(r",\s*([}\]])", r"\1", s2))
+    if not raw or not raw.strip():
+        log("⚠️ AI пустой ответ, повтор...")
+        raw = ai_call(sys_prompt, prompt, max_tokens=8000)
+    if not raw or not raw.strip():
+        raise ValueError("AI вернул пустой ответ")
+    log(f"🔍 Raw preview: {raw[:60]}")
+    s = raw.strip()
+    # Strip markdown code blocks
+    s = re.sub(r"^```[a-z]*\s*", "", s, flags=re.MULTILINE)
+    s = re.sub(r"```\s*$", "", s, flags=re.MULTILINE)
+    s = s.strip()
+    start, end = s.find("{"), s.rfind("}")
+    if start == -1:
+        raise ValueError(f"JSON не найден: {s[:200]}")
+    s = s[start:end+1]
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+    try:
+        return json.loads(s)
+    except Exception as je:
+        s2 = re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace("\n"," ")+'"', s)
+        s2 = re.sub(r",\s*([}\]])", r"\1", s2)
+        return json.loads(s2)
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log, prog=None):
