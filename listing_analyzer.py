@@ -1364,12 +1364,12 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     story.append(Spacer(1, 10*mm))
     story.append(Paragraph("<b>Amazon Listing Audit</b>", S["title"]))
+    _asin_val = asin or our_data.get("parent_asin","") or "—"
     _asin_link = f'<link href="https://www.amazon.com/dp/{_asin_val}" color="#1d4ed8">https://www.amazon.com/dp/{_asin_val}</link>'
     story.append(Paragraph(_asin_link, S["small"]))
     story.append(HRFlowable(width=W, thickness=2, color=colors.HexColor("#3b82f6")))
     story.append(Spacer(1, 4*mm))
 
-    _asin_val = asin or our_data.get("parent_asin","") or "—"
     cover_data = [
         ["ASIN", _asin_val, "Дата", date_str],
         ["Цена", price, "Рейтинг", f"{rating} ({reviews})"],
