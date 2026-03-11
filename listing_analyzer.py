@@ -1279,7 +1279,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
         pdfmetrics.registerFont(TTFont("DV-BoldOblique", _fdir + "DejaVuSans-BoldOblique.ttf"))
         _F, _FB, _FO, _FBO = "DV", "DV-Bold", "DV-Oblique", "DV-BoldOblique"
     except:
-        _F, _FB, _FO, _FBO = _F, _FB, "Helvetica-Oblique", "Helvetica-BoldOblique"
+        _F, _FB, _FO, _FBO = "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique"
 
     styles = getSampleStyleSheet()
 
