@@ -902,19 +902,25 @@ with st.sidebar:
         except Exception as e:
             st.error(f"❌ {str(e)[:60]}")
     if _ac2.button("🧪 Gemini", key="api_test_gem"):
+        _key = st.secrets.get("GEMINI_API_KEY","")
+        # First: list available models
+        for _ep in ["v1", "v1beta"]:
+            try:
+                _r = requests.get(f"https://generativelanguage.googleapis.com/{_ep}/models?key={_key}", timeout=10)
+                if _r.ok:
+                    _names = [m["name"] for m in _r.json().get("models",[]) if "generateContent" in m.get("supportedGenerationMethods",[])]
+                    st.info(f"[{_ep}] Доступно {len(_names)} моделей:\n" + "\n".join(_names[:20]))
+                    break
+                else:
+                    st.warning(f"[{_ep}] {_r.status_code}: {_r.text[:100]}")
+            except Exception as _le:
+                st.warning(f"[{_ep}] {_le}")
+        # Then test call
         try:
             res = gemini_call("Say: OK")
             st.success(f"✅ Gemini: {res[:40]}")
         except Exception as e:
             st.error(f"❌ {str(e)[:200]}")
-            # Show available models
-            try:
-                _key = st.secrets.get("GEMINI_API_KEY","")
-                _r = requests.get(f"https://generativelanguage.googleapis.com/v1/models?key={_key}", timeout=10)
-                if _r.ok:
-                    _names = [m["name"] for m in _r.json().get("models",[]) if "generateContent" in m.get("supportedGenerationMethods",[])]
-                    st.info("Доступные модели:\n" + "\n".join(_names[:15]))
-            except: pass
 
 # ── Input always visible at top ───────────────────────────────────────────────
 with st.expander("📎 Листинги", expanded=("result" not in st.session_state)):
