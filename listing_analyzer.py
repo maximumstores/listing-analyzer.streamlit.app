@@ -1379,38 +1379,10 @@ elif page == "📸 Фото":
                 # Action block based on score
                 if score > 0 and score < 8:
                     with st.expander("🛠 Что делать"):
-                        if i == 0:  # Main image
-                            issues = []
-                            t_low = text.lower()
-                            if "серый фон" in t_low or "grey" in t_low or "gray" in t_low or "фон" in t_low:
-                                issues.append("📸 Переснять на чисто белом фоне RGB(255,255,255) — lightbox или студия")
-                            if "штан" in t_low or "шорт" in t_low or "брюк" in t_low or "pants" in t_low or "shorts" in t_low:
-                                issues.append("✂️ Кадрировать по пояс или переснять без лишней одежды на модели")
-                            if "85%" in t_low or "заполнен" in t_low or "fill" in t_low:
-                                issues.append("🔍 Товар должен занимать ≥85% кадра — приблизить или обрезать отступы")
-                            if "текст" in t_low or "логотип" in t_low or "watermark" in t_low:
-                                issues.append("🚫 Убрать текст/логотипы/водяные знаки с главного фото")
-                            if not issues and wtxt:
-                                issues.append(f"→ {wtxt}")
-                            for _issue in issues:
-                                st.markdown(f"- {_issue}")
-                            if score <= 5:
-                                st.error("🔴 Приоритет ВЫСОКИЙ — риск suppression листинга Amazon")
-                        else:  # Gallery photos
-                            t_low = text.lower()
-                            actions = []
-                            if "текст" in t_low and ("мелк" in t_low or "small" in t_low or "ocr" in t_low):
-                                actions.append("🔡 Увеличить шрифт до ≥36pt, тёмный текст на белом фоне")
-                            if "инфографик" in t_low or "infographic" in t_low:
-                                actions.append("📊 Добавить инфографику: 17.5μ vs 21μ, temperature range, anti-odor days")
-                            if "lifestyle" in t_low or "лайфстайл" in t_low:
-                                actions.append("🏃 Добавить lifestyle: travel/office/hiking — показать use cases")
-                            if "size" in t_low or "размер" in t_low:
-                                actions.append("📏 Добавить size chart с измерениями в дюймах и см")
-                            if not actions and wtxt:
-                                actions.append(f"→ {wtxt}")
-                            for _a in actions:
-                                st.markdown(f"- {_a}")
+                        if wtxt:
+                            st.markdown(f"→ {wtxt}")
+                        if score <= 5 and i == 0:
+                            st.error("🔴 Приоритет ВЫСОКИЙ — риск suppression листинга Amazon")
                 # Debug: show raw if strength missing
                 if not stxt and text:
                     with st.expander("🔧 Raw (Strength не распознан)"):
