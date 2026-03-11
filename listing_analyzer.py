@@ -886,9 +886,11 @@ with st.sidebar:
     st.session_state["use_gemini"] = "Gemini" in _model_choice
     if st.session_state.get("use_gemini"):
         _gem_model = st.selectbox("Gemini модель", [
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash-preview-04-17",
+            "gemini-2.5-pro-preview-03-25",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
             "gemma-3-27b-it",
         ], key="gemini_model_sel", label_visibility="collapsed")
         st.session_state["gemini_model"] = _gem_model
@@ -905,9 +907,17 @@ with st.sidebar:
     if _ac2.button("🧪 Gemini", key="api_test_gem"):
         try:
             res = gemini_call("Say: OK")
-            st.success(f"✅ Gemini: {res[:30]}")
+            st.success(f"✅ Gemini: {res[:40]}")
         except Exception as e:
-            st.error(f"❌ {str(e)[:60]}")
+            st.error(f"❌ {str(e)[:200]}")
+            # Show available models
+            try:
+                _key = st.secrets.get("GEMINI_API_KEY","")
+                _r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={_key}", timeout=10)
+                if _r.ok:
+                    _names = [m["name"] for m in _r.json().get("models",[]) if "generateContent" in m.get("supportedGenerationMethods",[])]
+                    st.info("Доступные модели:\n" + "\n".join(_names[:15]))
+            except: pass
 
 # ── Input always visible at top ───────────────────────────────────────────────
 with st.expander("📎 Листинги", expanded=("result" not in st.session_state)):
