@@ -1268,20 +1268,33 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
         topMargin=20*mm, bottomMargin=20*mm)
 
     W = A4[0] - 40*mm
+    # Register DejaVu fonts for Cyrillic support
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    _fdir = "/usr/share/fonts/truetype/dejavu/"
+    try:
+        pdfmetrics.registerFont(TTFont("DV",       _fdir + "DejaVuSans.ttf"))
+        pdfmetrics.registerFont(TTFont("DV-Bold",  _fdir + "DejaVuSans-Bold.ttf"))
+        pdfmetrics.registerFont(TTFont("DV-Oblique",_fdir + "DejaVuSans-Oblique.ttf"))
+        pdfmetrics.registerFont(TTFont("DV-BoldOblique", _fdir + "DejaVuSans-BoldOblique.ttf"))
+        _F, _FB, _FO, _FBO = "DV", "DV-Bold", "DV-Oblique", "DV-BoldOblique"
+    except:
+        _F, _FB, _FO, _FBO = _F, _FB, "Helvetica-Oblique", "Helvetica-BoldOblique"
+
     styles = getSampleStyleSheet()
 
     # Custom styles
     S = {
-        "title":    ParagraphStyle("t",  fontSize=24, fontName="Helvetica-Bold",   textColor=colors.HexColor("#0f172a"), spaceAfter=4),
-        "h1":       ParagraphStyle("h1", fontSize=16, fontName="Helvetica-Bold",   textColor=colors.HexColor("#1e293b"), spaceBefore=12, spaceAfter=4),
-        "h2":       ParagraphStyle("h2", fontSize=13, fontName="Helvetica-Bold",   textColor=colors.HexColor("#334155"), spaceBefore=8,  spaceAfter=3),
-        "body":     ParagraphStyle("b",  fontSize=9,  fontName="Helvetica",        textColor=colors.HexColor("#475569"), spaceAfter=3, leading=14),
-        "small":    ParagraphStyle("s",  fontSize=8,  fontName="Helvetica",        textColor=colors.HexColor("#64748b"), spaceAfter=2),
-        "green":    ParagraphStyle("g",  fontSize=9,  fontName="Helvetica",        textColor=colors.HexColor("#15803d"), spaceAfter=2),
-        "red":      ParagraphStyle("r",  fontSize=9,  fontName="Helvetica",        textColor=colors.HexColor("#dc2626"), spaceAfter=2),
-        "orange":   ParagraphStyle("o",  fontSize=9,  fontName="Helvetica",        textColor=colors.HexColor("#d97706"), spaceAfter=2),
-        "center":   ParagraphStyle("c",  fontSize=9,  fontName="Helvetica",        alignment=TA_CENTER, spaceAfter=2),
-        "action":   ParagraphStyle("a",  fontSize=9,  fontName="Helvetica-BoldOblique", textColor=colors.HexColor("#1d4ed8"), spaceAfter=2),
+        "title":    ParagraphStyle("t",  fontSize=24, fontName=_FB,  textColor=colors.HexColor("#0f172a"), spaceAfter=4),
+        "h1":       ParagraphStyle("h1", fontSize=16, fontName=_FB,  textColor=colors.HexColor("#1e293b"), spaceBefore=12, spaceAfter=4),
+        "h2":       ParagraphStyle("h2", fontSize=13, fontName=_FB,  textColor=colors.HexColor("#334155"), spaceBefore=8,  spaceAfter=3),
+        "body":     ParagraphStyle("b",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#475569"), spaceAfter=3, leading=14),
+        "small":    ParagraphStyle("s",  fontSize=8,  fontName=_F,   textColor=colors.HexColor("#64748b"), spaceAfter=2),
+        "green":    ParagraphStyle("g",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#15803d"), spaceAfter=2),
+        "red":      ParagraphStyle("r",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#dc2626"), spaceAfter=2),
+        "orange":   ParagraphStyle("o",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#d97706"), spaceAfter=2),
+        "center":   ParagraphStyle("c",  fontSize=9,  fontName=_F,   alignment=TA_CENTER, spaceAfter=2),
+        "action":   ParagraphStyle("a",  fontSize=9,  fontName=_FBO, textColor=colors.HexColor("#1d4ed8"), spaceAfter=2),
     }
 
     def score_color(s):
@@ -1323,9 +1336,9 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
     ]
     cover_tbl = Table(cover_data, colWidths=[25*mm, 65*mm, 25*mm, 55*mm])
     cover_tbl.setStyle(TableStyle([
-        ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
-        ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
-        ("FONTNAME", (2,0), (2,-1), "Helvetica-Bold"),
+        ("FONTNAME", (0,0), (-1,-1), _F),
+        ("FONTNAME", (0,0), (0,-1), _FB),
+        ("FONTNAME", (2,0), (2,-1), _FB),
         ("FONTSIZE", (0,0), (-1,-1), 9),
         ("TEXTCOLOR", (0,0), (-1,-1), colors.HexColor("#334155")),
         ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f8fafc")),
@@ -1376,8 +1389,8 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
 
     sc_tbl = Table(score_rows, colWidths=[40*mm, 25*mm, 40*mm, 25*mm])
     sc_tbl.setStyle(TableStyle([
-        ("FONTNAME",   (0,0), (-1,0),  "Helvetica-Bold"),
-        ("FONTNAME",   (0,1), (-1,-1), "Helvetica"),
+        ("FONTNAME",   (0,0), (-1,0),  _FB),
+        ("FONTNAME",   (0,1), (-1,-1), _F),
         ("FONTSIZE",   (0,0), (-1,-1), 9),
         ("BACKGROUND", (0,0), (-1,0),  colors.HexColor("#1e293b")),
         ("TEXTCOLOR",  (0,0), (-1,0),  colors.white),
