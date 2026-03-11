@@ -231,11 +231,12 @@ def gemini_call(prompt, max_tokens=3000):
         r = requests.post(url, json=payload, timeout=120)
         if r.ok:
             return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        if r.status_code in (429, 503):
-            wait = 20*(attempt+1)
+        if r.status_code in (429, 503, 500):
+            wait = 60*(attempt+1)
+            st.toast(f"⏳ Gemini лимит, жду {wait}с... ({attempt+1}/3)")
             import time; time.sleep(wait); continue
         raise Exception(f"Gemini {r.status_code}: {r.text[:200]}")
-    raise Exception("Gemini перегружен после 3 попыток")
+    raise Exception("Gemini перегружен — попробуй через 2 мин")
 
 def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=2000):
     """Gemini vision - supports both URL and base64 images"""
@@ -265,11 +266,12 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
         r = requests.post(url, json=payload, timeout=120)
         if r.ok:
             return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        if r.status_code in (429, 503):
-            wait = 20*(attempt+1)
+        if r.status_code in (429, 503, 500):
+            wait = 60*(attempt+1)
+            st.toast(f"⏳ Gemini Vision лимит, жду {wait}с... ({attempt+1}/3)")
             import time; time.sleep(wait); continue
         raise Exception(f"Gemini Vision {r.status_code}: {r.text[:200]}")
-    raise Exception("Gemini Vision перегружен после 3 попыток")
+    raise Exception("Gemini Vision перегружен после 3 попыток — попробуй через 2 мин")
 
 def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=400, system=None):
     """Route vision call to Gemini or Claude"""
@@ -451,6 +453,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
     # Analyze photos: batch for Gemini (1 call), individual for Claude
     results = []
     if st.session_state.get("use_gemini"):
+        import time; time.sleep(5)  # small pause before batch
         log(f"👁️ Фото 1-{len(images)} → Gemini (batch)...")
         # Build batch prompt with all photos
         batch_prompt = intro + "\n\nАнализируй каждое фото СТРОГО по формату ниже.\n"
