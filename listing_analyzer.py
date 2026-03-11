@@ -686,12 +686,12 @@ CRITICAL RULES:
 {SCHEMA}"""
 
     sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text in {lang_name}."
-    raw = ai_call(sys_prompt, prompt, max_tokens=8000)
+    raw = ai_call(sys_prompt, prompt, max_tokens=12000)
     log(f"✅ JSON: {len(raw)} chars")
 
     if not raw or not raw.strip():
         log("⚠️ AI пустой ответ, повтор...")
-        raw = ai_call(sys_prompt, prompt, max_tokens=8000)
+        raw = ai_call(sys_prompt, prompt, max_tokens=12000)
     if not raw or not raw.strip():
         raise ValueError("AI вернул пустой ответ")
     log(f"🔍 Raw preview: {raw[:60]}")
@@ -705,12 +705,31 @@ CRITICAL RULES:
         raise ValueError(f"JSON не найден: {s[:200]}")
     s = s[start:end+1]
     s = re.sub(r",\s*([}\]])", r"\1", s)
+    def _try_parse(txt):
+        txt = re.sub(r",\s*([}\]])", r"\1", txt)
+        return json.loads(txt)
     try:
-        return json.loads(s)
-    except Exception as je:
+        return _try_parse(s)
+    except Exception:
+        # Try to fix truncated JSON by closing open structures
         s2 = re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace("\n"," ")+'"', s)
-        s2 = re.sub(r",\s*([}\]])", r"\1", s2)
-        return json.loads(s2)
+        try:
+            return _try_parse(s2)
+        except Exception:
+            # Count unclosed braces/brackets and close them
+            opens = s2.count("{") - s2.count("}")
+            opens_b = s2.count("[") - s2.count("]")
+            # Truncate at last complete key-value pair
+            for cut in range(len(s2)-1, 0, -1):
+                if s2[cut] in ('"', '}', ']', '0123456789'):
+                    candidate = s2[:cut+1]
+                    candidate += "]" * max(0, s2[:cut+1].count("[") - s2[:cut+1].count("]"))
+                    candidate += "}" * max(0, s2[:cut+1].count("{") - s2[:cut+1].count("}"))
+                    try:
+                        return _try_parse(candidate)
+                    except:
+                        continue
+            raise ValueError("Не удалось исправить JSON")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
