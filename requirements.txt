@@ -5,3 +5,4 @@ requests
 Pillow
 psycopg2-binary>=2.9.9
 pandas>=2.0.0
+reportlab
