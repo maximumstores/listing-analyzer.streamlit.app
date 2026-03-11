@@ -1271,14 +1271,40 @@ def generate_pdf_report(result, our_data, vision_text, images, asin):
     # Register DejaVu fonts for Cyrillic support
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    _fdir = "/usr/share/fonts/truetype/dejavu/"
-    try:
-        pdfmetrics.registerFont(TTFont("DV",       _fdir + "DejaVuSans.ttf"))
-        pdfmetrics.registerFont(TTFont("DV-Bold",  _fdir + "DejaVuSans-Bold.ttf"))
-        pdfmetrics.registerFont(TTFont("DV-Oblique",_fdir + "DejaVuSans-Oblique.ttf"))
-        pdfmetrics.registerFont(TTFont("DV-BoldOblique", _fdir + "DejaVuSans-BoldOblique.ttf"))
+    import os, urllib.request, tempfile
+
+    def _get_font(name, url):
+        """Download font if not cached, return path"""
+        cache = os.path.join(tempfile.gettempdir(), name)
+        if not os.path.exists(cache):
+            try: urllib.request.urlretrieve(url, cache)
+            except: return None
+        return cache
+
+    _base = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/"
+    _fonts = {
+        "DV":           "DejaVuSans.ttf",
+        "DV-Bold":      "DejaVuSans-Bold.ttf",
+        "DV-Oblique":   "DejaVuSans-Oblique.ttf",
+        "DV-BoldOblique":"DejaVuSans-BoldOblique.ttf",
+    }
+    # Also try local system path first
+    _local = "/usr/share/fonts/truetype/dejavu/"
+    _registered = True
+    for _fname, _ffile in _fonts.items():
+        try:
+            _local_path = _local + _ffile
+            if os.path.exists(_local_path):
+                pdfmetrics.registerFont(TTFont(_fname, _local_path))
+            else:
+                _dl = _get_font(_ffile, _base + _ffile)
+                if _dl: pdfmetrics.registerFont(TTFont(_fname, _dl))
+                else: _registered = False
+        except: pass
+
+    if _registered:
         _F, _FB, _FO, _FBO = "DV", "DV-Bold", "DV-Oblique", "DV-BoldOblique"
-    except:
+    else:
         _F, _FB, _FO, _FBO = "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique"
 
     styles = getSampleStyleSheet()
