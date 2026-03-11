@@ -1363,10 +1363,11 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     ov_col     = score_color(ov_pct)
 
     story.append(Spacer(1, 10*mm))
-    story.append(Paragraph("<b>Amazon Listing Audit</b>", S["title"]))
     _asin_val = asin or our_data.get("parent_asin","") or "—"
-    _asin_link = f'<link href="https://www.amazon.com/dp/{_asin_val}" color="#1d4ed8">https://www.amazon.com/dp/{_asin_val}</link>'
-    story.append(Paragraph(_asin_link, S["small"]))
+    story.append(Paragraph("Amazon Listing Audit", S["title"]))
+    story.append(Paragraph(
+        f'<link href="https://www.amazon.com/dp/{_asin_val}" color="#1d4ed8">'
+        f'amazon.com/dp/{_asin_val}</link>', S["small"]))
     story.append(HRFlowable(width=W, thickness=2, color=colors.HexColor("#3b82f6")))
     story.append(Spacer(1, 4*mm))
 
@@ -1392,9 +1393,9 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     # Overall score big display
     ov_tbl = Table([[
-        Paragraph(f"<font size=36 color='{hex_str(ov_col)}'><b>{ov_pct}%</b></font>", S["center"]),
+        Paragraph(f"<font size=28 color='{hex_str(ov_col)}'><b>{ov_pct}%</b></font>", S["center"]),
         Paragraph(f"<b>Overall Score</b><br/>{score_label(ov_pct)}", S["h2"])
-    ]], colWidths=[40*mm, W-40*mm])
+    ]], colWidths=[45*mm, W-45*mm])
     ov_tbl.setStyle(TableStyle([
         ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
         ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f1f5f9")),
@@ -1530,18 +1531,24 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
     story.append(Spacer(1, 3*mm))
 
-    for sec_key, sec_name in [("title","Заголовок"), ("bullets","Bullets"), ("description","Description"), ("aplus","A+ Контент")]:
-        sec = result.get(sec_key, {})
-        if not sec: continue
-        sc_v = pct(sec.get("score",0))
+    for sec_key, sec_score_key, sec_name in [
+        ("title",       "title_score",       "Заголовок"),
+        ("bullets",     "bullets_score",     "Bullets"),
+        ("description", "description_score", "Description"),
+        ("aplus",       "aplus_score",       "A+ Контент"),
+    ]:
+        sc_v = pct(result.get(sec_score_key, 0))
         sc_c = score_color(sc_v)
         story.append(Paragraph(
             f"{sec_name}  <font color='{hex_str(sc_c)}'><b>{sc_v}%</b></font>", S["h2"]))
-        if sec.get("gaps"):
-            for g in sec["gaps"][:3]:
-                story.append(Paragraph(f"! {g}", S["orange"]))
-        if sec.get("recommendation"):
-            story.append(Paragraph(f"> {sec['recommendation']}", S["action"]))
+        # Try nested dict first, then flat keys
+        sec = result.get(sec_key, {})
+        gaps = sec.get("gaps",[]) if isinstance(sec, dict) else result.get(f"{sec_key}_gaps",[])
+        rec  = sec.get("recommendation","") if isinstance(sec, dict) else result.get(f"{sec_key}_rec","")
+        for g in gaps[:3]:
+            story.append(Paragraph(f"! {g}", S["orange"]))
+        if rec:
+            story.append(Paragraph(f"> {rec}", S["action"]))
         story.append(Spacer(1, 2*mm))
 
     # ── COMPETITORS PAGE ────────────────────────────────────────────────────
