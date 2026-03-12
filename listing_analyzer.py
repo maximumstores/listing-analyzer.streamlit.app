@@ -338,13 +338,24 @@ def scrapingdog_product(asin, log):
                     log(f"  ✅ A+ API: /S/ баннеров: {len(data['aplus_image_urls'])}")
             except: pass
 
-            # Fallback: A+ banners are in images array AFTER first 7 product photos
+            # Check aplus_images field first (ScrapingDog)
+            if not data.get("aplus_image_urls"):
+                _api_aplus = data.get("aplus_images", [])
+                _real_aplus = [u for u in _api_aplus if isinstance(u,str) and u.startswith("http")
+                               and "grey-pixel" not in u and any(x in u for x in [".jpg",".jpeg",".png",".webp"])]
+                if _real_aplus:
+                    data["aplus_image_urls"] = _real_aplus[:6]
+                    log(f"  ✅ A+ из aplus_images: {len(_real_aplus)} шт")
+
+            # Fallback: A+ banners from images[7+]
             if not data.get("aplus_image_urls"):
                 _all_imgs = data.get("images", [])
                 if isinstance(_all_imgs, list) and len(_all_imgs) > 7:
-                    _aplus_candidates = [u for u in _all_imgs[7:] if isinstance(u, str)][:6]
-                    data["aplus_image_urls"] = _aplus_candidates
-                    log(f"  ✅ A+ баннеры из images[7+]: {len(_aplus_candidates)} шт")
+                    _aplus_candidates = [u for u in _all_imgs[7:] if isinstance(u, str)
+                                        and "grey-pixel" not in u][:8]
+                    if _aplus_candidates:
+                        data["aplus_image_urls"] = _aplus_candidates
+                        log(f"  ✅ A+ баннеры из images[7+]: {len(_aplus_candidates)} шт")
         # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin","images"]:
@@ -484,27 +495,22 @@ PHOTO_BLOCK_2
 
 ...и так для всех {len(images)} фото. Не пропускай ни одно фото."""
         b64_list = [(img["b64"], img.get("media_type","image/jpeg")) for img in images]
-        # Split into chunks of 2 photos to avoid token limit
-        _all_blocks = {}
-        _chunk_size = 2
-        for _chunk_start in range(0, len(images), _chunk_size):
-            _chunk = images[_chunk_start:_chunk_start+_chunk_size]
-            _nums = list(range(_chunk_start+1, _chunk_start+len(_chunk)+1))
-            _fmt = "Тип: [тип]\nОценка: X/10\nСильная сторона: [текст]\nСлабость: [текст]\nДействие: [текст]"
-            _cp = intro + f"\n\nАнализируй фото {_nums}. Для каждого выведи блок:\n"
-            for _n in _nums:
-                _cp += f"\nPHOTO_BLOCK_{_n}\n{_fmt}\n"
-            _cp += f"\nОбязательно все {len(_chunk)} блока."
-            _cb64 = [(_i["b64"], _i.get("media_type","image/jpeg")) for _i in _chunk]
-            log(f"👁️ Gemini batch фото {_nums}...")
-            import time; time.sleep(3)
-            _br = gemini_vision_call(_cp, image_b64_list=_cb64, max_tokens=2000)
-            log(f"🔍 raw[0:150]: {_br[:150]}")
-            for _m in re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _br, re.DOTALL):
-                _all_blocks[int(_m.group(1))] = _m.group(2).strip()
-        for i in range(len(images)):
-            blk = _all_blocks.get(i+1, "Тип: фото\nОценка: 0/10\nСильная сторона: —\nСлабость: не проанализировано\nДействие: повторить анализ")
-            results.append(f"PHOTO_BLOCK_{i+1}\n{blk}")
+        # Send each photo individually with pause (most reliable for Gemini)
+        import time
+        _fmt = "Тип: [тип]\nОценка: X/10\nСильная сторона: [текст]\nСлабость: [текст]\nДействие: [текст]"
+        for _i, _img in enumerate(images):
+            if _i > 0: time.sleep(8)
+            log(f"👁️ Gemini фото {_i+1}/{len(images)}...")
+            if _i == 0:
+                _pp = intro
+            else:
+                _pp = f"Ты эксперт Amazon фотографий. Оцени это фото #{_i+1} по рубрику: +2 видимость товара, +2 фон, +2 инфоценность, +2 Amazon соответствие, +1 appeal, +1 уникальность. Штрафы: -3 товар не виден, -2 лишняя одежда на главном, -2 фон не белый. Товар: {title}"
+            _pp += f"\n\nОтветь СТРОГО в формате:\nPHOTO_BLOCK_{_i+1}\n{_fmt}"
+            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=600)
+            # Parse this single block
+            _m = re.search(r"PHOTO_BLOCK_\d+\s*(.*)", _br, re.DOTALL)
+            _blk = _m.group(1).strip() if _m else _br.strip()
+            results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
     else:
         for i, img in enumerate(images):
             log(f"👁️ Фото {i+1}/{len(images)} {'🔵' * (i+1)}{'⚪' * (len(images)-i-1)}")
@@ -532,13 +538,14 @@ def analyze_aplus_vision(aplus_urls, product_data, log, lang=None):
         lang = st.session_state.get("analysis_lang", "ru")
 
     images = []
-    for i, url in enumerate(aplus_urls[:6]):
+    for i, url in enumerate(aplus_urls[:8]):
+        if "grey-pixel" in url: continue
         try:
             r = requests.get(url, timeout=15, headers={"User-Agent":"Mozilla/5.0"})
-            if r.ok and len(r.content) > 1000:
+            if r.ok and len(r.content) > 3000:
                 data_img, mt = compress_image(r.content)
-                images.append({"b64": base64.b64encode(data_img).decode(), "media_type": mt})
-                log(f"  📥 A+ баннер {i+1}: {len(data_img)//1024}KB ✅")
+                images.append({"b64": base64.b64encode(data_img).decode(), "media_type": mt, "url": url})
+                log(f"  📥 A+ баннер {len(images)}: {len(data_img)//1024}KB ✅")
         except Exception as e:
             log(f"  ⚠️ A+ баннер {i+1}: {e}")
     if not images: return ""
@@ -574,11 +581,16 @@ APLUS_BLOCK_{{i}}
         msg_content.append({"type":"text","text":f"{'A+ banner' if lang=='en' else 'A+ баннер'} #{i+1}:"})
         msg_content.append({"type":"image","source":{"type":"base64","media_type":img["media_type"],"data":img["b64"]}})
 
-    if st.session_state.get("use_gemini"):
-        log("⏭️ A+ Vision пропущен (Gemini режим)")
-        return ""
     try:
-        result = anthropic_vision(msg_content, max_tokens=2000, system=sys_prompt)
+        if st.session_state.get("use_gemini"):
+            # Gemini: send all A+ images in one call via b64
+            _ap_b64 = [(img["b64"], img["media_type"]) for img in images]
+            _ap_prompt = sys_prompt + "\n\n" + "\n".join(
+                [f"A+ баннер #{i+1}:" for i in range(len(images))])
+            result = gemini_vision_call(_ap_prompt, image_b64_list=_ap_b64, max_tokens=2000)
+        else:
+            result = anthropic_vision(msg_content, max_tokens=2000, system=sys_prompt)
+        log(f"✅ A+ Vision: {len(images)} баннеров проанализировано")
         return result
     except Exception as e:
         log(f"⚠️ A+ Vision: {e}"); return ""
@@ -863,6 +875,7 @@ with st.sidebar:
     NAV_ITEMS = [
         ("🏠", "Обзор"),
         ("📸", "Фото"),
+        ("🎨", "A+ Контент"),
         ("📝", "Контент"),
         ("🏆", "Benchmark"),
         ("🧠", "COSMO / Rufus"),
@@ -2091,6 +2104,71 @@ elif page == "📸 Фото":
                         st.code(text[:400])
 
 # ══════════════════════════════════════════════════════════════════════════════
+# PAGE: A+ Контент
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "🎨 A+ Контент":
+    st.title("🎨 A+ Контент")
+    _av = st.session_state.get("aplus_vision","")
+    _av_urls = st.session_state.get("our_data",{}).get("aplus_image_urls",[])
+
+    if not _av:
+        if st.session_state.get("our_data",{}).get("aplus"):
+            st.warning("⚠️ A+ баннеры не проанализированы. Нажми **🔄 Обновить анализ** в меню слева.")
+        else:
+            st.info("ℹ️ У этого листинга нет A+ контента.")
+    else:
+        # Score from result
+        _av_total = r.get("aplus_score", 0) if "r" in dir() else 0
+        if isinstance(_av_total, str): _av_total = int(_av_total.replace("%","") or 0)
+        if _av_total:
+            _av_col1, _av_col2 = st.columns([1,3])
+            _av_col1.metric("A+ Score", f"{_av_total}%")
+
+        _av_blocks = re.split(r"APLUS_BLOCK_\d+", _av)
+        _av_blocks = [b.strip() for b in _av_blocks if b.strip()]
+        st.markdown(f"**{len(_av_blocks)} баннер(ов) проанализировано**")
+        st.divider()
+
+        for _bi, _block in enumerate(_av_blocks):
+            _av_score_m = re.search(r"(?:Оценка|Score)\s*[:\-]?\s*(\d+)", _block)
+            _av_score = int(_av_score_m.group(1)) if _av_score_m else 0
+            _av_mod_m = re.search(r"(?:Модуль|Module)\s*[:\-]?\s*(.+)", _block)
+            _av_sum_m = re.search(r"(?:Содержание|Summary|Content)\s*[:\-]?\s*(.+)", _block)
+            _av_str_m = re.search(r"(?:Сильная сторона|Strength)\s*[:\-]?\s*(.{3,})", _block)
+            _av_weak_m = re.search(r"(?:Слабость|Weakness)\s*[:\-]?\s*(.{3,})", _block)
+            _av_act_m = re.search(r"(?:Действие|Action)\s*[:\-]?\s*(.{3,})", _block)
+            _av_mod  = _av_mod_m.group(1).strip() if _av_mod_m else ""
+            _av_sum  = _av_sum_m.group(1).strip() if _av_sum_m else ""
+            _av_str  = _av_str_m.group(1).strip() if _av_str_m else ""
+            _av_weak = _av_weak_m.group(1).strip() if _av_weak_m else ""
+            _av_act  = _av_act_m.group(1).strip() if _av_act_m else ""
+            _av_bc = "#22c55e" if _av_score>=8 else ("#f59e0b" if _av_score>=6 else "#ef4444")
+            _av_sl = "Отлично" if _av_score>=8 else ("Хорошо" if _av_score>=6 else "Слабо")
+
+            with st.container(border=True):
+                c_img, c_txt = st.columns([1, 2])
+                if _av_urls and _bi < len(_av_urls):
+                    with c_img:
+                        st.image(_av_urls[_bi], use_container_width=True)
+                with c_txt:
+                    _av_head = f"Баннер #{_bi+1}" + (f" — {_av_mod}" if _av_mod else "")
+                    st.markdown(f"**{_av_head}**")
+                    if _av_sum: st.caption(_av_sum)
+                    if _av_score:
+                        st.markdown(
+                            f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">' +
+                            f'<div style="font-size:2.5rem;font-weight:800;color:{_av_bc}">{_av_score}/10</div>' +
+                            f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">' +
+                            f'<div style="background:{_av_bc};width:{_av_score*10}%;height:10px;border-radius:6px"></div></div>' +
+                            f'<div style="color:{_av_bc};font-size:0.85rem;margin-top:3px">{_av_sl}</div></div></div>',
+                            unsafe_allow_html=True)
+                    if _av_str:  st.success(f"✅ {_av_str}")
+                    if _av_weak: st.warning(f"⚠️ {_av_weak}")
+                    if _av_act:
+                        with st.expander("🛠 Что делать"):
+                            st.markdown(f"→ {_av_act}")
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Контент
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "📝 Контент":
@@ -2185,48 +2263,12 @@ elif page == "📝 Контент":
     st.divider()
     _sec("A+",          "aplus_score")
 
-    # A+ Vision banners analysis
-    _av = st.session_state.get("aplus_vision","")
-    _av_urls = st.session_state.get("aplus_img_urls",[])
-    if _av:
-        with st.expander("🎨 A+ Vision — визуальный анализ баннеров", expanded=True):
-            _av_blocks = re.split(r"APLUS_BLOCK_\d+", _av)
-            _av_blocks = [b.strip() for b in _av_blocks if b.strip()]
-            for _bi, _block in enumerate(_av_blocks):
-                # Parse fields
-                _av_score_m = re.search(r"(?:Оценка|Score)\s*[:\-]?\s*(\d+)", _block)
-                _av_score = int(_av_score_m.group(1)) if _av_score_m else 0
-                _av_mod_m = re.search(r"(?:Модуль|Module)\s*[:\-]?\s*(.+)", _block)
-                _av_sum_m = re.search(r"(?:Содержание|Summary)\s*[:\-]?\s*(.+)", _block)
-                _av_str_m = re.search(r"(?:Сильная сторона|Strength)\s*[:\-]?\s*(.{3,})", _block)
-                _av_weak_m = re.search(r"(?:Слабость|Weakness)\s*[:\-]?\s*(.{3,})", _block)
-                _av_act_m = re.search(r"(?:Действие|Action)\s*[:\-]?\s*(.{3,})", _block)
-                _av_mod  = _av_mod_m.group(1).strip() if _av_mod_m else ""
-                _av_sum  = _av_sum_m.group(1).strip() if _av_sum_m else ""
-                _av_str  = _av_str_m.group(1).strip() if _av_str_m else ""
-                _av_weak = _av_weak_m.group(1).strip() if _av_weak_m else ""
-                _av_act  = _av_act_m.group(1).strip() if _av_act_m else ""
-                _av_bc = "#22c55e" if _av_score>=8 else ("#f59e0b" if _av_score>=6 else "#ef4444")
-                _av_sl = "Отлично" if _av_score>=8 else ("Хорошо" if _av_score>=6 else "Слабо")
-
-                with st.container(border=True):
-                    c_img, c_txt = st.columns([1,2])
-                    if _av_urls and _bi < len(_av_urls):
-                        with c_img:
-                            st.image(_av_urls[_bi], use_container_width=True)
-                    with c_txt:
-                        _av_head = f"Баннер #{_bi+1}" + (f" — {_av_mod}" if _av_mod else "")
-                        st.markdown(f"**{_av_head}**")
-                        if _av_sum: st.caption(_av_sum)
-                        if _av_score:
-                            st.markdown(f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0"><div style="font-size:2rem;font-weight:800;color:{_av_bc}">{_av_score}/10</div><div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px"><div style="background:{_av_bc};width:{_av_score*10}%;height:10px;border-radius:6px"></div></div><div style="color:{_av_bc};font-size:0.8rem;margin-top:2px">{_av_sl}</div></div></div>', unsafe_allow_html=True)
-                        if _av_str:  st.success(f"✅ {_av_str}")
-                        if _av_weak: st.warning(f"⚠️ {_av_weak}")
-                        if _av_score < 8 and (_av_act or _av_weak):
-                            with st.expander("🛠 Что делать"):
-                                st.markdown(f"→ {_av_act or _av_weak}")
+    # A+ — link to dedicated page
+    _av_check = st.session_state.get("aplus_vision","")
+    if _av_check:
+        st.info("🎨 Визуальный анализ A+ баннеров → перейди в раздел **A+ Контент** в меню слева")
     elif st.session_state.get("our_data",{}).get("aplus"):
-        st.info("🎨 A+ есть, но баннеры не загружены. Перезапусти анализ для Vision A+.")
+        st.info("🎨 A+ есть, но баннеры не загружены. Перезапусти анализ.")
 
     st.divider()
     _sec("Фото",        "images_score")
