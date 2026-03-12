@@ -404,13 +404,19 @@ def analyze_vision(images, product_data, asin, log, lang=None):
 Product: {title} | ASIN: {asin} | Price: {price} | Rating: {rating}
 
 SCORING RUBRIC (each photo scored 1-10):
-+2 pts — Subject clarity: product clearly visible, sharp focus, no blur
-+2 pts — Background: main=pure white required; lifestyle=relevant setting; infographic=clean layout
++2 pts — Product visibility: what % of frame is the ACTUAL sold product? If product is hidden under other clothing or <30% of frame — max 1 pt for this criterion
++2 pts — Background: main=pure white RGB(255,255,255); lifestyle=relevant setting; infographic=clean layout
 +2 pts — Information value: shows features/benefits/use case relevant to buyer decision
-+2 pts — Amazon compliance: no watermarks, no promotional text on main, correct aspect ratio
-+1 pt  — Emotional/lifestyle appeal: buyer can visualize using the product
++2 pts — Amazon compliance: no watermarks, no promo text on main, correct aspect ratio
++1 pt  — Lifestyle appeal: buyer can visualize using the product
 +1 pt  — Uniqueness vs generic stock photo
 
+CRITICAL PENALTIES (deduct immediately):
+-3 pts — Sold product hidden / barely visible (e.g. tank top under a shirt)
+-2 pts — Main photo has clothing/accessories not included in purchase
+-2 pts — Main photo background is not pure white
+
+BE STRICT: real problems must lower the score. 10/10 only if photo is perfect on ALL criteria.
 SCORE MEANINGS: 9-10=excellent, 7-8=good, 5-6=needs improvement, 1-4=poor/replace
 
 PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | comparison | packaging
@@ -431,13 +437,19 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 Товар: {title} | ASIN: {asin} | Цена: {price} | Рейтинг: {rating}
 
 РУБРИК ОЦЕНКИ (каждое фото 1-10 баллов):
-+2 балла — Чёткость объекта: товар хорошо виден, резкий фокус, нет размытия
-+2 балла — Фон: главное фото=чисто белый; lifestyle=релевантная обстановка; инфографика=чистый макет
++2 балла — Видимость товара: СКОЛЬКО % кадра занимает САМИ продаваемый товар (не другая одежда, не реквизит)? Если товар закрыт другой одеждой или занимает <30% — максимум 1 балл по этому критерию
++2 балла — Фон: главное=чисто белый RGB(255,255,255); lifestyle=релевантная обстановка; инфографика=чистый макет
 +2 балла — Информационная ценность: показывает характеристики/пользу/сценарий важный для покупателя
-+2 балла — Соответствие Amazon: нет водяных знаков, нет промотекста на главном фото, правильное соотношение
-+1 балл  — Эмоциональный/lifestyle appeal: покупатель представляет себя с товаром
++2 балла — Соответствие Amazon: нет водяных знаков, нет промотекста на главном, правильное соотношение
++1 балл  — Lifestyle appeal: покупатель представляет себя с товаром
 +1 балл  — Уникальность: не выглядит как стоковое фото
 
+КРИТИЧЕСКИЕ ШТРАФЫ (вычитай сразу):
+-3 балла — Продаваемый товар скрыт / почти не виден (например майка под рубашкой)
+-2 балла — На главном фото одежда/аксессуары НЕ из комплекта
+-2 балла — Фон главного фото не чисто белый
+
+БУДЬ СТРОГ: реальные проблемы должны снижать оценку. 10/10 только если фото идеально по ВСЕМ критериям.
 ЗНАЧЕНИЯ: 9-10=отлично, 7-8=хорошо, 5-6=требует улучшения, 1-4=слабо/заменить
 
 ТИПЫ ФОТ: главное | lifestyle | инфографика | размерная-сетка | детали | A+-баннер | сравнение | упаковка
