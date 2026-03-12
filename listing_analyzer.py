@@ -44,16 +44,24 @@ def db_init():
                 result_json TEXT,
                 vision_text TEXT,
                 our_title TEXT,
-                competitors_json TEXT
+                competitors_json TEXT,
+                workflow_status TEXT DEFAULT 'new_audit',
+                workflow_note TEXT,
+                workflow_updated_at TIMESTAMP
             )
         """)
         conn.commit()
-        # Migration: add listing_type if missing
-        try:
-            cur.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS listing_type TEXT DEFAULT 'наш'")
-            conn.commit()
-        except Exception:
-            pass
+        for _col, _def in [
+            ("listing_type", "TEXT DEFAULT 'наш'"),
+            ("workflow_status", "TEXT DEFAULT 'new_audit'"),
+            ("workflow_note", "TEXT"),
+            ("workflow_updated_at", "TIMESTAMP"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS {_col} {_def}")
+                conn.commit()
+            except Exception:
+                pass
         conn.close()
     except Exception:
         pass
@@ -102,6 +110,55 @@ def db_save(asin, result, vision_text, our_title):
     except Exception as _e:
         st.session_state["_db_save_err"] = str(_e)
         return False
+
+WORKFLOW_STATUSES = [
+    ("🆕", "new_audit",      "Новый аудит"),
+    ("✏️", "needs_rewrite",  "Нужен рерайт"),
+    ("🎨", "ready_designer", "К дизайнеру"),
+    ("📋", "ready_update",   "К загрузке"),
+    ("🔁", "recheck",        "Перепроверить"),
+    ("✅", "done",           "Готово"),
+]
+
+def workflow_label(status):
+    for icon, key, label in WORKFLOW_STATUSES:
+        if key == status: return f"{icon} {label}"
+    return "🆕 Новый аудит"
+
+def workflow_icon(status):
+    for icon, key, label in WORKFLOW_STATUSES:
+        if key == status: return icon
+    return "🆕"
+
+def db_update_workflow(record_id, status, note=""):
+    try:
+        conn = get_db()
+        if not conn: return False
+        cur = conn.cursor()
+        cur.execute("UPDATE listing_analysis SET workflow_status=%s, workflow_note=%s, workflow_updated_at=NOW() WHERE id=%s",
+                    (status, note, record_id))
+        conn.commit(); conn.close()
+        return True
+    except Exception:
+        return False
+
+def db_workflow_board():
+    try:
+        conn = get_db()
+        if not conn: return []
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT ON (asin) id, asin, our_title, overall_score,
+                   workflow_status, workflow_note, workflow_updated_at, analyzed_at
+            FROM listing_analysis WHERE listing_type='наш'
+            ORDER BY asin, analyzed_at DESC
+        """)
+        rows = cur.fetchall(); conn.close()
+        return [{"id":r[0],"asin":r[1],"title":r[2],"score":r[3],
+                 "status":r[4] or "new_audit","note":r[5] or "","updated":r[6],"analyzed":r[7]}
+                for r in rows]
+    except Exception:
+        return []
 
 def db_history(asin, limit=10):
     """Get analysis history for ASIN"""
@@ -311,53 +368,20 @@ def scrapingdog_product(asin, log):
             params={"api_key": sd_key, "asin": asin, "domain": "com"}, timeout=60)
         if not r.ok: log(f"⚠️ {r.status_code}: {r.text[:100]}"); return {}, []
         data = r.json()
-        # Fetch A+ content separately if available
+        # A+ banners = images[] after product photos (grey-pixel = JS lazy load, useless)
         if data.get("aplus"):
-            try:
-                ra = requests.get("https://api.scrapingdog.com/amazon/product",
-                    params={"api_key": sd_key, "asin": asin, "domain": "com", "type": "aplus"}, timeout=60)
-                if ra.ok:
-                    adata = ra.json()
-                    data["aplus_content"] = str(adata)[:2000]
-                    # Extract ALL image URLs recursively
-                    _aplus_imgs = []
-                    def _extract_urls(obj, depth=0):
-                        if depth > 10: return
-                        if isinstance(obj, dict):
-                            for k, v in obj.items():
-                                if isinstance(v, str) and v.startswith("http") and any(x in v.lower() for x in [".jpg",".png",".jpeg",".webp"]):
-                                    _aplus_imgs.append(v)
-                                else: _extract_urls(v, depth+1)
-                        elif isinstance(obj, list):
-                            for i in obj: _extract_urls(i, depth+1)
-                        elif isinstance(obj, str) and obj.startswith("http") and any(x in obj.lower() for x in [".jpg",".png",".jpeg",".webp"]):
-                            _aplus_imgs.append(obj)
-                    _extract_urls(adata)
-                    _aplus_banners = [u for u in _aplus_imgs if "/images/S/" in u]
-                    data["aplus_image_urls"] = list(dict.fromkeys(_aplus_banners))[:6]
-                    log(f"  ✅ A+ API: /S/ баннеров: {len(data['aplus_image_urls'])}")
-            except: pass
-
-            # PRIMARY: A+ banners from images[7+] (most reliable source)
-            if not data.get("aplus_image_urls"):
-                _all_imgs = data.get("images", [])
-                if isinstance(_all_imgs, list) and len(_all_imgs) > 6:
-                    _aplus_candidates = [u for u in _all_imgs[6:] if isinstance(u, str)
-                                        and "grey-pixel" not in u
-                                        and u.startswith("http")][:10]
-                    if _aplus_candidates:
-                        data["aplus_image_urls"] = _aplus_candidates
-                        log(f"  ✅ A+ из images[6+]: {len(_aplus_candidates)} шт")
-
-            # FALLBACK: aplus_images field — only if ≥2 real images (not grey-pixel)
-            if not data.get("aplus_image_urls"):
-                _api_aplus = data.get("aplus_images", [])
-                _real_aplus = [u for u in _api_aplus if isinstance(u,str) and u.startswith("http")
-                               and "grey-pixel" not in u
-                               and any(x in u for x in [".jpg",".jpeg",".png",".webp"])]
-                if len(_real_aplus) >= 2:
-                    data["aplus_image_urls"] = _real_aplus[:6]
-                    log(f"  ✅ A+ из aplus_images: {len(_real_aplus)} шт")
+            _prod_imgs = data.get("images_of_specified_asin", [])
+            _all_imgs  = data.get("images", [])
+            _split = len(_prod_imgs) if _prod_imgs else 6
+            _aplus_candidates = [u for u in _all_imgs[_split:]
+                                 if isinstance(u, str) and u.startswith("http")
+                                 and "grey-pixel" not in u
+                                 and "_SS4" not in u and "_SR3" not in u][:12]
+            if _aplus_candidates:
+                data["aplus_image_urls"] = _aplus_candidates
+                log(f"  ✅ A+ баннеры: {len(_aplus_candidates)} шт (images[{_split}+])")
+            else:
+                log("  ℹ️ A+ баннеры не найдены в images[]")
         # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin","images"]:
@@ -944,6 +968,10 @@ with st.sidebar:
     if _h_col1.button("📈  История", key="nav_history", use_container_width=True,
                  type="primary" if _cur3=="📈 История" else "secondary"):
         st.session_state["page"] = "📈 История"
+        st.rerun()
+    if st.button("📋  Workflow", key="nav_workflow", use_container_width=True,
+                 type="primary" if _cur3=="📋 Workflow" else "secondary"):
+        st.session_state["page"] = "📋 Workflow"
         st.rerun()
     # 🔄 Update button - reruns analysis with saved URL
     if st.session_state.get("our_url_saved") and "result" in st.session_state:
@@ -2809,3 +2837,59 @@ elif _is_competitor_page:
         _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
         st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
         st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: Workflow
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "📋 Workflow":
+    st.title("📋 Workflow — Pipeline листингов")
+
+    _board = db_workflow_board()
+
+    if not _board:
+        st.info("Нет данных. Запусти анализ хотя бы одного листинга.")
+    else:
+        # ── Kanban columns ──────────────────────────────────────────────────
+        _status_cols = {key: [] for _, key, _ in WORKFLOW_STATUSES}
+        for item in _board:
+            _s = item.get("status", "new_audit")
+            if _s not in _status_cols: _s = "new_audit"
+            _status_cols[_s].append(item)
+
+        # Show as columns
+        _wf_cols = st.columns(len(WORKFLOW_STATUSES))
+        for _ci, (icon, key, label) in enumerate(WORKFLOW_STATUSES):
+            with _wf_cols[_ci]:
+                _items = _status_cols[key]
+                st.markdown(f"**{icon} {label}**")
+                st.caption(f"{len(_items)} листинг(ов)")
+                for _it in _items:
+                    _score = _it.get("score") or 0
+                    _sc_color = "#22c55e" if _score>=80 else ("#f59e0b" if _score>=60 else "#ef4444")
+                    with st.container(border=True):
+                        st.markdown(f"**{_it['asin']}**")
+                        st.markdown(f'<span style="color:{_sc_color};font-weight:700">{_score}%</span>', unsafe_allow_html=True)
+                        if _it.get("title"): st.caption(_it["title"][:40])
+                        if _it.get("note"): st.caption(f"📝 {_it['note']}")
+
+        st.divider()
+
+        # ── Detail editor ───────────────────────────────────────────────────
+        st.subheader("✏️ Изменить статус")
+        if _board:
+            _sel_asin = st.selectbox("ASIN", [i["asin"] for i in _board], key="wf_sel_asin")
+            _sel_item = next((i for i in _board if i["asin"]==_sel_asin), None)
+            if _sel_item:
+                _cur_status = _sel_item.get("status","new_audit")
+                _status_keys = [k for _,k,_ in WORKFLOW_STATUSES]
+                _status_labels = [f"{ic} {lb}" for ic,_,lb in WORKFLOW_STATUSES]
+                _cur_idx = _status_keys.index(_cur_status) if _cur_status in _status_keys else 0
+                _new_status_label = st.radio("Статус", _status_labels, index=_cur_idx, horizontal=True, key="wf_status_radio")
+                _new_status = _status_keys[_status_labels.index(_new_status_label)]
+                _new_note = st.text_input("Заметка (необязательно)", value=_sel_item.get("note",""), key="wf_note")
+                if st.button("💾 Сохранить", type="primary", key="wf_save"):
+                    if db_update_workflow(_sel_item["id"], _new_status, _new_note):
+                        st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}")
+                        st.rerun()
+                    else:
+                        st.error("Ошибка сохранения")
