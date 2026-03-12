@@ -456,23 +456,31 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
     # Analyze photos: batch for Gemini (1 call), individual for Claude
     results = []
     if st.session_state.get("use_gemini"):
-        import time; time.sleep(5)  # small pause before batch
+        import time; time.sleep(5)
         log(f"👁️ Фото 1-{len(images)} → Gemini (batch)...")
-        # Build batch prompt with all photos
-        batch_prompt = intro + "\n\nАнализируй каждое фото СТРОГО по формату ниже.\n"
-        batch_prompt += block_fmt.format(i=1).replace("PHOTO_BLOCK_1", "PHOTO_BLOCK_{N}")
-        batch_prompt += f"\n\nВсего {len(images)} фото. Для каждого напиши блок PHOTO_BLOCK_N (N=1..{len(images)})."
+        _fmt = "Тип: [тип]\nОценка: X/10\nСильная сторона: [текст]\nСлабость: [текст]\nДействие: [текст]"
+        batch_prompt = intro + f"""
+
+Ты получишь {len(images)} фото подряд (фото 1, 2, 3...).
+Для КАЖДОГО фото выведи блок строго в таком формате (с заголовком PHOTO_BLOCK_N):
+
+PHOTO_BLOCK_1
+{_fmt}
+
+PHOTO_BLOCK_2
+{_fmt}
+
+...и так для всех {len(images)} фото. Не пропускай ни одно фото."""
         b64_list = [(img["b64"], img.get("media_type","image/jpeg")) for img in images]
-        batch_res = gemini_vision_call(batch_prompt, image_b64_list=b64_list, max_tokens=2000)
-        log(f"🔍 Batch raw[0:200]: {batch_res[:200]}")
-        # Split result into blocks
-        raw_blocks = re.split(r"PHOTO_BLOCK_\d+", batch_res)
-        raw_blocks = [b.strip() for b in raw_blocks if b.strip()]
-        for i, blk in enumerate(raw_blocks[:len(images)]):
+        batch_res = gemini_vision_call(batch_prompt, image_b64_list=b64_list, max_tokens=3000)
+        log(f"🔍 Batch raw[0:300]: {batch_res[:300]}")
+        # Parse by numbered blocks
+        _all_blocks = {}
+        for _m in re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", batch_res, re.DOTALL):
+            _all_blocks[int(_m.group(1))] = _m.group(2).strip()
+        for i in range(len(images)):
+            blk = _all_blocks.get(i+1, "Тип: фото\nОценка: 0/10\nСильная сторона: —\nСлабость: не проанализировано\nДействие: повторить анализ")
             results.append(f"PHOTO_BLOCK_{i+1}\n{blk}")
-        # Fill missing blocks
-        for i in range(len(results), len(images)):
-            results.append(f"PHOTO_BLOCK_{i+1}\nТип: фото\nОценка: 0/10\nСильная сторона: —\nСлабость: не проанализировано\nДействие: повторить анализ")
     else:
         for i, img in enumerate(images):
             log(f"👁️ Фото {i+1}/{len(images)} {'🔵' * (i+1)}{'⚪' * (len(images)-i-1)}")
