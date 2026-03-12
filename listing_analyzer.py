@@ -340,22 +340,366 @@ def scrapingdog_product(asin, log):
 
             # Check aplus_images field first (ScrapingDog)
             if not data.get("aplus_image_urls"):
-                _api_aplus = data.get("aplus_images", [])
-                _real_aplus = [u for u in _api_aplus if isinstance(u,str) and u.startswith("http")
-                               and "grey-pixel" not in u and any(x in u for x in [".jpg",".jpeg",".png",".webp"])]
-                if _real_aplus:
-                    data["aplus_image_urls"] = _real_aplus[:6]
-                    log(f"  ✅ A+ из aplus_images: {len(_real_aplus)} шт")
+                _api_aplus = data.get("aplus_images", [])# Amazon Listing Analyzer v2 — MR.EQUIPP
+import json, re, base64, requests, streamlit as st
+from PIL import Image
+import io
+from datetime import datetime
 
-            # Fallback: A+ banners from images[7+]
+# ── PostgreSQL history ─────────────────────────────────────────────────────────
+def get_db():
+    """Get DB connection from Streamlit secrets"""
+    db_url = st.secrets.get("DATABASE_URL","")
+    if not db_url:
+        st.session_state["_db_err"] = "DATABASE_URL не найден в secrets"
+        return None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, sslmode="require")
+        return conn
+    except ImportError as e:
+        st.session_state["_db_err"] = f"psycopg2 не установлен: {e}"
+        return None
+    except Exception as _e:
+        st.session_state["_db_err"] = f"Ошибка подключения: {_e}"
+        return None
+
+def db_init():
+    """Create table if not exists"""
+    conn = get_db()
+    if not conn: return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS listing_analysis (
+                id SERIAL PRIMARY KEY,
+                asin TEXT NOT NULL,
+                listing_type TEXT DEFAULT 'наш',
+                analyzed_at TIMESTAMP DEFAULT NOW(),
+                overall_score INT,
+                title_score INT,
+                bullets_score INT,
+                images_score INT,
+                aplus_score INT,
+                cosmo_score INT,
+                rufus_score INT,
+                result_json TEXT,
+                vision_text TEXT,
+                our_title TEXT,
+                competitors_json TEXT
+            )
+        """)
+        conn.commit()
+        # Migration: add listing_type if missing
+        try:
+            cur.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS listing_type TEXT DEFAULT 'наш'")
+            conn.commit()
+        except Exception:
+            pass
+        conn.close()
+    except Exception:
+        pass
+
+def db_save(asin, result, vision_text, our_title):
+    """Save analysis result to DB"""
+    conn = get_db()
+    if not conn: return False
+    try:
+        cosmo = pct(result.get("cosmo_analysis",{}).get("score",0)) if isinstance(result.get("cosmo_analysis"),dict) else 0
+        rufus = pct(result.get("rufus_analysis",{}).get("score",0)) if isinstance(result.get("rufus_analysis"),dict) else 0
+        # Collect competitor snapshot
+        comp_list = st.session_state.get("comp_data_list", [])
+        comp_snap = []
+        for _i, _cd in enumerate(comp_list):
+            if not _cd: continue
+            _cai = st.session_state.get(f"comp_ai_{_i}", {})
+            comp_snap.append({
+                "asin": get_asin_from_data(_cd),
+                "title": _cd.get("title","")[:80],
+                "overall": pct(_cai.get("overall_score",0)) if _cai else 0,
+                "price": _cd.get("price",""),
+                "rating": _cd.get("average_rating",""),
+                "reviews": _cd.get("reviews_count",""),
+            })
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO listing_analysis
+              (asin, overall_score, title_score, bullets_score, images_score,
+               aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title, competitors_json)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (asin,
+              pct(result.get("overall_score",0)),
+              pct(result.get("title_score",0)),
+              pct(result.get("bullets_score",0)),
+              pct(result.get("images_score",0)),
+              pct(result.get("aplus_score",0)),
+              cosmo, rufus,
+              json.dumps(result, ensure_ascii=False),
+              vision_text or "",
+              our_title or "",
+              json.dumps(comp_snap, ensure_ascii=False)))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as _e:
+        st.session_state["_db_save_err"] = str(_e)
+        return False
+
+def db_history(asin, limit=10):
+    """Get analysis history for ASIN"""
+    conn = get_db()
+    if not conn: return []
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT analyzed_at, overall_score, title_score, bullets_score,
+                   images_score, aplus_score, cosmo_score, rufus_score, our_title
+            FROM listing_analysis
+            WHERE asin = %s
+            ORDER BY analyzed_at DESC
+            LIMIT %s
+        """, (asin, limit))
+        rows = cur.fetchall()
+        conn.close()
+        return [{"date": r[0], "overall": r[1], "title": r[2], "bullets": r[3],
+                 "images": r[4], "aplus": r[5], "cosmo": r[6], "rufus": r[7], "our_title": r[8]}
+                for r in rows]
+    except Exception:
+        return []
+
+def db_all_asins():
+    """List all ASINs with latest score"""
+    conn = get_db()
+    if not conn: return []
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at, listing_type
+            FROM listing_analysis
+            ORDER BY asin, analyzed_at DESC
+        """)
+        rows = cur.fetchall()
+        conn.close()
+        return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3], "type": r[4]} for r in rows]
+    except Exception:
+        return []
+
+ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MODEL        = "claude-sonnet-4-5"  # text analysis
+ANTHROPIC_MODEL_VISION = "claude-sonnet-4-5"  # vision
+
+SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
+
+
+def get_asin(url):
+    m = re.search(r'/dp/([A-Z0-9]{10})', url)
+    return m.group(1) if m else None
+
+def sc(s): return "🟢" if s>=8 else ("🟡" if s>=6 else "🔴")
+def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"}.get(p,p)
+
+def get_asin_from_data(d):
+    """Get ASIN from product data, using stored input ASIN as priority"""
+    return d.get("_input_asin","") or d.get("parent_asin","") or d.get("product_information",{}).get("ASIN","")
+
+def pct(val):
+    """Parse score: int 0-100, int 0-10, or string 'XX%' -> int 0-100"""
+    if isinstance(val, str):
+        try: return int(val.replace("%","").strip())
+        except: return 0
+    if isinstance(val, (float, int)):
+        v = int(val)
+        return v if v > 10 else v * 10
+    return 0
+
+def sc_pct(val):
+    v = pct(val)
+    return "🟢" if v>=75 else ("🟡" if v>=50 else "🔴")
+
+def section(label, score, gaps, rec, raw_text="", char_limit=0):
+    c1,c2 = st.columns([4,1])
+    c1.markdown(f"**{label}**"); c2.markdown(f"{sc(score)} **{score}/10**")
+    st.progress(score/10)
+    if raw_text:
+        char_count = len(raw_text)
+        color = "red" if (char_limit and char_count > char_limit) else "gray"
+        st.markdown(f"<small style='color:{color}'>📝 {char_count} симв{f' / {char_limit} лимит' if char_limit else ''}</small>", unsafe_allow_html=True)
+        with st.expander("Показать текст"):
+            st.markdown(f"> {raw_text}")
+    if gaps:
+        with st.expander(f"⚠️ Пробелы ({len(gaps)})"):
+            for g in gaps: st.markdown(f"- {g}")
+    if rec: st.info(f"💡 {rec}")
+
+def _anthropic_post(payload, retries=3):
+    import time
+    key = st.secrets.get("ANTHROPIC_API_KEY","")
+    if not key: raise Exception("ANTHROPIC_API_KEY не задан")
+    headers = {"x-api-key":key,"anthropic-version":"2023-06-01","content-type":"application/json"}
+    for attempt in range(retries):
+        r = requests.post(ANTHROPIC_URL, headers=headers, json=payload, timeout=300)
+        if r.ok:
+            return r.json()["content"][0]["text"]
+        if r.status_code == 529:
+            wait = 20 * (attempt + 1)
+            st.toast(f"⏳ Anthropic перегружен, жду {wait}с... ({attempt+1}/{retries})")
+            time.sleep(wait)
+            continue
+        raise Exception(f"Anthropic {r.status_code}: {r.json().get('error',{}).get('message','')}")
+    raise Exception("Anthropic перегружен — попробуй через минуту")
+
+def anthropic_call(system, user, max_tokens=3000):
+    payload = {"model": ANTHROPIC_MODEL, "max_tokens": max_tokens, "messages": [{"role":"user","content":user}]}
+    if system: payload["system"] = system
+    return _anthropic_post(payload)
+
+def anthropic_vision(content_blocks, max_tokens=3000, system=None):
+    payload = {"model": ANTHROPIC_MODEL_VISION, "max_tokens": max_tokens,
+               "messages": [{"role":"user","content":content_blocks}]}
+    if system: payload["system"] = system
+    return _anthropic_post(payload)
+
+# ── Gemini AI ─────────────────────────────────────────────────────────────────
+def gemini_call(prompt, max_tokens=3000):
+    """Call Google Gemini as fallback model"""
+    import time
+    key = st.secrets.get("GEMINI_API_KEY","")
+    if not key: raise Exception("GEMINI_API_KEY не задан в Secrets")
+    _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
+    payload = {"contents":[{"parts":[{"text":prompt}]}],
+               "generationConfig":{"maxOutputTokens":max_tokens}}
+    for attempt in range(3):
+        r = requests.post(url, json=payload, timeout=120)
+        if r.ok:
+            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        if r.status_code in (429, 503, 500):
+            wait = 60*(attempt+1)
+            st.toast(f"⏳ Gemini лимит, жду {wait}с... ({attempt+1}/3)")
+            import time; time.sleep(wait); continue
+        raise Exception(f"Gemini {r.status_code}: {r.text[:200]}")
+    raise Exception("Gemini перегружен — попробуй через 2 мин")
+
+def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=2000):
+    """Gemini vision - supports both URL and base64 images"""
+    import time
+    key = st.secrets.get("GEMINI_API_KEY","")
+    if not key: raise Exception("GEMINI_API_KEY не задан")
+    _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
+    parts = []
+    # Add images
+    if image_urls:
+        for img_url in image_urls:
+            try:
+                r_img = requests.get(img_url, timeout=15)
+                if r_img.ok:
+                    import base64 as _b64
+                    parts.append({"inline_data": {"mime_type": "image/jpeg",
+                        "data": _b64.b64encode(r_img.content).decode()}})
+            except: pass
+    if image_b64_list:
+        for b64, mime in image_b64_list:
+            parts.append({"inline_data": {"mime_type": mime or "image/jpeg", "data": b64}})
+    parts.append({"text": prompt})
+    payload = {"contents": [{"parts": parts}],
+               "generationConfig": {"maxOutputTokens": max_tokens}}
+    _last_err = ""
+    for attempt in range(3):
+        r = requests.post(url, json=payload, timeout=120)
+        _last_err = f"{r.status_code}: {r.text[:300]}"
+        st.toast(f"🔍 Gemini Vision attempt {attempt+1}: {r.status_code}")
+        if r.ok:
+            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        if r.status_code in (429, 503, 500):
+            wait = 60*(attempt+1)
+            st.toast(f"⏳ Gemini Vision {r.status_code}, жду {wait}с...")
+            import time; time.sleep(wait); continue
+        raise Exception(f"Gemini Vision {_last_err}")
+    raise Exception(f"Gemini Vision исчерпан: {_last_err}")
+
+def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=400, system=None):
+    """Route vision call to Gemini or Claude"""
+    if st.session_state.get("use_gemini"):
+        full = f"{system}\n\n{prompt}" if system else prompt
+        if image_url:
+            return gemini_vision_call(full, image_urls=[image_url], max_tokens=max_tokens)
+        elif image_b64:
+            return gemini_vision_call(full, image_b64_list=[(image_b64, media_type)], max_tokens=max_tokens)
+    else:
+        blocks = []
+        if system: pass  # passed separately
+        if image_b64:
+            blocks = [
+                {"type":"text","text": prompt},
+                {"type":"image","source":{"type":"base64","media_type":media_type,"data":image_b64}}
+            ]
+        return anthropic_vision(blocks, max_tokens=max_tokens, system=system)
+
+def ai_call(system, user, max_tokens=3000):
+    """Route to Gemini or Claude based on user choice"""
+    if st.session_state.get("use_gemini"):
+        full = f"{system}\n\n{user}" if system else user
+        return gemini_call(full, max_tokens)
+    return anthropic_call(system, user, max_tokens)
+
+# ── ScrapingDog ───────────────────────────────────────────────────────────────
+def scrapingdog_product(asin, log):
+    sd_key = st.secrets.get("SCRAPINGDOG_API_KEY","")
+    if not sd_key: log("⚠️ SCRAPINGDOG_API_KEY не задан"); return {}, []
+    log(f"🌐 ScrapingDog: {asin}...")
+    try:
+        r = requests.get("https://api.scrapingdog.com/amazon/product",
+            params={"api_key": sd_key, "asin": asin, "domain": "com"}, timeout=60)
+        if not r.ok: log(f"⚠️ {r.status_code}: {r.text[:100]}"); return {}, []
+        data = r.json()
+        # Fetch A+ content separately if available
+        if data.get("aplus"):
+            try:
+                ra = requests.get("https://api.scrapingdog.com/amazon/product",
+                    params={"api_key": sd_key, "asin": asin, "domain": "com", "type": "aplus"}, timeout=60)
+                if ra.ok:
+                    adata = ra.json()
+                    data["aplus_content"] = str(adata)[:2000]
+                    # Extract ALL image URLs recursively
+                    _aplus_imgs = []
+                    def _extract_urls(obj, depth=0):
+                        if depth > 10: return
+                        if isinstance(obj, dict):
+                            for k, v in obj.items():
+                                if isinstance(v, str) and v.startswith("http") and any(x in v.lower() for x in [".jpg",".png",".jpeg",".webp"]):
+                                    _aplus_imgs.append(v)
+                                else: _extract_urls(v, depth+1)
+                        elif isinstance(obj, list):
+                            for i in obj: _extract_urls(i, depth+1)
+                        elif isinstance(obj, str) and obj.startswith("http") and any(x in obj.lower() for x in [".jpg",".png",".jpeg",".webp"]):
+                            _aplus_imgs.append(obj)
+                    _extract_urls(adata)
+                    _aplus_banners = [u for u in _aplus_imgs if "/images/S/" in u]
+                    data["aplus_image_urls"] = list(dict.fromkeys(_aplus_banners))[:6]
+                    log(f"  ✅ A+ API: /S/ баннеров: {len(data['aplus_image_urls'])}")
+            except: pass
+
+            # PRIMARY: A+ banners from images[7+] (most reliable source)
             if not data.get("aplus_image_urls"):
                 _all_imgs = data.get("images", [])
-                if isinstance(_all_imgs, list) and len(_all_imgs) > 7:
-                    _aplus_candidates = [u for u in _all_imgs[7:] if isinstance(u, str)
-                                        and "grey-pixel" not in u][:8]
+                if isinstance(_all_imgs, list) and len(_all_imgs) > 6:
+                    _aplus_candidates = [u for u in _all_imgs[6:] if isinstance(u, str)
+                                        and "grey-pixel" not in u
+                                        and u.startswith("http")][:10]
                     if _aplus_candidates:
                         data["aplus_image_urls"] = _aplus_candidates
-                        log(f"  ✅ A+ баннеры из images[7+]: {len(_aplus_candidates)} шт")
+                        log(f"  ✅ A+ из images[6+]: {len(_aplus_candidates)} шт")
+
+            # FALLBACK: aplus_images field — only if ≥2 real images (not grey-pixel)
+            if not data.get("aplus_image_urls"):
+                _api_aplus = data.get("aplus_images", [])
+                _real_aplus = [u for u in _api_aplus if isinstance(u,str) and u.startswith("http")
+                               and "grey-pixel" not in u
+                               and any(x in u for x in [".jpg",".jpeg",".png",".webp"])]
+                if len(_real_aplus) >= 2:
+                    data["aplus_image_urls"] = _real_aplus[:6]
+                    log(f"  ✅ A+ из aplus_images: {len(_real_aplus)} шт")
         # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin","images"]:
@@ -1111,21 +1455,7 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                 del st.session_state[_k]
             st.rerun()
 
-    # Handle sidebar refresh trigger
-    if st.session_state.pop("_trigger_rerun", False):
-        _saved_url = st.session_state.get("our_url_saved","")
-        _saved_comps = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
-        if _saved_url:
-            lines = []; ph = st.empty()
-            def log(msg): lines.append(msg); ph.markdown("\n\n".join(lines[-8:]))
-            _prog2 = st.progress(0, text="🔄 Обновляю анализ...")
-            try:
-                result, vision = run_analysis(_saved_url, _saved_comps, log, prog=_prog2)
-                st.session_state.update({"result": result, "vision": vision})
-                st.session_state["page"] = "🏠 Обзор"
-                st.rerun()
-            except Exception as e:
-                st.error(f"Ошибка: {e}")
+    # (sidebar refresh handled globally above)
 
     if _run_btn:
         lines = []; ph = st.empty()
@@ -1371,6 +1701,25 @@ def page_history():
 
 # Init DB on startup
 db_init()
+
+# ── Handle sidebar refresh trigger (any page) ─────────────────────────────────
+if st.session_state.pop("_trigger_rerun", False):
+    _saved_url = st.session_state.get("our_url_saved","")
+    _saved_comps = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
+    if _saved_url:
+        _ph_refresh = st.empty()
+        _lines_r = []
+        def _log_r(msg): _lines_r.append(msg); _ph_refresh.markdown("\n\n".join(_lines_r[-8:]))
+        _prog_r = st.progress(0, text="🔄 Обновляю анализ...")
+        try:
+            _r2, _v2 = run_analysis(_saved_url, _saved_comps, _log_r, prog=_prog_r)
+            st.session_state.update({"result": _r2, "vision": _v2})
+            st.session_state["page"] = "🏠 Обзор"
+            _prog_r.empty(); _ph_refresh.empty()
+            st.rerun()
+        except Exception as _e:
+            st.error(f"Ошибка: {_e}")
+            st.stop()
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
 page = st.session_state.get("page", "🏠 Обзор")
