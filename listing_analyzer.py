@@ -262,16 +262,19 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
     parts.append({"text": prompt})
     payload = {"contents": [{"parts": parts}],
                "generationConfig": {"maxOutputTokens": max_tokens}}
+    _last_err = ""
     for attempt in range(3):
         r = requests.post(url, json=payload, timeout=120)
+        _last_err = f"{r.status_code}: {r.text[:300]}"
+        st.toast(f"🔍 Gemini Vision attempt {attempt+1}: {r.status_code}")
         if r.ok:
             return r.json()["candidates"][0]["content"]["parts"][0]["text"]
         if r.status_code in (429, 503, 500):
             wait = 60*(attempt+1)
-            st.toast(f"⏳ Gemini Vision {r.status_code}, жду {wait}с... ({attempt+1}/3)")
+            st.toast(f"⏳ Gemini Vision {r.status_code}, жду {wait}с...")
             import time; time.sleep(wait); continue
-        raise Exception(f"Gemini Vision {r.status_code}: {r.text[:300]}")
-    raise Exception("Gemini Vision: все 3 попытки исчерпаны")
+        raise Exception(f"Gemini Vision {_last_err}")
+    raise Exception(f"Gemini Vision исчерпан: {_last_err}")
 
 def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=400, system=None):
     """Route vision call to Gemini or Claude"""
