@@ -464,6 +464,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
         batch_prompt += f"\n\nВсего {len(images)} фото. Для каждого напиши блок PHOTO_BLOCK_N (N=1..{len(images)})."
         b64_list = [(img["b64"], img.get("media_type","image/jpeg")) for img in images]
         batch_res = gemini_vision_call(batch_prompt, image_b64_list=b64_list, max_tokens=2000)
+        log(f"🔍 Batch raw[0:200]: {batch_res[:200]}")
         # Split result into blocks
         raw_blocks = re.split(r"PHOTO_BLOCK_\d+", batch_res)
         raw_blocks = [b.strip() for b in raw_blocks if b.strip()]
