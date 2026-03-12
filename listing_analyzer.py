@@ -925,10 +925,29 @@ with st.sidebar:
     # История — всегда видна в сайдбаре
     st.divider()
     _cur3 = st.session_state.get("page","")
-    if st.button("📈  История", key="nav_history", use_container_width=True,
+    _h_col1, _h_col2 = st.columns([2,1])
+    if _h_col1.button("📈  История", key="nav_history", use_container_width=True,
                  type="primary" if _cur3=="📈 История" else "secondary"):
         st.session_state["page"] = "📈 История"
         st.rerun()
+    # 🔄 Update button - reruns analysis with saved URL
+    if st.session_state.get("our_url_saved") and "result" in st.session_state:
+        if st.button("🔄 Обновить анализ", use_container_width=True, key="sidebar_refresh"):
+            st.session_state["_trigger_rerun"] = True
+            st.rerun()
+
+    # Share to Telegram button
+    if "result" in st.session_state and "our_data" in st.session_state:
+        _asin_s = st.session_state["our_data"].get("parent_asin","")
+        _sc_s = st.session_state["result"].get("overall_score","—")
+        if isinstance(_sc_s,(int,float)): _sc_s = f"{int(_sc_s)}%"
+        _url = "https://listing-analyze.streamlit.app"
+        _msg = f"Amazon Listing Audit%0AASIN: {_asin_s}%0AScore: {_sc_s}%0A{_url}"
+        _h_col2.markdown(
+            f'<a href="https://t.me/share/url?url={_url}&text={_msg}" target="_blank">' +
+            '<button style="width:100%;padding:6px 2px;background:#0088cc;color:white;' +
+            'border:none;border-radius:6px;cursor:pointer;font-size:0.75rem">📤 TG</button></a>',
+            unsafe_allow_html=True)
 
     # Return from history button — always visible when in history mode
     if st.session_state.get("_hist_loaded"):
@@ -1078,6 +1097,22 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
             for _k in list(st.session_state.keys()):
                 del st.session_state[_k]
             st.rerun()
+
+    # Handle sidebar refresh trigger
+    if st.session_state.pop("_trigger_rerun", False):
+        _saved_url = st.session_state.get("our_url_saved","")
+        _saved_comps = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
+        if _saved_url:
+            lines = []; ph = st.empty()
+            def log(msg): lines.append(msg); ph.markdown("\n\n".join(lines[-8:]))
+            _prog2 = st.progress(0, text="🔄 Обновляю анализ...")
+            try:
+                result, vision = run_analysis(_saved_url, _saved_comps, log, prog=_prog2)
+                st.session_state.update({"result": result, "vision": vision})
+                st.session_state["page"] = "🏠 Обзор"
+                st.rerun()
+            except Exception as e:
+                st.error(f"Ошибка: {e}")
 
     if _run_btn:
         lines = []; ph = st.empty()
