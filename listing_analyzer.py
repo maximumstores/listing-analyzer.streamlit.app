@@ -472,12 +472,24 @@ PHOTO_BLOCK_2
 
 ...и так для всех {len(images)} фото. Не пропускай ни одно фото."""
         b64_list = [(img["b64"], img.get("media_type","image/jpeg")) for img in images]
-        batch_res = gemini_vision_call(batch_prompt, image_b64_list=b64_list, max_tokens=3000)
-        log(f"🔍 Batch raw[0:300]: {batch_res[:300]}")
-        # Parse by numbered blocks
+        # Split into chunks of 2 photos to avoid token limit
         _all_blocks = {}
-        for _m in re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", batch_res, re.DOTALL):
-            _all_blocks[int(_m.group(1))] = _m.group(2).strip()
+        _chunk_size = 2
+        for _chunk_start in range(0, len(images), _chunk_size):
+            _chunk = images[_chunk_start:_chunk_start+_chunk_size]
+            _nums = list(range(_chunk_start+1, _chunk_start+len(_chunk)+1))
+            _fmt = "Тип: [тип]\nОценка: X/10\nСильная сторона: [текст]\nСлабость: [текст]\nДействие: [текст]"
+            _cp = intro + f"\n\nАнализируй фото {_nums}. Для каждого выведи блок:\n"
+            for _n in _nums:
+                _cp += f"\nPHOTO_BLOCK_{_n}\n{_fmt}\n"
+            _cp += f"\nОбязательно все {len(_chunk)} блока."
+            _cb64 = [(_i["b64"], _i.get("media_type","image/jpeg")) for _i in _chunk]
+            log(f"👁️ Gemini batch фото {_nums}...")
+            import time; time.sleep(3)
+            _br = gemini_vision_call(_cp, image_b64_list=_cb64, max_tokens=2000)
+            log(f"🔍 raw[0:150]: {_br[:150]}")
+            for _m in re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _br, re.DOTALL):
+                _all_blocks[int(_m.group(1))] = _m.group(2).strip()
         for i in range(len(images)):
             blk = _all_blocks.get(i+1, "Тип: фото\nОценка: 0/10\nСильная сторона: —\nСлабость: не проанализировано\nДействие: повторить анализ")
             results.append(f"PHOTO_BLOCK_{i+1}\n{blk}")
