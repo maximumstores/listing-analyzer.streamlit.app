@@ -896,9 +896,10 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     return result, vision_result
 
 # ── UI ────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Listing Analyzer", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Listing Analyzer", page_icon="https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260", layout="wide")
 
 with st.sidebar:
+    st.image("https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260", width=120)
     st.markdown("## 🔍 Listing Analyzer")
     st.divider()
 
@@ -2574,4 +2575,4 @@ elif page == "📋 Workflow":
                         st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}")
                         st.rerun()
                     else:
-                        st.error("Ошибка сохранения") 
+                        st.error("Ошибка сохранения")
