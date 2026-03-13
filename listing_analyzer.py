@@ -906,8 +906,9 @@ with st.sidebar:
     if st.session_state.get("_api_balance_error"):
         st.markdown("""
 <div style="background:#fef2f2;border:1.5px solid #ef4444;border-radius:8px;padding:10px 12px;margin-bottom:8px">
-<div style="font-size:0.85rem;font-weight:700;color:#dc2626">💳 Баланс API исчерпан</div>
-<div style="font-size:0.75rem;color:#64748b;margin-top:3px">Анализатор не работает до пополнения</div>
+<div style="font-size:0.85rem;font-weight:700;color:#dc2626">💳 Баланс Anthropic API исчерпан</div>
+<div style="font-size:0.75rem;color:#64748b;margin-top:3px">console.anthropic.com → Billing → Buy credits</div>
+<div style="font-size:0.75rem;color:#94a3b8;margin-top:2px">⚠️ Не путать с подпиской Claude.ai — это разные счета</div>
 </div>""", unsafe_allow_html=True)
         st.link_button("🔗 Пополнить баланс", "https://console.anthropic.com/settings/billing", use_container_width=True)
         st.divider()
