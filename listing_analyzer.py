@@ -6,7 +6,6 @@ from datetime import datetime
 
 # ── PostgreSQL history ─────────────────────────────────────────────────────────
 def get_db():
-    """Get DB connection from Streamlit secrets"""
     db_url = st.secrets.get("DATABASE_URL","")
     if not db_url:
         st.session_state["_db_err"] = "DATABASE_URL не найден в secrets"
@@ -23,7 +22,6 @@ def get_db():
         return None
 
 def db_init():
-    """Create table if not exists"""
     conn = get_db()
     if not conn: return
     try:
@@ -67,13 +65,11 @@ def db_init():
         pass
 
 def db_save(asin, result, vision_text, our_title):
-    """Save analysis result to DB"""
     conn = get_db()
     if not conn: return False
     try:
         cosmo = pct(result.get("cosmo_analysis",{}).get("score",0)) if isinstance(result.get("cosmo_analysis"),dict) else 0
         rufus = pct(result.get("rufus_analysis",{}).get("score",0)) if isinstance(result.get("rufus_analysis"),dict) else 0
-        # Collect competitor snapshot
         comp_list = st.session_state.get("comp_data_list", [])
         comp_snap = []
         for _i, _cd in enumerate(comp_list):
@@ -161,7 +157,6 @@ def db_workflow_board():
         return []
 
 def db_history(asin, limit=10):
-    """Get analysis history for ASIN"""
     conn = get_db()
     if not conn: return []
     try:
@@ -183,7 +178,6 @@ def db_history(asin, limit=10):
         return []
 
 def db_all_asins():
-    """List all ASINs with latest score"""
     conn = get_db()
     if not conn: return []
     try:
@@ -199,9 +193,9 @@ def db_all_asins():
     except Exception:
         return []
 
-ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL        = "claude-sonnet-4-5"  # text analysis
-ANTHROPIC_MODEL_VISION = "claude-sonnet-4-5"  # vision
+ANTHROPIC_URL          = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MODEL        = "claude-sonnet-4-5"
+ANTHROPIC_MODEL_VISION = "claude-sonnet-4-5"
 
 SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
 
@@ -214,11 +208,9 @@ def sc(s): return "🟢" if s>=8 else ("🟡" if s>=6 else "🔴")
 def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"}.get(p,p)
 
 def get_asin_from_data(d):
-    """Get ASIN from product data, using stored input ASIN as priority"""
     return d.get("_input_asin","") or d.get("parent_asin","") or d.get("product_information",{}).get("ASIN","")
 
 def pct(val):
-    """Parse score: int 0-100, int 0-10, or string 'XX%' -> int 0-100"""
     if isinstance(val, str):
         try: return int(val.replace("%","").strip())
         except: return 0
@@ -230,6 +222,35 @@ def pct(val):
 def sc_pct(val):
     v = pct(val)
     return "🟢" if v>=75 else ("🟡" if v>=50 else "🔴")
+
+# ── Vision cost/time estimator ────────────────────────────────────────────────
+def estimate_run(do_vision, do_aplus, do_comp_vision, n_competitors, use_gemini):
+    """Returns (time_str, cost_str) estimate based on selected options"""
+    # Base: scraping + text AI
+    secs = 30
+    cost = 0.008
+
+    model_mult = 0.3 if use_gemini else 1.0  # Gemini much cheaper
+
+    if do_vision:
+        secs += 45
+        cost += 0.015 * model_mult
+    if do_aplus:
+        secs += 20
+        cost += 0.008 * model_mult
+    if do_comp_vision and n_competitors > 0:
+        secs += 40 * n_competitors
+        cost += 0.02 * n_competitors * model_mult
+    elif n_competitors > 0:
+        # Still scrape + text AI for competitors
+        secs += 20 * n_competitors
+        cost += 0.008 * n_competitors * model_mult
+
+    mins = secs // 60
+    secs_rem = secs % 60
+    time_str = f"~{mins}м {secs_rem}с" if mins > 0 else f"~{secs}с"
+    cost_str = f"~${cost:.2f}"
+    return time_str, cost_str
 
 def section(label, score, gaps, rec, raw_text="", char_limit=0):
     c1,c2 = st.columns([4,1])
@@ -274,9 +295,7 @@ def anthropic_vision(content_blocks, max_tokens=3000, system=None):
     if system: payload["system"] = system
     return _anthropic_post(payload)
 
-# ── Gemini AI ─────────────────────────────────────────────────────────────────
 def gemini_call(prompt, max_tokens=3000):
-    """Call Google Gemini as fallback model"""
     import time
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан в Secrets")
@@ -296,14 +315,12 @@ def gemini_call(prompt, max_tokens=3000):
     raise Exception("Gemini перегружен — попробуй через 2 мин")
 
 def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=2000):
-    """Gemini vision - supports both URL and base64 images"""
     import time
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан")
     _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
     parts = []
-    # Add images
     if image_urls:
         for img_url in image_urls:
             try:
@@ -334,7 +351,6 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
     raise Exception(f"Gemini Vision исчерпан: {_last_err}")
 
 def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=400, system=None):
-    """Route vision call to Gemini or Claude"""
     if st.session_state.get("use_gemini"):
         full = f"{system}\n\n{prompt}" if system else prompt
         if image_url:
@@ -343,7 +359,6 @@ def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpe
             return gemini_vision_call(full, image_b64_list=[(image_b64, media_type)], max_tokens=max_tokens)
     else:
         blocks = []
-        if system: pass  # passed separately
         if image_b64:
             blocks = [
                 {"type":"text","text": prompt},
@@ -352,7 +367,6 @@ def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpe
         return anthropic_vision(blocks, max_tokens=max_tokens, system=system)
 
 def ai_call(system, user, max_tokens=3000):
-    """Route to Gemini or Claude based on user choice"""
     if st.session_state.get("use_gemini"):
         full = f"{system}\n\n{user}" if system else user
         return gemini_call(full, max_tokens)
@@ -368,16 +382,13 @@ def scrapingdog_product(asin, log):
             params={"api_key": sd_key, "asin": asin, "domain": "com"}, timeout=60)
         if not r.ok: log(f"⚠️ {r.status_code}: {r.text[:100]}"); return {}, []
         data = r.json()
-        # A+ banners — try aplus_images first, fallback to images[split+]
         if data.get("aplus"):
-            # 1. aplus_images field — real banners when ScrapingDog renders JS
             _api_aplus = data.get("aplus_images", [])
             _real_aplus = []
             for _u in _api_aplus:
                 if not isinstance(_u, str): continue
                 if "grey-pixel" in _u: continue
                 if not _u.startswith("http"): continue
-                # Remove crop suffix to get full image
                 import re as _re
                 _u2 = _re.sub(r'\.__CR[^.]+_PT0_SX\d+_V\d+___', '', _u)
                 _real_aplus.append(_u2)
@@ -385,7 +396,6 @@ def scrapingdog_product(asin, log):
                 data["aplus_image_urls"] = _real_aplus[:8]
                 log(f"  ✅ A+ из aplus_images: {len(_real_aplus)} баннеров")
             else:
-                # 2. Fallback: images[] after product photos
                 _prod_imgs = data.get("images_of_specified_asin", [])
                 _all_imgs  = data.get("images", [])
                 _split = len(_prod_imgs) if _prod_imgs else 6
@@ -398,7 +408,6 @@ def scrapingdog_product(asin, log):
                     log(f"  ✅ A+ из images[{_split}+]: {len(_aplus_candidates)} шт")
                 else:
                     log("  ℹ️ A+ баннеры недоступны")
-        # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin","images"]:
             raw = data.get(field,[])
@@ -480,9 +489,9 @@ MAIN IMAGE AMAZON REQUIREMENTS (apply strictly for photo #1):
 ✅ No text, logos, watermarks, promo graphics, badges
 ✅ Minimum 1000px long side (ideally 2000-3000px) for zoom
 ✅ Real photo (not illustration)
-✅ ONLY the sold product — FORBIDDEN: other clothing on model (pants, shorts, shoes of different color), accessories, props not included in purchase
-✅ For apparel: the sold item must be the primary focus, other clothing/body parts must not distract
-IMPORTANT: Look carefully — are there any items in the photo that are NOT the sold product? If yes — this is a violation, deduct 2 pts and name exactly what violates the rule."""
+✅ ONLY the sold product — FORBIDDEN: other clothing on model, accessories, props not included
+✅ For apparel: the sold item must be the primary focus
+IMPORTANT: Look carefully — are there any items in the photo that are NOT the sold product? If yes — deduct 2 pts and name exactly what violates the rule."""
         block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 5 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength]\nWeakness: [1 specific problem — ONLY what you actually see]\nAction: [1 fix starting with a verb: Reshoot / Remove / Crop / Replace / Reduce. Be specific about what to do.]"
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
@@ -490,15 +499,15 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 Товар: {title} | ASIN: {asin} | Цена: {price} | Рейтинг: {rating}
 
 РУБРИК ОЦЕНКИ (каждое фото 1-10 баллов):
-+2 балла — Видимость товара: СКОЛЬКО % кадра занимает САМИ продаваемый товар (не другая одежда, не реквизит)? Если товар закрыт другой одеждой или занимает <30% — максимум 1 балл по этому критерию
-+2 балла — Фон: главное=чисто белый RGB(255,255,255); lifestyle=релевантная обстановка; инфографика=чистый макет
++2 балла — Видимость товара: сколько % кадра занимает продаваемый товар? Если <30% — максимум 1 балл
++2 балла — Фон: главное=чисто белый RGB(255,255,255); lifestyle=релевантная обстановка
 +2 балла — Информационная ценность: показывает характеристики/пользу/сценарий важный для покупателя
-+2 балла — Соответствие Amazon: нет водяных знаков, нет промотекста на главном, правильное соотношение
++2 балла — Соответствие Amazon: нет водяных знаков, нет промотекста на главном
 +1 балл  — Lifestyle appeal: покупатель представляет себя с товаром
 +1 балл  — Уникальность: не выглядит как стоковое фото
 
 КРИТИЧЕСКИЕ ШТРАФЫ (вычитай сразу):
--3 балла — Продаваемый товар скрыт / почти не виден (например майка под рубашкой)
+-3 балла — Продаваемый товар скрыт / почти не виден
 -2 балла — На главном фото одежда/аксессуары НЕ из комплекта
 -2 балла — Фон главного фото не чисто белый
 
@@ -509,36 +518,17 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 
 ТРЕБОВАНИЯ AMAZON К ГЛАВНОМУ ФОТО (применяй строго к фото #1):
 ✅ Фон исключительно белый RGB(255,255,255) — без теней, без серого
-✅ Товар занимает ≥85% площади кадра — оцени визуально в процентах
+✅ Товар занимает ≥85% площади кадра
 ✅ Нет текста, логотипов, водяных знаков, промо-графики, бейджей
-✅ Минимум 1000px по длинной стороне (идеально 2000-3000px) для зума
+✅ Минимум 1000px по длинной стороне
 ✅ Реальная фотография (не иллюстрация)
-✅ ТОЛЬКО продаваемый товар — ЗАПРЕЩЕНЫ: другая одежда на модели (брюки, шорты, обувь другого цвета), аксессуары, реквизит не входящий в комплект
-✅ Для одежды: товар должен быть главным фокусом, другие части тела/одежды не должны отвлекать
-ВАЖНО: Посмотри внимательно — есть ли на фото предметы которые НЕ являются продаваемым товаром? Если да — это нарушение, снять 2 балла и написать конкретно что именно нарушает правило."""
+✅ ТОЛЬКО продаваемый товар — ЗАПРЕЩЕНЫ: другая одежда на модели, аксессуары не из комплекта
+ВАЖНО: Посмотри внимательно — есть ли на фото предметы которые НЕ являются продаваемым товаром? Если да — это нарушение, снять 2 балла и написать конкретно что нарушает правило."""
         block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 5 строк:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона]\nСлабость: [1 конкретная проблема — ТОЛЬКО то что видишь на фото]\nДействие: [1 конкретное исправление начиная с глагола: Переснять / Убрать / Обрезать / Заменить / Уменьшить. Конкретно что сделать.]"
 
-    # Analyze photos: batch for Gemini (1 call), individual for Claude
     results = []
     if st.session_state.get("use_gemini"):
         import time; time.sleep(5)
-        log(f"👁️ Фото 1-{len(images)} → Gemini (batch)...")
-        _fmt = "Тип: [тип]\nОценка: X/10\nСильная сторона: [текст]\nСлабость: [текст]\nДействие: [текст]"
-        batch_prompt = intro + f"""
-
-Ты получишь {len(images)} фото подряд (фото 1, 2, 3...).
-Для КАЖДОГО фото выведи блок строго в таком формате (с заголовком PHOTO_BLOCK_N):
-
-PHOTO_BLOCK_1
-{_fmt}
-
-PHOTO_BLOCK_2
-{_fmt}
-
-...и так для всех {len(images)} фото. Не пропускай ни одно фото."""
-        b64_list = [(img["b64"], img.get("media_type","image/jpeg")) for img in images]
-        # Send each photo individually with pause (most reliable for Gemini)
-        import time
         _fmt = "Тип: [тип]\nОценка: X/10\nСильная сторона: [текст]\nСлабость: [текст]\nДействие: [текст]"
         for _i, _img in enumerate(images):
             if _i > 0: time.sleep(8)
@@ -549,7 +539,6 @@ PHOTO_BLOCK_2
                 _pp = f"Ты эксперт Amazon фотографий. Оцени это фото #{_i+1} по рубрику: +2 видимость товара, +2 фон, +2 инфоценность, +2 Amazon соответствие, +1 appeal, +1 уникальность. Штрафы: -3 товар не виден, -2 лишняя одежда на главном, -2 фон не белый. Товар: {title}"
             _pp += f"\n\nОтветь СТРОГО в формате:\nPHOTO_BLOCK_{_i+1}\n{_fmt}"
             _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=600)
-            # Parse this single block
             _m = re.search(r"PHOTO_BLOCK_\d+\s*(.*)", _br, re.DOTALL)
             _blk = _m.group(1).strip() if _m else _br.strip()
             results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
@@ -574,7 +563,6 @@ PHOTO_BLOCK_2
 
 # ── A+ Vision ─────────────────────────────────────────────────────────────────
 def analyze_aplus_vision(aplus_urls, product_data, log, lang=None):
-    """Download A+ banner images and analyze with Vision"""
     if not aplus_urls: return ""
     if lang is None:
         lang = st.session_state.get("analysis_lang", "ru")
@@ -625,7 +613,6 @@ APLUS_BLOCK_{{i}}
 
     try:
         if st.session_state.get("use_gemini"):
-            # Gemini: send all A+ images in one call via b64
             _ap_b64 = [(img["b64"], img["media_type"]) for img in images]
             _ap_prompt = sys_prompt + "\n\n" + "\n".join(
                 [f"A+ баннер #{i+1}:" for i in range(len(images))])
@@ -650,7 +637,6 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang=
         opts = data.get("customization_options", {})
         sizes  = [s.get("value","") for s in opts.get("size",[])]
         colors = [c.get("value","") for c in opts.get("color",[])]
-        # Also check product_information for size field
         pi_size = pi.get("Size","") or pi.get("size","")
         prime = data.get("is_prime_exclusive", False) or data.get("is_prime", False)
         return "\n".join([
@@ -669,8 +655,6 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang=
             f"A+ Content: {str(data.get('aplus_content','нет данных'))[:3000]}",
         ])
 
-    # Send full our data but cap at 3000 chars
-    # Pre-compute factual stats so AI cannot hallucinate them
     _title_text   = our_data.get("title", "")
     _bullets      = our_data.get("feature_bullets", [])
     _title_len    = len(_title_text)
@@ -699,7 +683,7 @@ FACTUAL STATS (do NOT contradict these):
         if d.get("description"): parts.append(f"Description: {str(d['description'])[:200]}")
         return "\n".join(filter(None, parts))
     comp_text = "\n\n".join([f"COMPETITOR {i+1}:\n{fmt_comp(d)}" for i,d in enumerate(competitor_data_list) if d])
-    vision_section = f"\nPHOTO VISION ANALYSIS:\n{{vision_result[:1500]}}" if vision_result else ""
+    vision_section = f"\nPHOTO VISION ANALYSIS:\n{vision_result[:1500]}" if vision_result else ""
     lang_name = "Russian" if lang == "ru" else "English"
 
     _ctx = st.session_state.get("ai_context_saved", st.session_state.get("ai_context","")).strip()
@@ -732,19 +716,14 @@ Analyze the listing above and score each component. Use ONLY real data from the 
 - 50-69%: Walls of text, no benefits
 - 0-49%: Missing bullets
 
-### DESCRIPTION — Plain text or limited HTML (only <br><b><p><ul><li> allowed by Amazon)
-- IMPORTANT: If seller has A+ content → description is hidden from buyers, so description_score impact is low
+### DESCRIPTION — Plain text or limited HTML
+- IMPORTANT: If seller has A+ content → description is hidden from buyers
 - 90-100%: 300-2000 chars, covers features/care/use cases, no duplicate of bullets
-- 70-89%: Short but decent, or has A+ compensating
 - 0%: Empty or missing — score MUST be "0%". No exceptions.
-- description_gaps: if empty, write ONLY ["Описание отсутствует"]. Do NOT write long HTML structure advice — that belongs in actions field.
+- description_gaps: if empty, write ONLY ["Описание отсутствует"].
 
-### IMAGES — Evaluate: main image (40%), gallery completeness (30%), OCR readability for Rufus (30%)
-- IMPORTANT: If vision analysis shows main image has violations (non-product items, wrong background) → images_score MAX 70%
-- Main 90-100%: Unique angle, shows product in action, clear at thumbnail
-- Gallery 90-100%: 6+ images: lifestyle, infographics, size/scale, packaging, variants
-- OCR 90-100%: Dark text on white background, sans-serif, horizontal layout
-- Combined 90-100%: All three excellent
+### IMAGES — Evaluate: main image (40%), gallery completeness (30%), OCR readability (30%)
+- IMPORTANT: If vision analysis shows main image has violations → images_score MAX 70%
 
 ### Q&A — 10+ Q&As, brand responses, covers objections
 ### REVIEWS — 100+ reviews, 4.5+ stars, recent activity
@@ -775,13 +754,11 @@ CRITICAL RULES:
 - Use REAL data from the listing — no placeholder text
 - overall_score = weighted average of all 17 scores
 - images_score = 40% main + 30% gallery + 30% OCR combined
-- title_gaps: 1-3 REAL issues in the ACTUAL title text. NEVER suggest adding what is already there. Score >=85% = max 1 gap or [].
-- bullets_gaps: 1-3 REAL issues in the ACTUAL bullets. NEVER suggest adding what is already present.
-- description_gaps: if no description exists write ONLY ["Описание отсутствует"]. NEVER suggest HTML structure in gaps — put structure advice in actions.details only.
-- description_rec: if no description, write ONE short sentence what to add. No HTML tags in rec.
+- title_gaps: 1-3 REAL issues in the ACTUAL title text. Score >=85% = max 1 gap or [].
+- bullets_gaps: 1-3 REAL issues in the ACTUAL bullets.
+- description_gaps: if no description exists write ONLY ["Описание отсутствует"].
 - aplus_gaps: if no A+ exists write ["A+ контент отсутствует — создать"], else real issues only.
-- images_gaps: 1-2 issues based on vision analysis results above.
-- CRITICAL: Read the actual listing text before writing gaps. Never hallucinate missing elements that are already present in the text.
+- CRITICAL: Read the actual listing text before writing gaps. Never hallucinate missing elements that are already present.
 
 {SCHEMA}"""
 
@@ -796,7 +773,6 @@ CRITICAL RULES:
         raise ValueError("AI вернул пустой ответ")
     log(f"🔍 Raw preview: {raw[:60]}")
     s = raw.strip()
-    # Strip markdown code blocks
     s = re.sub(r"^```[a-z]*\s*", "", s, flags=re.MULTILINE)
     s = re.sub(r"```\s*$", "", s, flags=re.MULTILINE)
     s = s.strip()
@@ -811,15 +787,10 @@ CRITICAL RULES:
     try:
         return _try_parse(s)
     except Exception:
-        # Try to fix truncated JSON by closing open structures
         s2 = re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace("\n"," ")+'"', s)
         try:
             return _try_parse(s2)
         except Exception:
-            # Count unclosed braces/brackets and close them
-            opens = s2.count("{") - s2.count("}")
-            opens_b = s2.count("[") - s2.count("]")
-            # Truncate at last complete key-value pair
             for cut in range(len(s2)-1, 0, -1):
                 if s2[cut] in ('"', '}', ']', '0123456789'):
                     candidate = s2[:cut+1]
@@ -839,8 +810,12 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         log(text)
 
     asin = get_asin(our_url) or "unknown"
-    n_comps = len([u for u in competitor_urls if u.strip()])
-    # Steps: scrape(10) + photos(20) + vision(35) + comps*N(50) + AI(90) + done(100)
+    _lang = st.session_state.get("analysis_lang","ru")
+
+    # Read vision toggles
+    _do_vision      = st.session_state.get("do_vision", True)
+    _do_aplus       = st.session_state.get("do_aplus_vision", True)
+    _do_comp_vision = st.session_state.get("do_comp_vision", True)
 
     _prog(5,  f"🌐 Загружаю данные листинга {asin}...")
     our_data, img_urls = scrapingdog_product(asin, log)
@@ -849,28 +824,36 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     images = download_images(img_urls, log) if img_urls else []
     st.session_state["images"] = images
 
-    _lang = st.session_state.get("analysis_lang","ru")
-    _prog(30, "👁️ Vision анализ фото...")
-    vision_result = analyze_vision(images, our_data, asin, log, lang=_lang) if images else ""
-    if not images: log("⚠️ Фото не загружены")
+    # ── Vision фото (основной листинг) ───────────────────────────────────────
+    if images and _do_vision:
+        _prog(30, "👁️ Vision анализ фото...")
+        vision_result = analyze_vision(images, our_data, asin, log, lang=_lang)
+    else:
+        vision_result = ""
+        if not images:
+            log("⚠️ Фото не загружены")
+        else:
+            log("⏭️ Vision фото пропущен (отключён)")
 
-    # A+ Vision — analyze A+ banners if available
+    # ── A+ Vision ─────────────────────────────────────────────────────────────
     _aplus_urls = our_data.get("aplus_image_urls", [])
-    if _aplus_urls:
+    if _aplus_urls and _do_aplus:
         _prog(35, f"🎨 A+ Vision: {len(_aplus_urls)} баннеров...")
         aplus_vision = analyze_aplus_vision(_aplus_urls, our_data, log, lang=_lang)
         st.session_state["aplus_vision"] = aplus_vision
-        st.session_state["aplus_img_urls"] = _aplus_urls
         log(f"✅ A+ Vision: {len(_aplus_urls)} баннеров проанализировано")
     else:
         st.session_state["aplus_vision"] = ""
-        st.session_state["aplus_img_urls"] = []
-        log("ℹ️ A+ баннеры не найдены (нет aplus_image_urls)")
+        if _aplus_urls and not _do_aplus:
+            log("⏭️ A+ Vision пропущен (отключён)")
+        else:
+            log("ℹ️ A+ баннеры не найдены (нет aplus_image_urls)")
+    # URLs сохраняем всегда — чтобы картинки показывались даже без анализа
+    st.session_state["aplus_img_urls"] = _aplus_urls
 
-    # Competitors — full analysis (scrape + vision + AI) for each
+    # ── Конкуренты ────────────────────────────────────────────────────────────
     active = [u.strip() for u in competitor_urls if u.strip()]
     comp_data_list = []
-    _lang = st.session_state.get("analysis_lang","ru")
     n_active = max(len(active), 1)
 
     for i, url in enumerate(active[:3]):
@@ -886,13 +869,18 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         _prog(base_pct + 3, f"⬇️ Конкурент {i+1}: скачиваю фото...")
         cimgs_dl = download_images(cimg_urls[:5], log) if cimg_urls else []
 
-        _prog(base_pct + 5, f"👁️ Конкурент {i+1}: Vision анализ...")
-        cvision = analyze_vision(cimgs_dl, cdata, casin, log, lang=_lang) if cimgs_dl else ""
+        # ── Vision конкурента — управляется чекбоксом ─────────────────────
+        if cimgs_dl and _do_comp_vision:
+            _prog(base_pct + 5, f"👁️ Конкурент {i+1}: Vision анализ...")
+            cvision = analyze_vision(cimgs_dl, cdata, casin, log, lang=_lang)
+        else:
+            cvision = ""
+            if cimgs_dl:
+                log(f"⏭️ Vision конкурент {i+1} пропущен (отключён)")
 
         _prog(base_pct + 8, f"🧠 Конкурент {i+1}: AI анализ...")
         cai = analyze_text(cdata, [], cvision, casin, log, lang=_lang)
 
-        # Store in session state — same keys as the manual button
         st.session_state[f"comp_ai_{i}"] = cai
         if cimgs_dl:
             st.session_state[f"comp_vision_{i}"] = (cimgs_dl, cvision)
@@ -910,7 +898,6 @@ with st.sidebar:
     st.markdown("## 🔍 Listing Analyzer")
     st.divider()
 
-    # Navigation via buttons
     if "page" not in st.session_state:
         st.session_state["page"] = "🏠 Обзор"
 
@@ -935,7 +922,6 @@ with st.sidebar:
 </div>""", unsafe_allow_html=True)
 
         for _i, _c in enumerate(_cd_nav):
-            _cpi = _c.get("product_information", {})
             _casin = get_asin_from_data(_c)
             _ct = _c.get("title","")
             st.markdown(f"""<div style="background:#fff5f5;border-radius:8px;padding:8px 10px;margin-bottom:4px;border-left:3px solid #ef4444">
@@ -947,7 +933,6 @@ with st.sidebar:
 
         cur = st.session_state.get("page","🏠 Обзор")
 
-        # ── МЫ ──────────────────────────────────────────────────────
         st.markdown('<div style="font-size:0.7rem;font-weight:700;color:#94a3b8;letter-spacing:0.08em;padding:4px 2px">МЫ</div>', unsafe_allow_html=True)
         for icon, label in NAV_ITEMS:
             full = f"{icon} {label}"
@@ -957,11 +942,9 @@ with st.sidebar:
                 st.session_state["page"] = full
                 st.rerun()
 
-        # ── КОНКУРЕНТЫ ───────────────────────────────────────────────
         if _cd_nav:
             st.markdown('<div style="font-size:0.7rem;font-weight:700;color:#94a3b8;letter-spacing:0.08em;padding:12px 2px 4px">КОНКУРЕНТЫ</div>', unsafe_allow_html=True)
             for _i2, _c2 in enumerate(_cd_nav):
-                _cpi2 = _c2.get("product_information", {})
                 _casin2 = get_asin_from_data(_c2)
                 _ct2 = _c2.get("title","")
                 _ct2_short = _ct2[:20]+"..." if len(_ct2)>20 else _ct2
@@ -977,7 +960,6 @@ with st.sidebar:
         for icon, label in NAV_ITEMS:
             st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
 
-    # История — всегда видна в сайдбаре
     st.divider()
     _cur3 = st.session_state.get("page","")
     _h_col1, _h_col2 = st.columns([2,1])
@@ -989,13 +971,11 @@ with st.sidebar:
                  type="primary" if _cur3=="📋 Workflow" else "secondary"):
         st.session_state["page"] = "📋 Workflow"
         st.rerun()
-    # 🔄 Update button - reruns analysis with saved URL
     if st.session_state.get("our_url_saved") and "result" in st.session_state:
         if st.button("🔄 Обновить анализ", use_container_width=True, key="sidebar_refresh"):
             st.session_state["_trigger_rerun"] = True
             st.rerun()
 
-    # Share to Telegram button
     if "result" in st.session_state and "our_data" in st.session_state:
         _asin_s = st.session_state["our_data"].get("parent_asin","")
         _sc_s = st.session_state["result"].get("overall_score","—")
@@ -1008,7 +988,6 @@ with st.sidebar:
             'border:none;border-radius:6px;cursor:pointer;font-size:0.75rem">📤 TG</button></a>',
             unsafe_allow_html=True)
 
-    # Return from history button — always visible when in history mode
     if st.session_state.get("_hist_loaded"):
         if st.sidebar.button("↩️ Новый анализ", type="primary", use_container_width=True):
             for _k in ["_hist_loaded", "result", "vision", "images", "our_data",
@@ -1068,7 +1047,6 @@ with st.sidebar:
             st.error(f"❌ {str(e)[:60]}")
     if _ac2.button("🧪 Gemini", key="api_test_gem"):
         _key = st.secrets.get("GEMINI_API_KEY","")
-        # First: list available models
         for _ep in ["v1", "v1beta"]:
             try:
                 _r = requests.get(f"https://generativelanguage.googleapis.com/{_ep}/models?key={_key}", timeout=10)
@@ -1080,7 +1058,6 @@ with st.sidebar:
                     st.warning(f"[{_ep}] {_r.status_code}: {_r.text[:100]}")
             except Exception as _le:
                 st.warning(f"[{_ep}] {_le}")
-        # Then test call
         try:
             res = gemini_call("Say: OK")
             st.success(f"✅ Gemini: {res[:40]}")
@@ -1098,7 +1075,6 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
     comp5 = c5.text_input("Конкурент 5", key="c4", value=st.session_state.get("c4_saved",""), placeholder="https://www.amazon.com/dp/...")
     competitor_urls = [comp1, comp2, comp3, comp4, comp5]
 
-    # Detect what changed
     prev_url  = st.session_state.get("our_url_saved","")
     prev_comp = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
     curr_comp = competitor_urls
@@ -1106,7 +1082,6 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
     new_comps    = [u for u,p in zip(curr_comp,prev_comp) if u.strip() and u.strip()!=p.strip()]
     already_done = "result" in st.session_state
 
-    # Button label hint
     if already_done and not our_changed and new_comps:
         btn_label = f"➕ Добавить {len(new_comps)} конкурент(а)"
     elif already_done and not our_changed and not new_comps:
@@ -1117,34 +1092,86 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
     lang = st.radio("🌐 Язык анализа", ["🇷🇺 Русский", "🇺🇸 English"], horizontal=True, key="lang_sel")
     st.session_state["analysis_lang"] = "ru" if "Русский" in lang else "en"
 
+    # ── Оптимизация токенов — чекбоксы Vision ────────────────────────────────
+    with st.expander("⚡ Оптимизация токенов", expanded=False):
+        _n_comps = len([u for u in competitor_urls if u.strip()])
+        _use_gem = st.session_state.get("use_gemini", False)
+
+        _vc1, _vc2, _vc3 = st.columns(3)
+        _do_vision      = _vc1.checkbox("🖼️ Vision фото (наш)",    value=st.session_state.get("do_vision", True),      key="cb_vision")
+        _do_aplus       = _vc2.checkbox("🎨 Vision A+ баннеры",     value=st.session_state.get("do_aplus_vision", True), key="cb_aplus")
+        _do_comp_vision = _vc3.checkbox("👁️ Vision конкурентов",    value=st.session_state.get("do_comp_vision", True),  key="cb_comp_v")
+
+        st.session_state["do_vision"]       = _do_vision
+        st.session_state["do_aplus_vision"] = _do_aplus
+        st.session_state["do_comp_vision"]  = _do_comp_vision
+
+        # Cost/time estimate
+        _t_str, _c_str = estimate_run(_do_vision, _do_aplus, _do_comp_vision, _n_comps, _use_gem)
+
+        _what_on = []
+        if _do_vision:      _what_on.append("Vision фото")
+        if _do_aplus:       _what_on.append("A+")
+        if _do_comp_vision and _n_comps: _what_on.append(f"Vision {_n_comps} конк.")
+        _mode = " + ".join(_what_on) if _what_on else "только текст"
+
+        # Determine scenario label and hint
+        _off = []
+        if not _do_vision:      _off.append("Vision фото")
+        if not _do_aplus:       _off.append("Vision A+")
+        if not _do_comp_vision: _off.append("Vision конк.")
+
+        if not (_do_vision or _do_aplus or _do_comp_vision):
+            _est_color = "#22c55e"
+            _scenario  = "⚡ Быстрый ретест"
+            _hint      = "Только текстовый AI — идеально после правки title/bullets"
+        elif not (_do_vision and _do_aplus and _do_comp_vision):
+            _est_color = "#f59e0b"
+            _off_str   = ", ".join(_off)
+            _scenario  = f"🔶 Частичный анализ (без: {_off_str})"
+            if not _do_comp_vision and _do_vision:
+                _hint = "Глубокий аудит нашего листинга без трат на конкурентов"
+            elif not _do_vision and _do_comp_vision:
+                _hint = "Быстро проверить конкурентов без полного Vision нашего листинга"
+            else:
+                _hint = "Выборочный режим — включи нужные блоки выше"
+        else:
+            _est_color = "#ef4444"
+            _scenario  = "🔴 Полный аудит"
+            _hint      = "Vision всех фото + A+ + конкуренты — максимум данных"
+
+        st.markdown(
+            f'<div style="background:#f1f5f9;border-radius:8px;padding:10px 14px;margin-top:6px;'
+            f'border-left:4px solid {_est_color}">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px">'
+            f'<span style="font-size:0.95rem">⏱ <b>{_t_str}</b> &nbsp;|&nbsp; 💸 <b>{_c_str}</b></span>'
+            f'<span style="color:{_est_color};font-size:0.82rem;font-weight:700">{_scenario}</span>'
+            f'</div>'
+            f'<div style="color:#64748b;font-size:0.78rem;margin-top:3px">{_hint}</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
     with st.expander("🎯 Фокус анализа (необязательно)", expanded=False):
         st.caption("Помогает AI расставить приоритеты")
         _fa1, _fa2, _fa3 = st.columns(3)
         with _fa1:
             goal = st.radio("🎯 Цель", [
-                "Полный аудит",
-                "Поднять конверсию",
-                "Выйти в топ поиска",
-                "Победить конкурента",
+                "Полный аудит", "Поднять конверсию",
+                "Выйти в топ поиска", "Победить конкурента",
             ], key="goal_sel")
         with _fa2:
             audience = st.radio("👥 Аудитория", [
-                "Не указано",
-                "Спортсмены",
-                "Outdoor / туризм",
-                "Everyday / офис",
-                "Business casual",
+                "Не указано", "Спортсмены", "Outdoor / туризм",
+                "Everyday / офис", "Business casual",
             ], key="aud_sel")
         with _fa3:
             positioning = st.radio("💰 Позиционирование", [
-                "Не указано",
-                "Бюджет",
-                "Средний сегмент",
-                "Премиум",
+                "Не указано", "Бюджет", "Средний сегмент", "Премиум",
             ], key="pos_sel")
 
         _ctx_parts = [f"Analysis goal: {goal}"]
-        if audience != "Не указано":   _ctx_parts.append(f"Target audience: {audience}")
+        if audience != "Не указано":    _ctx_parts.append(f"Target audience: {audience}")
         if positioning != "Не указано": _ctx_parts.append(f"Brand positioning: {positioning}")
         st.session_state["ai_context"] = " | ".join(_ctx_parts)
 
@@ -1157,8 +1184,6 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                 del st.session_state[_k]
             st.rerun()
 
-    # (sidebar refresh handled globally above)
-
     if _run_btn:
         lines = []; ph = st.empty()
         def log(msg):
@@ -1166,63 +1191,59 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
 
         _main_prog = st.progress(0, text="🚀 Запускаю анализ...")
         try:
-                # SMART: only re-run full analysis if our URL changed or first run
-                if not already_done or our_changed:
-                    result, vision = run_analysis(our_url, competitor_urls, log, prog=_main_prog)
-                    st.session_state.update({"result": result, "vision": vision})
-                    st.session_state["our_url_saved"] = our_url
-                    st.session_state["c0_saved"] = comp1
-                    st.session_state["c1_saved"] = comp2
-                    st.session_state["c2_saved"] = comp3
-                    st.session_state["c3_saved"] = comp4
-                    st.session_state["c4_saved"] = comp5
-                    st.session_state["ai_context_saved"] = st.session_state.get("ai_context","")
-                else:
-                    # Only fetch new competitors
-                    existing = st.session_state.get("comp_data_list", [])
-                    for i, url in enumerate(curr_comp):
-                        if url.strip() and url.strip() != prev_comp[i].strip():
-                            casin = get_asin(url)
-                            if casin:
-                                log(f"➕ Новый конкурент {i+1}: {casin}...")
-                                cdata, _ = scrapingdog_product(casin, log)
-                                # Replace or append
-                                if i < len(existing):
-                                    existing[i] = cdata
-                                else:
-                                    existing.append(cdata)
-                                st.session_state[f"c{i}_saved"] = url.strip()
-                    st.session_state["comp_data_list"] = existing
-                    # Re-run only text analysis with updated competitors
-                    log("🧠 Обновляю сравнительный анализ...")
-                    od_s = st.session_state.get("our_data", {})
-                    v_s  = st.session_state.get("vision", "")
-                    asin_s = get_asin(our_url) or "unknown"
-                    _lang = st.session_state.get("analysis_lang","ru")
-                    result = analyze_text(od_s, existing, v_s, asin_s, log, lang=_lang)
-                    st.session_state["result"] = result
-                    # Save to DB history
-                    try:
-                        _od = st.session_state.get("our_data", {})
-                        _saved = db_save(get_asin_from_data(_od), result,
-                                st.session_state.get("vision",""),
-                                _od.get("title",""))
-                        if _saved:
-                            log("💾 Сохранено в историю")
-                        else:
-                            log(f"⚠️ БД ошибка: {st.session_state.get('_db_save_err','?')}")
-                    except Exception as _dbe:
-                        log(f"⚠️ БД исключение: {_dbe}")
+            if not already_done or our_changed:
+                result, vision = run_analysis(our_url, competitor_urls, log, prog=_main_prog)
+                st.session_state.update({"result": result, "vision": vision})
+                st.session_state["our_url_saved"] = our_url
+                st.session_state["c0_saved"] = comp1
+                st.session_state["c1_saved"] = comp2
+                st.session_state["c2_saved"] = comp3
+                st.session_state["c3_saved"] = comp4
+                st.session_state["c4_saved"] = comp5
+                st.session_state["ai_context_saved"] = st.session_state.get("ai_context","")
+                # Save to DB
+                try:
+                    _od = st.session_state.get("our_data", {})
+                    _saved = db_save(get_asin_from_data(_od), result,
+                            st.session_state.get("vision",""), _od.get("title",""))
+                    log("💾 Сохранено в историю" if _saved else f"⚠️ БД ошибка: {st.session_state.get('_db_save_err','?')}")
+                except Exception as _dbe:
+                    log(f"⚠️ БД исключение: {_dbe}")
+            else:
+                existing = st.session_state.get("comp_data_list", [])
+                for i, url in enumerate(curr_comp):
+                    if url.strip() and url.strip() != prev_comp[i].strip():
+                        casin = get_asin(url)
+                        if casin:
+                            log(f"➕ Новый конкурент {i+1}: {casin}...")
+                            cdata, _ = scrapingdog_product(casin, log)
+                            if i < len(existing): existing[i] = cdata
+                            else: existing.append(cdata)
+                            st.session_state[f"c{i}_saved"] = url.strip()
+                st.session_state["comp_data_list"] = existing
+                log("🧠 Обновляю сравнительный анализ...")
+                od_s = st.session_state.get("our_data", {})
+                v_s  = st.session_state.get("vision", "")
+                asin_s = get_asin(our_url) or "unknown"
+                _lang2 = st.session_state.get("analysis_lang","ru")
+                result = analyze_text(od_s, existing, v_s, asin_s, log, lang=_lang2)
+                st.session_state["result"] = result
+                try:
+                    _od = st.session_state.get("our_data", {})
+                    _saved = db_save(get_asin_from_data(_od), result,
+                            st.session_state.get("vision",""), _od.get("title",""))
+                    log("💾 Сохранено в историю" if _saved else f"⚠️ БД ошибка")
+                except Exception as _dbe:
+                    log(f"⚠️ БД исключение: {_dbe}")
 
-                _main_prog.progress(100, text="✅ Анализ завершён!")
-                st.rerun()
+            _main_prog.progress(100, text="✅ Анализ завершён!")
+            st.rerun()
         except Exception as e:
-                st.error(f"Ошибка: {e}")
+            st.error(f"Ошибка: {e}")
 
 def page_history():
     st.title("📈 История анализов")
 
-    # Debug: test DB connection
     with st.expander("🔧 Диагностика БД"):
         db_url = st.secrets.get("DATABASE_URL","")
         if not db_url:
@@ -1237,7 +1258,6 @@ def page_history():
                     cnt = _cur.fetchone()[0]
                     _tc.close()
                     st.success(f"✅ Подключение ОК | Записей в таблице: {cnt}")
-                    # Show what ASINs are stored
                     _tc2 = get_db()
                     if _tc2:
                         _cur2 = _tc2.cursor()
@@ -1256,7 +1276,6 @@ def page_history():
         st.info("История пуста — запусти первый анализ")
         return
 
-    # ASIN selector
     asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
     sel = st.selectbox("ASIN", asin_opts)
     sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
@@ -1266,7 +1285,6 @@ def page_history():
         st.warning("Нет данных для этого ASIN")
         return
 
-    # Latest vs previous delta
     latest = history[0]
     st.subheader(f"Последний анализ: {latest['date'].strftime('%d.%m.%Y %H:%M')}")
 
@@ -1289,7 +1307,6 @@ def page_history():
             delta = f"{val-prev:+d}%" if val != prev else None
         col.metric(label, f"{val}%", delta=delta)
 
-    # Trend chart
     if len(history) > 1:
         st.divider()
         st.subheader("📊 Динамика Overall Score")
@@ -1303,7 +1320,6 @@ def page_history():
         else:
             st.line_chart(df_chart)
 
-    # Full history table
     st.divider()
     amz_url = f"https://www.amazon.com/dp/{sel_asin}"
     st.markdown(f"🔗 [Открыть листинг на Amazon ↗]({amz_url})")
@@ -1312,13 +1328,8 @@ def page_history():
     import pandas as pd
     df = pd.DataFrame([{
         "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
-        "Overall": h["overall"],
-        "Title": h["title"],
-        "Bullets": h["bullets"],
-        "Images": h["images"],
-        "A+": h["aplus"],
-        "COSMO": h["cosmo"],
-        "Rufus": h["rufus"],
+        "Overall": h["overall"], "Title": h["title"], "Bullets": h["bullets"],
+        "Images": h["images"], "A+": h["aplus"], "COSMO": h["cosmo"], "Rufus": h["rufus"],
     } for h in history])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -1329,12 +1340,10 @@ def page_history():
     sel_hist_idx = hist_opts.index(sel_hist)
 
     if st.button("📂 Открыть этот анализ", type="primary", use_container_width=True):
-        # Load full result_json + competitors_json from DB
         conn_h = get_db()
         if conn_h:
             try:
                 cur_h = conn_h.cursor()
-                # Add column if missing
                 try:
                     cur_h.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS competitors_json TEXT")
                     conn_h.commit()
@@ -1349,23 +1358,20 @@ def page_history():
                 rows_h = cur_h.fetchall()
                 conn_h.close()
                 row_h = rows_h[sel_hist_idx]
-                # Restore session state
                 st.session_state["result"]  = json.loads(row_h[0]) if row_h[0] else {}
                 st.session_state["vision"]  = row_h[1] or ""
-                st.session_state["images"]  = []  # actual photos not in DB, vision text is
-                # Restore competitor AI results if saved
+                st.session_state["images"]  = []
                 if row_h[2]:
                     comps_h = json.loads(row_h[2])
                     for _ci, _ch in enumerate(comps_h):
                         st.session_state[f"comp_ai_{_ci}"] = {"overall_score": f"{_ch.get('overall',0)}%"}
                 st.session_state["_hist_loaded"] = sel_hist
                 st.session_state["page"] = "🏠 Обзор"
-                st.success(f"✅ Загружен анализ от {sel_hist} → Обзор (фото недоступны — только текст)")
+                st.success(f"✅ Загружен анализ от {sel_hist}")
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Ошибка: {e}")
 
-    # Show if currently viewing historical snapshot
     if st.session_state.get("_hist_loaded"):
         _hl = st.session_state["_hist_loaded"]
         st.info(f"📅 Просматриваешь: {_hl}")
@@ -1374,7 +1380,6 @@ def page_history():
             st.session_state["page"] = "🏠 Обзор"
             st.rerun()
 
-    # Show competitor snapshot from latest analysis
     if history:
         conn2 = get_db()
         if conn2:
@@ -1390,12 +1395,9 @@ def page_history():
                         st.subheader("🔴 Конкуренты на момент последнего анализа")
                         import pandas as pd
                         cdf = pd.DataFrame([{
-                            "ASIN": c.get("asin",""),
-                            "Title": c.get("title",""),
-                            "Overall": c.get("overall",0),
-                            "Цена": c.get("price",""),
-                            "Рейтинг": c.get("rating",""),
-                            "Отзывы": c.get("reviews",""),
+                            "ASIN": c.get("asin",""), "Title": c.get("title",""),
+                            "Overall": c.get("overall",0), "Цена": c.get("price",""),
+                            "Рейтинг": c.get("rating",""), "Отзывы": c.get("reviews",""),
                         } for c in comps])
                         st.dataframe(cdf, use_container_width=True, hide_index=True)
             except Exception:
@@ -1404,7 +1406,7 @@ def page_history():
 # Init DB on startup
 db_init()
 
-# ── Handle sidebar refresh trigger (any page) ─────────────────────────────────
+# ── Handle sidebar refresh trigger ────────────────────────────────────────────
 if st.session_state.pop("_trigger_rerun", False):
     _saved_url = st.session_state.get("our_url_saved","")
     _saved_comps = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
@@ -1472,11 +1474,11 @@ if "result" not in st.session_state:
 <div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #8b5cf6">
 <div style="font-weight:700;margin-bottom:8px">💡 Советы</div>
 <div style="font-size:0.88rem;color:#475569;line-height:1.6">
-• Используй <b>Русский</b> для внутреннего анализа<br>
+• Используй <b>⚡ Оптимизацию токенов</b> для быстрых ретестов<br>
+• Отключи Vision — анализ ускорится в 3-4х<br>
 • <b>English</b> — для листингов на .com рынке<br>
 • Заполни <b>Фокус анализа</b> для точных рек.<br>
-• Кнопка <b>🗑️ Сброс</b> — полная очистка данных<br>
-• Анализ кэшируется — можно листать без перезапуска
+• Кнопка <b>🗑️ Сброс</b> — полная очистка данных
 </div>
 </div>
 
@@ -1496,7 +1498,6 @@ imgs = st.session_state.get("images", [])
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def health_card():
     health = pct(r.get("overall_score", r.get("health_score", 0)))
-    hb     = r.get("health_breakdown", {})
     hc     = "#22c55e" if health>=75 else ("#f59e0b" if health>=50 else "#ef4444")
     hl     = "Отличный листинг" if health>=75 else ("Есть над чем работать" if health>=50 else "Требует срочных улучшений")
     title_h   = od.get("title","")
@@ -1553,7 +1554,6 @@ def health_card():
 # PDF REPORT GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
 def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=None):
-    """Generate full PDF audit report with photos and scores"""
     import io, base64, re as _re
     from datetime import datetime
     from reportlab.lib.pagesizes import A4
@@ -1571,13 +1571,11 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         topMargin=20*mm, bottomMargin=20*mm)
 
     W = A4[0] - 40*mm
-    # Register DejaVu fonts for Cyrillic support
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    import os, urllib.request, tempfile
+    import os, tempfile
 
     def _get_font(name, url):
-        """Download font if not cached, return path"""
         cache = os.path.join(tempfile.gettempdir(), name)
         if not os.path.exists(cache):
             try:
@@ -1586,9 +1584,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
             except: return None
         return cache if os.path.exists(cache) else None
 
-    # Try multiple CDN sources for NotoSans (full Cyrillic support)
     _SOURCES = [
-        ("NotoSans-Regular.ttf", "https://fonts.gstatic.com/s/notosans/v36/o-0NIpQlx3QUlC5A4PNjXhFVadyBx2pqPIif.woff2"),
         ("NotoSans-Regular.ttf", "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"),
         ("NotoSans-Regular.ttf", "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"),
     ]
@@ -1598,7 +1594,6 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     ]
 
     def _try_load(font_name, sources):
-        # First try system path
         _sys = "/usr/share/fonts/truetype/dejavu/DejaVuSans" + ("-Bold" if "Bold" in font_name else "") + ".ttf"
         if os.path.exists(_sys):
             try:
@@ -1616,26 +1611,21 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     _ok_r = _try_load("DV",      _SOURCES)
     _ok_b = _try_load("DV-Bold", _SOURCES_BOLD)
-
     if _ok_r and _ok_b:
-        _F, _FB, _FO, _FBO = "DV", "DV-Bold", "DV", "DV-Bold"
+        _F, _FB = "DV", "DV-Bold"
     else:
-        _F, _FB, _FO, _FBO = "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique"
+        _F, _FB = "Helvetica", "Helvetica-Bold"
 
-    styles = getSampleStyleSheet()
-
-    # Custom styles
     S = {
-        "title":    ParagraphStyle("t",  fontSize=24, fontName=_FB,  textColor=colors.HexColor("#0f172a"), spaceAfter=4),
-        "h1":       ParagraphStyle("h1", fontSize=16, fontName=_FB,  textColor=colors.HexColor("#1e293b"), spaceBefore=12, spaceAfter=4),
-        "h2":       ParagraphStyle("h2", fontSize=13, fontName=_FB,  textColor=colors.HexColor("#334155"), spaceBefore=8,  spaceAfter=3),
-        "body":     ParagraphStyle("b",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#475569"), spaceAfter=3, leading=14),
-        "small":    ParagraphStyle("s",  fontSize=8,  fontName=_F,   textColor=colors.HexColor("#64748b"), spaceAfter=2),
-        "green":    ParagraphStyle("g",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#15803d"), spaceAfter=2),
-        "red":      ParagraphStyle("r",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#dc2626"), spaceAfter=2),
-        "orange":   ParagraphStyle("o",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#d97706"), spaceAfter=2),
-        "center":   ParagraphStyle("c",  fontSize=9,  fontName=_F,   alignment=TA_CENTER, spaceAfter=2),
-        "action":   ParagraphStyle("a",  fontSize=9,  fontName=_FBO, textColor=colors.HexColor("#1d4ed8"), spaceAfter=2),
+        "title":  ParagraphStyle("t",  fontSize=24, fontName=_FB,  textColor=colors.HexColor("#0f172a"), spaceAfter=4),
+        "h1":     ParagraphStyle("h1", fontSize=16, fontName=_FB,  textColor=colors.HexColor("#1e293b"), spaceBefore=12, spaceAfter=4),
+        "h2":     ParagraphStyle("h2", fontSize=13, fontName=_FB,  textColor=colors.HexColor("#334155"), spaceBefore=8,  spaceAfter=3),
+        "body":   ParagraphStyle("b",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#475569"), spaceAfter=3, leading=14),
+        "small":  ParagraphStyle("s",  fontSize=8,  fontName=_F,   textColor=colors.HexColor("#64748b"), spaceAfter=2),
+        "green":  ParagraphStyle("g",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#15803d"), spaceAfter=2),
+        "orange": ParagraphStyle("o",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#d97706"), spaceAfter=2),
+        "center": ParagraphStyle("c",  fontSize=9,  fontName=_F,   alignment=TA_CENTER, spaceAfter=2),
+        "action": ParagraphStyle("a",  fontSize=9,  fontName=_FB,  textColor=colors.HexColor("#1d4ed8"), spaceAfter=2),
     }
 
     def score_color(s):
@@ -1644,9 +1634,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         return colors.HexColor("#dc2626")
 
     def hex_str(c):
-        """Convert reportlab color to hex string like #1a2b3c"""
-        return '#{:02x}{:02x}{:02x}'.format(
-            int(c.red*255), int(c.green*255), int(c.blue*255))
+        return '#{:02x}{:02x}{:02x}'.format(int(c.red*255), int(c.green*255), int(c.blue*255))
 
     def score_label(s):
         if s >= 75: return "Хорошо"
@@ -1655,19 +1643,16 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     story = []
 
-    # ── COVER PAGE ──────────────────────────────────────────────────────────
-    title_val  = our_data.get("title", asin)[:80]
-    price      = our_data.get("price", "")
-    rating     = our_data.get("average_rating", "")
-    reviews    = our_data.get("total_reviews", "")
-    date_str   = datetime.now().strftime("%d.%m.%Y %H:%M")
-    overall    = result.get("overall_score", 0)
-    ov_pct     = pct(overall)
-    ov_col     = score_color(ov_pct)
+    title_val = our_data.get("title", asin)[:80]
+    price     = our_data.get("price", "")
+    rating    = our_data.get("average_rating", "")
+    reviews   = our_data.get("total_reviews", "")
+    date_str  = datetime.now().strftime("%d.%m.%Y %H:%M")
+    ov_pct    = pct(result.get("overall_score", 0))
+    ov_col    = score_color(ov_pct)
+    _asin_val = asin or our_data.get("parent_asin","") or "—"
 
     story.append(Spacer(1, 10*mm))
-    _asin_val = asin or our_data.get("parent_asin","") or "—"
-    story.append(Spacer(1, 8*mm))
     story.append(Paragraph("Amazon Listing Audit", S["title"]))
     story.append(Spacer(1, 3*mm))
     story.append(HRFlowable(width=W, thickness=2, color=colors.HexColor("#3b82f6")))
@@ -1687,7 +1672,6 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         ("FONTNAME", (0,0), (0,-1), _FB),
         ("FONTNAME", (2,0), (2,-1), _FB),
         ("FONTSIZE", (0,0), (-1,-1), 9),
-        ("TEXTCOLOR", (0,0), (-1,-1), colors.HexColor("#334155")),
         ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f8fafc")),
         ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
         ("PADDING", (0,0), (-1,-1), 6),
@@ -1696,7 +1680,6 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     story.append(cover_tbl)
     story.append(Spacer(1, 6*mm))
 
-    # Overall score big display
     ov_tbl = Table([[
         Paragraph(f"<font size=32 color='{hex_str(ov_col)}'><b>{ov_pct}%</b></font>", S["center"]),
         Paragraph(f"<b>Overall Score</b><br/>{score_label(ov_pct)}", S["h2"])
@@ -1704,18 +1687,17 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     ov_tbl.setStyle(TableStyle([
         ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
         ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f1f5f9")),
-        ("ROUNDEDCORNERS", [6]),
         ("PADDING", (0,0), (-1,-1), 10),
     ]))
     story.append(ov_tbl)
     story.append(Spacer(1, 6*mm))
 
-    # Score breakdown table
     def _get_score(r, key):
         v = r.get(key, 0)
         if isinstance(v, str) and "%" in v: return int(v.replace("%","").strip())
         if isinstance(v, (int,float)): return int(v)
         return 0
+
     _cosmo_sc = pct(_get_score(result.get("cosmo_analysis",{}), "score")) or _get_score(result, "cosmo_score")
     _rufus_sc = pct(_get_score(result.get("rufus_analysis",{}), "score")) or _get_score(result, "rufus_score")
     score_map = [
@@ -1762,12 +1744,6 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     story.append(sc_tbl)
     story.append(Spacer(1, 4*mm))
 
-    # Summary
-    if result.get("summary"):
-        story.append(Paragraph("Резюме", S["h2"]))
-        story.append(Paragraph(result["summary"], S["body"]))
-
-    # Priority actions
     actions = result.get("priority_improvements", []) or [
         a.get("action","") for a in result.get("actions",[]) if isinstance(a, dict)]
     if actions:
@@ -1777,7 +1753,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     story.append(PageBreak())
 
-    # ── PHOTOS PAGE ─────────────────────────────────────────────────────────
+    # Photos page
     story.append(Paragraph("Анализ фотографий", S["h1"]))
     story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
     story.append(Spacer(1, 3*mm))
@@ -1785,29 +1761,19 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     _clean = lambda s: _re.sub(r"\*+", "", s).strip()
 
     if vision_text and images:
-        # Extract blocks by number to avoid alignment issues
         _all_blocks = {}
         for _m in _re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", vision_text, _re.DOTALL):
             _all_blocks[int(_m.group(1))] = _m.group(2).strip()
         for i, img_d in enumerate(images[:5]):
             blk = _all_blocks.get(i+1, "")
-            # Parse block
             typ_m  = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
             sc_m   = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", blk)
             str_m  = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.+)", blk)
             weak_m = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.+)", blk)
             act_m  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.+)", blk)
-
             sc_val  = int(sc_m.group(1)) if sc_m else 0
-            typ_txt = _clean(typ_m.group(1)) if typ_m else ("главное" if i == 0 else "")
-            str_txt = _clean(str_m.group(1)) if str_m else ""
-            weak_txt= _clean(weak_m.group(1)) if weak_m else ""
-            act_txt = _clean(act_m.group(1)) if act_m else ""
-
             sc_col  = colors.HexColor("#15803d") if sc_val>=8 else (colors.HexColor("#d97706") if sc_val>=6 else colors.HexColor("#dc2626"))
             sc_lbl  = "Отлично" if sc_val>=8 else ("Хорошо" if sc_val>=6 else "Слабо")
-
-            # Photo thumbnail
             try:
                 _b64_data = img_d.get("b64","") if isinstance(img_d, dict) else img_d
                 img_bytes = base64.b64decode(_b64_data)
@@ -1817,18 +1783,17 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
                 pil_img.save(thumb_buf, format="JPEG", quality=70)
                 thumb_buf.seek(0)
                 rl_img = RLImage(thumb_buf, width=35*mm, height=35*mm)
-            except Exception as _pe:
+            except:
                 rl_img = Paragraph(f"(фото {i+1})", S["small"])
 
             info_content = [
-                Paragraph(f"<b>Фото #{i+1}</b> — {typ_txt}", S["h2"]),
+                Paragraph(f"<b>Фото #{i+1}</b> — {_clean(typ_m.group(1)) if typ_m else ''}", S["h2"]),
                 Paragraph(f"<font color='{hex_str(sc_col)}'><b>{sc_val}/10</b></font>  {sc_lbl}", S["body"]),
             ]
-            if str_txt:  info_content.append(Paragraph(f"+ {str_txt}", S["green"]))
-            if weak_txt: info_content.append(Paragraph(f"! {weak_txt}", S["orange"]))
-            if act_txt:  info_content.append(Paragraph(f"> {act_txt}", S["action"]))
-            # Fallback: show raw block if nothing parsed
-            if not str_txt and not weak_txt and blk:
+            if str_m:  info_content.append(Paragraph(f"+ {_clean(str_m.group(1))}", S["green"]))
+            if weak_m: info_content.append(Paragraph(f"! {_clean(weak_m.group(1))}", S["orange"]))
+            if act_m:  info_content.append(Paragraph(f"> {_clean(act_m.group(1))}", S["action"]))
+            if not str_m and blk:
                 info_content.append(Paragraph(blk[:300], S["small"]))
 
             from reportlab.platypus import KeepTogether
@@ -1843,7 +1808,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     story.append(PageBreak())
 
-    # ── CONTENT PAGE ────────────────────────────────────────────────────────
+    # Content page
     story.append(Paragraph("Анализ контента", S["h1"]))
     story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
     story.append(Spacer(1, 3*mm))
@@ -1858,7 +1823,6 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         sc_c = score_color(sc_v)
         story.append(Paragraph(
             f"{sec_name}  <font color='{hex_str(sc_c)}'><b>{sc_v}%</b></font>", S["h2"]))
-        # Try nested dict first, then flat keys
         sec = result.get(sec_key, {})
         gaps = sec.get("gaps",[]) if isinstance(sec, dict) else result.get(f"{sec_key}_gaps",[])
         rec  = sec.get("recommendation","") if isinstance(sec, dict) else result.get(f"{sec_key}_rec","")
@@ -1868,105 +1832,6 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
             story.append(Paragraph(f"> {rec}", S["action"]))
         story.append(Spacer(1, 2*mm))
 
-    # ── COSMO / RUFUS PAGE ─────────────────────────────────────────────────
-    _cosmo = result.get("cosmo_analysis", {})
-    _rufus = result.get("rufus_analysis", {})
-    if _cosmo or _rufus:
-        story.append(PageBreak())
-        story.append(Paragraph("COSMO / Rufus анализ", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        story.append(Spacer(1, 3*mm))
-
-        # Scores row
-        _cs = pct(_cosmo.get("score",0)) if isinstance(_cosmo,dict) else 0
-        _rs = pct(_rufus.get("score",0)) if isinstance(_rufus,dict) else 0
-        _sc_tbl = Table([[
-            Paragraph(f"<font color='{hex_str(score_color(_cs))}'><b>{_cs}%</b></font> COSMO Score", S["h2"]),
-            Paragraph(f"<font color='{hex_str(score_color(_rs))}'><b>{_rs}%</b></font> Rufus Score", S["h2"]),
-        ]], colWidths=[W/2, W/2])
-        _sc_tbl.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f8fafc")),
-            ("PADDING",(0,0),(-1,-1),8),
-            ("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#e2e8f0")),
-        ]))
-        story.append(_sc_tbl)
-        story.append(Spacer(1, 3*mm))
-
-        # COSMO signals present
-        if isinstance(_cosmo, dict):
-            _present = _cosmo.get("signals_present", [])
-            _missing = _cosmo.get("signals_missing", [])
-            if _present:
-                story.append(Paragraph("✅ COSMO — присутствуют сигналы", S["h2"]))
-                for s in _present[:8]:
-                    story.append(Paragraph(f"+ {s}", S["green"]))
-                story.append(Spacer(1, 2*mm))
-            if _missing:
-                story.append(Paragraph("❌ COSMO — отсутствуют сигналы", S["h2"]))
-                for s in _missing[:5]:
-                    story.append(Paragraph(f"! {s}", S["orange"]))
-                story.append(Spacer(1, 2*mm))
-
-        # Rufus issues
-        if isinstance(_rufus, dict):
-            _issues = _rufus.get("issues", [])
-            _recs   = _rufus.get("recommendations", [])
-            if _issues:
-                story.append(Paragraph("❌ Rufus — проблемы", S["h2"]))
-                for s in _issues[:5]:
-                    story.append(Paragraph(f"! {s}", S["orange"]))
-                story.append(Spacer(1, 2*mm))
-            if _recs:
-                story.append(Paragraph("→ Рекомендации Rufus", S["h2"]))
-                for s in _recs[:5]:
-                    story.append(Paragraph(f"> {s}", S["action"]))
-
-    # ── COMPETITORS PAGE ────────────────────────────────────────────────────
-    if comp_data and any(comp_data):
-        story.append(PageBreak())
-        story.append(Paragraph("Анализ конкурентов", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        story.append(Spacer(1, 3*mm))
-
-        # Comparison table header
-        _hdr = ["Метрика", "МЫ"]
-        for _cd in comp_data[:3]:
-            if _cd: _hdr.append(_cd.get("asin","Конкурент")[:12])
-        _rows = [_hdr]
-
-        def _cv(d, k): return f"{pct(d.get(k,0))}%" if d else "—"
-
-        for _metric, _key in [("Title","title_score"),("Bullets","bullets_score"),
-                               ("Images","images_score"),("A+","aplus_score"),
-                               ("COSMO","cosmo_score"),("Цена","price")]:
-            _row = [_metric]
-            if _key == "price":
-                _row.append(str(our_data.get("price",""))[:12])
-                for _cd in comp_data[:3]:
-                    _row.append(str(_cd.get("price",""))[:12] if _cd else "—")
-            else:
-                _row.append(_cv(result, _key))
-                for _cd in comp_data[:3]:
-                    _row.append(_cv(_cd.get("ai_result",{}), _key) if _cd else "—")
-            _rows.append(_row)
-
-        _cw = [35*mm] + [(W-35*mm)/max(len(_hdr)-1,1)] * (len(_hdr)-1)
-        _ct = Table(_rows, colWidths=_cw)
-        _ct.setStyle(TableStyle([
-            ("FONTNAME",   (0,0), (-1,0),  _FB),
-            ("FONTNAME",   (0,1), (-1,-1), _F),
-            ("FONTSIZE",   (0,0), (-1,-1), 9),
-            ("BACKGROUND", (0,0), (-1,0),  colors.HexColor("#1e293b")),
-            ("TEXTCOLOR",  (0,0), (-1,0),  colors.white),
-            ("BACKGROUND", (1,1), (1,-1),  colors.HexColor("#dbeafe")),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#f8fafc"), colors.white]),
-            ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-            ("PADDING",    (0,0), (-1,-1), 6),
-            ("ALIGN",      (1,0), (-1,-1), "CENTER"),
-        ]))
-        story.append(_ct)
-
-    # ── FOOTER ──────────────────────────────────────────────────────────────
     story.append(Spacer(1, 6*mm))
     story.append(HRFlowable(width=W, thickness=0.5, color=colors.HexColor("#cbd5e1")))
     story.append(Paragraph(f"Сгенерировано: {date_str} | ASIN: {asin} | Amazon Listing Analyzer", S["small"]))
@@ -1974,6 +1839,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     doc.build(story)
     buf.seek(0)
     return buf.read()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Обзор
@@ -1988,7 +1854,6 @@ if page == "🏠 Обзор":
     _rufus = r.get("rufus_analysis",{})
     if _sum: st.info(f"**📋 Резюме:** {_sum}")
 
-    # Cosmo + Rufus summary
     if _cosmo or _rufus:
         cc1, cc2 = st.columns(2)
         with cc1:
@@ -2006,11 +1871,9 @@ if page == "🏠 Обзор":
     priority_improvements = r.get("priority_improvements", [])
     if actions or priority_improvements:
         st.subheader("🎯 Приоритетные действия")
-        # New format: priority_improvements is list of strings
         for item in priority_improvements:
             with st.container(border=True):
                 st.markdown(f"**{item}**")
-        # Old/mixed format: actions is list of dicts
         for i, a in enumerate(actions):
             if isinstance(a, dict):
                 with st.container(border=True):
@@ -2029,7 +1892,6 @@ if page == "🏠 Обзор":
                 col1.caption(ch.get("how_competitors_use",""))
                 col2.markdown(badge(ch.get("priority","MEDIUM")))
 
-    # PDF Download button
     st.divider()
     st.subheader("📥 Скачать PDF отчёт")
     _pdf_col1, _pdf_col2 = st.columns([2,4])
@@ -2038,8 +1900,7 @@ if page == "🏠 Обзор":
             with st.spinner("Генерирую PDF отчёт..."):
                 try:
                     _pdf_bytes = generate_pdf_report(
-                        result=r,
-                        our_data=od,
+                        result=r, our_data=od,
                         vision_text=st.session_state.get("vision",""),
                         images=st.session_state.get("images",[]),
                         asin=od.get("parent_asin","") or od.get("asin",""),
@@ -2067,13 +1928,11 @@ if page == "🏠 Обзор":
 elif page == "📸 Фото":
     st.title("📸 Vision анализ фотографий")
 
-    # Split vision text into blocks regardless of whether images are loaded
     _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v) if v else []
     blocks = [b.strip() for b in _all_blocks if b.strip() and re.search(r"\d+/10", b)]
     if not blocks:
         blocks = [b.strip() for b in _all_blocks if b.strip()]
 
-    # History mode: no images but vision text available
     if not imgs and blocks:
         st.info("📅 История: фото не сохраняются в БД — показан текстовый анализ Vision")
         for i, text in enumerate(blocks):
@@ -2106,7 +1965,11 @@ elif page == "📸 Фото":
         st.stop()
 
     if not imgs:
-        st.warning("Фото не загружены"); st.stop()
+        if not st.session_state.get("do_vision", True):
+            st.info("👁️ Vision фото был отключён при анализе — запусти повторно с включённым чекбоксом")
+        else:
+            st.warning("Фото не загружены")
+        st.stop()
 
     for i, img in enumerate(imgs):
         text = blocks[i] if i < len(blocks) else ""
@@ -2114,9 +1977,7 @@ elif page == "📸 Фото":
         score = int(sm.group(1)) if sm else 0
         bc    = "#22c55e" if score>=8 else ("#f59e0b" if score>=6 else "#ef4444")
         slbl  = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
-        # Flexible parsing: RU and EN
         typ  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", text)
-        # Broad regex: match Strength/Weakness labels + content on same line (3+ chars)
         strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
         weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
         actn = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]?\s*(.{3,})", text)
@@ -2125,8 +1986,7 @@ elif page == "📸 Фото":
         stxt  = _strip(strg.group(1)) if strg else ""
         wtxt  = _strip(weak.group(1)) if weak else ""
         atxt  = _strip(actn.group(1)) if actn else ""
-        # Filter useless "no weakness" answers
-        if wtxt and any(x in wtxt.lower() for x in ["none", "n/a", "no weakness", "no notable weakness", "нет слабостей", "полностью соответствует требованиям"]):
+        if wtxt and any(x in wtxt.lower() for x in ["none", "n/a", "no weakness", "нет слабостей"]):
             wtxt = ""
 
         with st.container(border=True):
@@ -2137,8 +1997,6 @@ elif page == "📸 Фото":
                 _head = f"Фото #{i+1}" + (f" — {ptype}" if ptype else "")
                 st.markdown(f"**{_head}**")
                 if score > 0:
-                    bc = "#22c55e" if score>=8 else ("#f59e0b" if score>=6 else "#ef4444")
-                    slbl = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
                     st.markdown(f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0"><div style="font-size:2rem;font-weight:800;color:{bc}">{score}/10</div><div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px"><div style="background:{bc};width:{score*10}%;height:10px;border-radius:6px"></div></div><div style="color:{bc};font-size:0.8rem;margin-top:2px">{slbl}</div></div></div>', unsafe_allow_html=True)
                 else:
                     st.warning("⚠️ Оценка не распознана")
@@ -2149,7 +2007,6 @@ elif page == "📸 Фото":
                         st.markdown(f"→ {atxt or wtxt}")
                         if score <= 5 and i == 0:
                             st.error("🔴 Приоритет ВЫСОКИЙ — риск suppression листинга Amazon")
-                # Debug: show raw if strength missing
                 if not stxt and text:
                     with st.expander("🔧 Raw (Strength не распознан)"):
                         st.code(text[:400])
@@ -2160,20 +2017,22 @@ elif page == "📸 Фото":
 elif page == "🎨 A+ Контент":
     st.title("🎨 A+ Контент")
     _av = st.session_state.get("aplus_vision","")
-    _av_urls = st.session_state.get("our_data",{}).get("aplus_image_urls",[])
+    _av_urls = st.session_state.get("aplus_img_urls", od.get("aplus_image_urls",[]))
 
-    if not _av:
-        if st.session_state.get("our_data",{}).get("aplus"):
+    if not _av and not _av_urls:
+        if od.get("aplus"):
             st.warning("⚠️ A+ баннеры не проанализированы. Нажми **🔄 Обновить анализ** в меню слева.")
         else:
             st.info("ℹ️ У этого листинга нет A+ контента.")
+    elif _av_urls and not _av:
+        # Картинки есть, анализ отключён — показываем только картинки
+        st.info("👁️ Vision A+ был отключён — показаны баннеры без AI-анализа. Включи чекбокс и перезапусти.")
+        for _bi, _url in enumerate(_av_urls[:8]):
+            st.image(_url, caption=f"A+ баннер #{_bi+1}", use_container_width=True)
     else:
-        # Score from result
-        _av_total = r.get("aplus_score", 0) if "r" in dir() else 0
-        if isinstance(_av_total, str): _av_total = int(_av_total.replace("%","") or 0)
+        _av_total = pct(r.get("aplus_score", 0))
         if _av_total:
-            _av_col1, _av_col2 = st.columns([1,3])
-            _av_col1.metric("A+ Score", f"{_av_total}%")
+            st.metric("A+ Score", f"{_av_total}%")
 
         _av_blocks = re.split(r"APLUS_BLOCK_\d+", _av)
         _av_blocks = [b.strip() for b in _av_blocks if b.strip()]
@@ -2230,7 +2089,6 @@ elif page == "📝 Контент":
 
     def _sec(label, key, **kw):
         val = pct(r.get(key, 0))
-        # Use section-specific gaps only — no fallback to priority_improvements
         gaps = r.get(key.replace("_score","_gaps"), [])
         rec  = r.get(key.replace("_score","_rec"), "")
         sc2  = sc_pct(val)
@@ -2248,7 +2106,6 @@ elif page == "📝 Контент":
                 for g in _real_gaps: st.markdown(f"- {g}")
         if rec: st.info(f"💡 {rec}")
 
-    # ── Title ──────────────────────────────────────────────────────────────────
     _sec("Title", "title_score", raw_text=our_title, char_limit=125)
     _tlen = len(our_title)
     _twords = [w.lower() for w in our_title.split() if len(w)>3]
@@ -2270,75 +2127,38 @@ elif page == "📝 Контент":
         _sc2.metric("🔧 Авто-проверка", f"{_auto_title_score}%",
                     delta=f"{_ai_title_score - _auto_title_score:+d}%" if _ai_title_score != _auto_title_score else None,
                     delta_color="normal")
-        st.divider()
-        _th = st.columns([4,1,1,3])
-        for _h,_lbl in zip(_th,["Критерий","Вес","Статус","Детали"]): _h.caption(f"**{_lbl}**")
-        for _crit,_wt,_ok,_det in _title_rubric:
-            _rc = st.columns([4,1,1,3])
-            _rc[0].write(_crit); _rc[1].write(f"`{_wt}`"); _rc[2].write("✅" if _ok else "❌")
-            if _det: _rc[3].caption(_det)
-        st.divider()
-        _ex1,_ex2 = st.columns(2)
-        _ex1.success("✅ **Пример хорошего**\nMerino Wool Tank Top Men – Lightweight Base Layer for Hiking & Sport\n• <125 симв.  • бренд+матер+тип  • нет повторов")
-        _ex2.error("⛔ **Пример плохого**\nBEST WOOL TANK! WOOL WOOL FOR MEN - SUPER!\n• спецсимволы !  • повтор WOOL  • кричащий стиль")
 
     st.divider()
-    # ── Bullets ─────────────────────────────────────────────────────────────────
     bullets_text = "\n".join([f"• {b}" for b in our_bullets]) if our_bullets else ""
     _sec("Bullets", "bullets_score", raw_text=bullets_text)
-    _bul_rubric = [
-        ("5 буллетов",              "20%", len(our_bullets)==5,                      f"{len(our_bullets)} шт."),
-        ("Формат «Фича: Выгода.»",  "30%", sum(1 for b in our_bullets if ":" in b)>=3, f"{sum(1 for b in our_bullets if ':' in b)}/5 с двоеточием"),
-        ("≤250 байт каждый",        "25%", all(len(b.encode())<250 for b in our_bullets), ""),
-        ("Нет ALL CAPS блоков",     "15%", not any(b[:15].isupper() for b in our_bullets), ""),
-        ("Покрывает возражения",    "10%", True, "уход, размер, совместимость"),
-    ]
-    _ai_bul_score = pct(r.get("bullets_score", 0))
-    _auto_bul_score = sum(int(_ok) * int(_wt.strip("%")) for _,_wt,_ok,_ in _bul_rubric)
-    with st.expander("📐 Рубрика оценки Bullets"):
-        _bs1, _bs2 = st.columns(2)
-        _bs1.metric("🤖 AI оценка", f"{_ai_bul_score}%")
-        _bs2.metric("🔧 Авто-проверка", f"{_auto_bul_score}%",
-                    delta=f"{_ai_bul_score - _auto_bul_score:+d}%" if _ai_bul_score != _auto_bul_score else None,
-                    delta_color="normal")
-        st.divider()
-        _bh = st.columns([4,1,1,3])
-        for _h,_lbl in zip(_bh,["Критерий","Вес","Статус","Детали"]): _h.caption(f"**{_lbl}**")
-        for _crit,_wt,_ok,_det in _bul_rubric:
-            _rc = st.columns([4,1,1,3])
-            _rc[0].write(_crit); _rc[1].write(f"`{_wt}`"); _rc[2].write("✅" if _ok else "❌")
-            if _det: _rc[3].caption(_det)
-
     st.divider()
     _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
     st.divider()
-    _sec("A+",          "aplus_score")
+    _sec("A+", "aplus_score")
 
-    # A+ — link to dedicated page
     _av_check = st.session_state.get("aplus_vision","")
     if _av_check:
         st.info("🎨 Визуальный анализ A+ баннеров → перейди в раздел **A+ Контент** в меню слева")
-    elif st.session_state.get("our_data",{}).get("aplus"):
+    elif od.get("aplus"):
         st.info("🎨 A+ есть, но баннеры не загружены. Перезапусти анализ.")
 
     st.divider()
-    _sec("Фото",        "images_score")
+    _sec("Фото", "images_score")
 
-    # Images breakdown
     ib = r.get("images_breakdown", {})
     if ib:
         st.subheader("📸 Детализация фото")
-        for k,v in ib.items():
-            st.markdown(f"**{k}:** {v}")
+        for k,v2 in ib.items():
+            st.markdown(f"**{k}:** {v2}")
 
     if r.get("tech_params"):
         st.divider()
         st.subheader("⚙️ Технические параметры")
-        for p in r["tech_params"]:
+        for p2 in r["tech_params"]:
             with st.container(border=True):
-                st.markdown(f"**{p.get('param','')}**")
+                st.markdown(f"**{p2.get('param','')}**")
                 x1,x2 = st.columns(2)
-                x1.caption(f"🏆 Конкуренты: {p.get('competitor_value','')}"); x2.caption(f"→ Наш пробел: {p.get('our_gap','')}")
+                x1.caption(f"🏆 Конкуренты: {p2.get('competitor_value','')}"); x2.caption(f"→ Наш пробел: {p2.get('our_gap','')}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Benchmark
@@ -2350,7 +2170,6 @@ elif page == "🏆 Benchmark":
         st.info("Добавь конкурентов в форму выше и запусти анализ повторно")
         st.stop()
 
-    # ── auto_score helper ────────────────────────────────────────────────────
     def auto_score(d):
         pi2 = d.get("product_information", {})
         title2  = d.get("title",""); imgs2 = d.get("images",[])
@@ -2364,34 +2183,33 @@ elif page == "🏆 Benchmark":
         if bsr_m:
             try: bsr_num = int(bsr_m.group(1).replace(",",""))
             except: pass
-        colors = len(d.get("customization_options",{}).get("color",[]))
-        sizes  = len(d.get("customization_options",{}).get("size",[]))
-        ts = min(10, max(0, (1.5 if len(title2)<=125 else 0) + (3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5) + (3.0 if any(k in title2.lower() for k in ["sport","hiking","travel","daily","gym","outdoor"]) else 1.0) + (1.0 if not re.search(r"[!$?{}]",title2) else 0) + 1))
-        bs = min(10, max(0, (1.5 if len(bul2)<=5 else 0) + (2.5 if any(":" in b for b in bul2) else 1.0) + (4.0 if len(bul2)>=4 else len(bul2)*1.0) + (1.0 if all(len(b.encode())<=255 for b in bul2) else 0) + 1))
-        ds = 0 if not desc2 else min(10, 4+(3 if len(desc2)>200 else 1)+(2 if len(desc2)>500 else 0))
+        colors2 = len(d.get("customization_options",{}).get("color",[]))
+        sizes2  = len(d.get("customization_options",{}).get("size",[]))
+        ts = min(10, max(0, (1.5 if len(title2)<=125 else 0) + (3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5) + 3.0 + (1.0 if not re.search(r"[!$?{}]",title2) else 0) + 1))
+        bs = min(10, max(0, (1.5 if len(bul2)<=5 else 0) + (2.5 if any(":" in b for b in bul2) else 1.0) + min(4.0,len(bul2)) + 1.0 + 1))
+        ds = 0 if not desc2 else min(10, 4+(3 if len(desc2)>200 else 1))
         ps = min(10, max(0, (4.0 if len(imgs2)>=6 else len(imgs2)*0.6)+(2.0 if has_vid else 0)+(4.0 if len(imgs2)>=6 else 0)))
         as_ = 0 if not has_ap else 7
         rs = 10 if (rating2>=4.4 and rev_cnt>=50) else (7 if rating2>=4.0 else 4)
         bsrs = 10 if bsr_num<=1000 else (8 if bsr_num<=5000 else 5)
         prs = 10 if is_prime else 5
-        vs = 10 if (colors>=5 and sizes>=3) else (7 if sizes>=3 else 4)
+        vs = 10 if (colors2>=5 and sizes2>=3) else (7 if sizes2>=3 else 4)
         h = int((ts*0.10+bs*0.10+ds*0.10+ps*0.10+as_*0.10+rs*0.15+bsrs*0.15+7*0.10+vs*0.05+prs*0.05)*10)
         return {"title":round(ts,1),"bullets":round(bs,1),"description":round(ds,1),"photos":round(ps,1),"aplus":as_,"reviews":rs,"bsr":bsrs,"variants":vs,"prime":prs,"health":h}
 
     our_scores = {
         "title":       pct(r.get("title_score",0)),
         "bullets":     pct(r.get("bullets_score",0)),
-        "description": pct(r.get("description_score", r.get("desc_score",0))),
-        "photos":      pct(r.get("images_score", r.get("photos_score",0))),
+        "description": pct(r.get("description_score",0)),
+        "photos":      pct(r.get("images_score",0)),
         "aplus":       pct(r.get("aplus_score",0)),
         "reviews":     pct(r.get("reviews_score",0)),
         "bsr":         pct(r.get("bsr_score",0)),
         "variants":    pct(r.get("customization_score",0)),
         "prime":       pct(r.get("prime_score",0)),
-        "health":      pct(r.get("overall_score", r.get("health_score",0))),
+        "health":      pct(r.get("overall_score",0)),
     }
     def get_comp_scores(c, i):
-        """Use AI scores if available, else auto_score"""
         cai = st.session_state.get(f"comp_ai_{i}")
         if cai:
             return {
@@ -2410,122 +2228,16 @@ elif page == "🏆 Benchmark":
 
     comp_scores = [get_comp_scores(c, i) for i,c in enumerate(cd)]
     all_scores  = [our_scores] + comp_scores
-    all_p       = [od] + cd
-
-    # ── helper: render one product full card ─────────────────────────────────
-    def render_product_card(d, sc, label, is_ours=False):
-        dpi  = d.get("product_information", {})
-        dasin   = get_asin_from_data(d)
-        dtitle  = d.get("title","")
-        dprice  = d.get("price","")
-        drating = d.get("average_rating","")
-        drev    = dpi.get("Customer Reviews",{}).get("ratings_count","")
-        dbsr    = str(dpi.get("Best Sellers Rank",""))[:50]
-        dbrand  = d.get("brand","")
-        dbul    = d.get("feature_bullets",[])
-        ddesc   = d.get("description","")
-        dimgs   = d.get("images",[])
-        daplus  = d.get("aplus",False)
-        dvid    = int(d.get("number_of_videos",0) or 0)
-        dprime  = d.get("is_prime_exclusive",False)
-        dcolors = d.get("customization_options",{}).get("color",[])
-        dsizes  = d.get("customization_options",{}).get("size",[])
-        dmat    = dpi.get("Material Type","")
-        tlen    = len(dtitle)
-        h       = sc.get("health",0)
-        hc      = "#22c55e" if h>=75 else ("#f59e0b" if h>=50 else "#ef4444")
-        bg      = "linear-gradient(135deg,#1e293b,#334155)" if is_ours else "linear-gradient(135deg,#3b1e1e,#5c2626)"
-
-        st.markdown(f"""
-<div style="background:{bg};border-radius:14px;padding:18px;color:white;margin-bottom:14px">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-    <div>
-      <div style="font-size:0.78rem;opacity:0.6">{dbrand} - {dasin}</div>
-      <div style="font-size:0.92rem;font-weight:600;max-width:480px;margin-top:3px">{dtitle[:75]}{"..." if tlen>75 else ""}</div>
-      <div style="display:flex;gap:12px;margin-top:7px;font-size:0.8rem;opacity:0.8;flex-wrap:wrap">
-        <span>💰 {dprice}</span><span>⭐ {drating} ({drev})</span>
-        <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">{tlen} симв.</span>
-      </div>
-    </div>
-    <div style="text-align:center">
-      <div style="font-size:2.8rem;font-weight:800;color:{hc}">{h}%</div>
-      <div style="font-size:0.75rem;color:{hc}">Health</div>
-    </div>
-  </div>
-  <div style="background:rgba(255,255,255,0.12);border-radius:6px;height:8px;margin-top:10px">
-    <div style="background:{hc};width:{h}%;height:8px;border-radius:6px"></div>
-  </div>
-</div>""", unsafe_allow_html=True)
-
-        # Mini score cards
-        sitems = [("Title",sc.get("title",0)),("Bullets",sc.get("bullets",0)),
-                  ("Описание",sc.get("description",0)),("Фото",sc.get("photos",0)),
-                  ("A+",sc.get("aplus",0)),("Отзывы",sc.get("reviews",0)),
-                  ("BSR",sc.get("bsr",0)),("Варианты",sc.get("variants",0)),("Prime",sc.get("prime",0))]
-        sc2 = st.columns(len(sitems))
-        for col2,(lbl2,val2) in zip(sc2,sitems):
-            p2 = int(val2/10*100); c2="#22c55e" if p2>=75 else ("#f59e0b" if p2>=50 else "#ef4444")
-            col2.markdown(f'<div style="border-left:3px solid {c2};padding:5px 4px;text-align:center;background:#f8fafc;border-radius:4px"><div style="font-size:1.05rem;font-weight:700;color:{c2}">{p2}%</div><div style="font-size:0.62rem;color:#64748b">{lbl2}</div></div>', unsafe_allow_html=True)
-
-        # Content tabs
-        tab_cont, tab_photo, tab_data = st.tabs(["📝 Контент", "📸 Фото", "📊 Данные"])
-        with tab_cont:
-            tcc = "#ef4444" if tlen>125 else "#22c55e"
-            st.markdown(f"**Title** — <span style='color:{tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
-            st.markdown(f"> {dtitle}")
-            st.divider()
-            st.markdown(f"**Bullets** ({len(dbul)})")
-            for b in dbul:
-                blen = len(b.encode())
-                st.markdown(f"{'🔴' if blen>255 else '✅'} {b}")
-                st.caption(f"{blen} байт")
-            if not dbul: st.caption("Нет буллетов")
-            st.divider()
-            st.markdown("**Описание**")
-            if ddesc: st.markdown(str(ddesc)[:600])
-            else: st.warning("Описание отсутствует")
-            st.divider()
-            st.markdown(f"**A+:** {'✅' if daplus else '❌'}  |  **Видео:** {'✅ '+str(dvid)+' шт.' if dvid else '❌'}")
-        with tab_photo:
-            if dimgs:
-                for rs in range(0, min(len(dimgs),9), 3):
-                    rc = st.columns(3)
-                    for ci2,iu in enumerate(dimgs[rs:rs+3]):
-                        try:
-                            ri2 = requests.get(iu, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
-                            if ri2.ok: rc[ci2].image(ri2.content, caption=f"#{rs+ci2+1}", use_container_width=True)
-                        except: rc[ci2].caption(f"#{rs+ci2+1} ошибка")
-                st.caption(f"Всего: {len(dimgs)} фото")
-            else: st.warning("Нет фото")
-        with tab_data:
-            da1,da2 = st.columns(2)
-            da1.metric("Цена", dprice); da2.metric("Рейтинг", drating)
-            da1.metric("Отзывов", drev); da2.metric("BSR", dbsr[:30])
-            da1.metric("Материал", dmat or "—"); da2.metric("Prime", "Да" if dprime else "Нет")
-            da1.metric("Цветов", len(dcolors)); da2.metric("Размеров", len(dsizes))
-            st.caption(f"Размеры: {[s.get('value','') for s in dsizes]}")
-            st.caption(f"Цвета: {[c.get('value','') for c in dcolors]}")
-
-    # ── Score comparison bars (always visible at top) ────────────────────────
-    score_rows = [
-        ("🏷️ Title","title",100),("📋 Bullets","bullets",100),
-        ("📄 Описание","description",100),("📸 Фото","photos",100),
-        ("✨ A+","aplus",100),("⭐ Отзывы","reviews",100),
-        ("📊 BSR","bsr",100),("🎨 Варианты","variants",100),
-        ("🚀 Prime","prime",100),("💯 Overall","health",100),
-    ]
     asin_labels = ["🔵 НАШ"] + [f"🔴 {get_asin_from_data(c) or f'Конк.{i+1}'}" for i,c in enumerate(cd)]
 
-    # ── Podium ───────────────────────────────────────────────────────────────
     total_scores = []
-    for sc in all_scores:
-        # Use pre-computed health/overall if available, else weighted average
-        if sc.get("health", 0) > 0:
-            total_scores.append(sc["health"])
+    for sc2 in all_scores:
+        if sc2.get("health", 0) > 0:
+            total_scores.append(sc2["health"])
         else:
             keys = ["title","bullets","description","photos","aplus","reviews","bsr","variants","prime"]
             w    = [0.10,0.10,0.10,0.10,0.10,0.15,0.15,0.05,0.05]
-            total = sum(sc.get(k,0)*wi for k,wi in zip(keys,w))
+            total = sum(sc2.get(k,0)*wi for k,wi in zip(keys,w))
             total_scores.append(round(total))
     ranked = sorted(enumerate(zip(asin_labels, total_scores)), key=lambda x: x[1][1], reverse=True)
     medals = ["🥇","🥈","🥉","4️⃣","5️⃣"]
@@ -2547,6 +2259,13 @@ elif page == "🏆 Benchmark":
 
     st.divider()
     st.subheader("📊 Сравнение оценок")
+    score_rows = [
+        ("🏷️ Title","title",100),("📋 Bullets","bullets",100),
+        ("📄 Описание","description",100),("📸 Фото","photos",100),
+        ("✨ A+","aplus",100),("⭐ Отзывы","reviews",100),
+        ("📊 BSR","bsr",100),("🎨 Варианты","variants",100),
+        ("🚀 Prime","prime",100),("💯 Overall","health",100),
+    ]
     hdr2 = st.columns([2]+[3]*(1+len(cd)))
     hdr2[0].markdown("**Метрика**")
     for j,al in enumerate(asin_labels): hdr2[j+1].markdown(f"**{al}**")
@@ -2565,9 +2284,6 @@ elif page == "🏆 Benchmark":
                 f'<div style="position:absolute;top:2px;left:6px;font-size:0.75rem;font-weight:700;color:white">{p3}%{"★" if is_best else ""}</div>'
                 f'</div>', unsafe_allow_html=True)
 
-
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: COSMO / Rufus
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2582,12 +2298,11 @@ elif page == "🧠 COSMO / Rufus":
     rc2   = "#22c55e" if rufus_s>=75 else ("#f59e0b" if rufus_s>=50 else "#ef4444")
     ccc1,ccc2 = st.columns(2)
     with ccc1:
-        st.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{cc}">{cosmo}%</div><div style="color:{cc};font-weight:600">COSMO Score</div><div style="background:#e5e7eb;border-radius:6px;height:10px;margin-top:8px"><div style="background:{cc};width:{cosmo}%;height:10px;border-radius:6px"></div></div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{cc}">{cosmo}%</div><div style="color:{cc};font-weight:600">COSMO Score</div></div>', unsafe_allow_html=True)
     with ccc2:
-        st.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{rc2}">{rufus_s}%</div><div style="color:{rc2};font-weight:600">Rufus Score</div><div style="background:#e5e7eb;border-radius:6px;height:10px;margin-top:8px"><div style="background:{rc2};width:{rufus_s}%;height:10px;border-radius:6px"></div></div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{rc2}">{rufus_s}%</div><div style="color:{rc2};font-weight:600">Rufus Score</div></div>', unsafe_allow_html=True)
     st.divider()
 
-    # New format: cosmo_analysis.signals_present/missing
     if _ca:
         c_present = _ca.get("signals_present",[])
         c_missing = _ca.get("signals_missing",[])
@@ -2596,49 +2311,22 @@ elif page == "🧠 COSMO / Rufus":
             col_p, col_m = st.columns(2)
             with col_p:
                 st.markdown("**✅ Присутствуют**")
-                for s2 in c_present:
-                    st.success(s2)
+                for s2 in c_present: st.success(s2)
             with col_m:
                 st.markdown("**❌ Отсутствуют**")
-                for s2 in c_missing:
-                    st.error(s2)
-    # Old format fallback
-    elif r.get("cosmo_semantic"):
-        st.subheader("📡 Семантические связи")
-        status_icon = {"WELL-DEVELOPED":"✅","GOOD":"✅","ADEQUATE":"⚠️","PARTIAL":"⚠️","MINIMAL":"❌"}
-        for rel in r["cosmo_semantic"]:
-            icon = status_icon.get(rel.get("status",""),"❓")
-            with st.container(border=True):
-                st.markdown(f"{icon} **{rel.get('relationship','')}** — *{rel.get('status','')}*")
-                if rel.get("evidence"):   st.caption(f"✓ {rel['evidence']}")
-                if rel.get("opportunity"):st.info(f"💡 {rel['opportunity']}")
+                for s2 in c_missing: st.error(s2)
 
     st.divider()
-    st.subheader("🤖 Rufus Q&A")
-    c1,c2,c3 = st.columns(3)
-    with c1:
-        st.markdown("**✅ Отвечает**")
-        for q in r.get("rufus_answered",[]):
-            with st.container(border=True):
-                st.caption(q.get("question",""))
-                st.success(q.get("answer","")[:200])
-    with c2:
-        st.markdown("**⚠️ Частично**")
-        for q in r.get("rufus_partial",[]):
-            with st.container(border=True):
-                st.caption(q.get("question",""))
-                st.warning(q.get("gap","")[:200])
-    with c3:
-        st.markdown("**❌ Не отвечает**")
-        for q in r.get("rufus_missing",[]):
-            with st.container(border=True):
-                st.caption(q.get("question",""))
-                st.error(q.get("missing","")[:200])
+    st.subheader("🤖 Rufus Issues")
+    if _ra.get("issues"):
+        for iss in _ra["issues"]:
+            st.warning(f"⚠️ {iss}")
 
     with st.expander("🔧 Raw JSON"):
         st.json(r)
+
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE: Конкурент N (individual pages)
+# PAGE: Конкурент N
 # ══════════════════════════════════════════════════════════════════════════════
 elif _is_competitor_page:
     idx_m = re.search(r"Конкурент (\d+)", page)
@@ -2648,11 +2336,8 @@ elif _is_competitor_page:
     if not c:
         st.warning("Данные конкурента не найдены"); st.stop()
 
-    # Use render_product_card defined in benchmark — redefine inline here
     cpi   = c.get("product_information", {})
     casin = get_asin_from_data(c)
-    csc_page = {}
-    # auto_score inline
     _t2 = c.get("title",""); _i2 = c.get("images",[]); _b2 = c.get("feature_bullets",[])
     _d2 = c.get("description",""); _rat2 = float(c.get("average_rating",0) or 0)
     _rev2 = int(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0)
@@ -2674,16 +2359,14 @@ elif _is_competitor_page:
     _prs = 10 if _pr2 else 5
     _vs = 10 if (_col2>=5 and _sz2>=3) else (7 if _sz2>=3 else 4)
     _h = int((_ts*0.10+_bs*0.10+_ds*0.10+_ps*0.10+_as*0.10+_rs*0.15+_bsrs*0.15+7*0.10+_vs*0.05+_prs*0.05)*10)
-    csc_page = {"title":round(_ts,1),"bullets":round(_bs,1),"description":round(_ds,1),"photos":round(_ps,1),"aplus":_as,"reviews":_rs,"bsr":_bsrs,"variants":_vs,"prime":_prs,"health":_h}
 
-    ch = csc_page["health"]; hc = "#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
+    ch = _h; hc = "#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
     tlen = len(_t2); cprice = c.get("price",""); cbrand = c.get("brand","")
     crating = c.get("average_rating",""); crev = cpi.get("Customer Reviews",{}).get("ratings_count","")
     cbsr_s = str(cpi.get("Best Sellers Rank",""))[:50]
 
     st.title(f"🔴 Конкурент {cidx+1}")
 
-    # Health card
     st.markdown(f"""
 <div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:14px;padding:18px;color:white;margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -2691,8 +2374,7 @@ elif _is_competitor_page:
       <div style="font-size:0.78rem;opacity:0.6">{cbrand} - {casin}</div>
       <div style="font-size:0.95rem;font-weight:600;max-width:500px;margin-top:3px">{_t2[:80]}{"..." if tlen>80 else ""}</div>
       <div style="display:flex;gap:12px;margin-top:7px;font-size:0.8rem;opacity:0.8;flex-wrap:wrap">
-        <span>Price: {cprice}</span>
-        <span>Rating: {crating} ({crev} reviews)</span>
+        <span>Price: {cprice}</span><span>Rating: {crating} ({crev} reviews)</span>
         <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">{tlen} chars</span>
       </div>
     </div>
@@ -2701,12 +2383,8 @@ elif _is_competitor_page:
       <div style="font-size:0.75rem;color:{hc}">Health Score</div>
     </div>
   </div>
-  <div style="background:rgba(255,255,255,0.12);border-radius:6px;height:8px;margin-top:10px">
-    <div style="background:{hc};width:{ch}%;height:8px;border-radius:6px"></div>
-  </div>
 </div>""", unsafe_allow_html=True)
 
-    # ── AI Analysis button for competitor ───────────────────────────────────
     _cai_key    = f"comp_ai_{cidx}"
     _vision_key = f"comp_vision_{cidx}"
     _cai_result = st.session_state.get(_cai_key)
@@ -2720,21 +2398,16 @@ elif _is_competitor_page:
                 _clang = st.session_state.get("analysis_lang","ru")
                 _cimgs_urls = c.get("images",[])
                 _prog = st.progress(0, text="⬇️ Загружаю фото...")
-                # Step 1: download images
                 _cimgs_dl = download_images(_cimgs_urls[:5], lambda m: None) if _cimgs_urls else []
                 _prog.progress(33, text="👁️ Vision анализ фото...")
-                # Step 2: vision
                 _comp_vision = analyze_vision(_cimgs_dl, c, casin, lambda m: None, lang=_clang) if _cimgs_dl else ""
                 _prog.progress(66, text="🧠 AI анализ текста...")
-                # Step 3: text analysis
                 _cai_result = analyze_text(c, [], _comp_vision, casin, lambda m: None, lang=_clang)
-                # Save both
                 st.session_state[_cai_key]    = _cai_result
                 st.session_state[_vision_key] = (_cimgs_dl, _comp_vision) if _cimgs_dl else None
                 _prog.progress(100, text="✅ Готово!")
                 st.rerun()
 
-    # Score mini-cards — use AI scores if available, else auto-score
     if _cai_result:
         _sitems = [
             ("Title",   pct(_cai_result.get("title_score",0))),
@@ -2762,18 +2435,11 @@ elif _is_competitor_page:
 
     st.divider()
 
-    # Content
     tab_cont, tab_photo, tab_data = st.tabs(["📝 Контент", "📸 Фото", "📊 Данные"])
     with tab_cont:
         _tcc = "#ef4444" if tlen>125 else "#22c55e"
         st.markdown(f"**Title** — <span style='color:{_tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
         st.markdown(f"> {_t2}")
-        if _cai_result:
-            _ts_ai = pct(_cai_result.get("title_score",0))
-            _tc2 = "#22c55e" if _ts_ai>=75 else ("#f59e0b" if _ts_ai>=50 else "#ef4444")
-            st.markdown(f"🧠 AI оценка: <span style='color:{_tc2};font-weight:700'>{_ts_ai}%</span>", unsafe_allow_html=True)
-            _tgi = _cai_result.get("priority_improvements",[])[:2]
-            for _tg in _tgi: st.caption(f"💡 {_tg}")
         st.divider()
         st.markdown(f"**Bullets** ({len(_b2)})")
         for _bul in _b2:
@@ -2781,28 +2447,15 @@ elif _is_competitor_page:
             st.markdown(f"{'🔴' if _blen>255 else '✅'} {_bul}")
             st.caption(f"{_blen} байт")
         if not _b2: st.caption("Нет буллетов")
-        if _cai_result:
-            _bs_ai = pct(_cai_result.get("bullets_score",0))
-            _bc2 = "#22c55e" if _bs_ai>=75 else ("#f59e0b" if _bs_ai>=50 else "#ef4444")
-            st.markdown(f"🧠 Bullets AI: <span style='color:{_bc2};font-weight:700'>{_bs_ai}%</span>", unsafe_allow_html=True)
         st.divider()
         st.markdown("**Описание**")
         if _d2: st.markdown(str(_d2)[:600])
         else: st.warning("Описание отсутствует")
-        if _cai_result:
-            _ds_ai = pct(_cai_result.get("description_score",0))
-            _dc2 = "#22c55e" if _ds_ai>=75 else ("#f59e0b" if _ds_ai>=50 else "#ef4444")
-            st.markdown(f"🧠 Описание AI: <span style='color:{_dc2};font-weight:700'>{_ds_ai}%</span>", unsafe_allow_html=True)
         st.divider()
         st.markdown(f"**A+:** {'✅' if _ap2 else '❌'}  |  **Видео:** {'✅ '+str(int(c.get('number_of_videos',0) or 0))+' шт.' if _vid2 else '❌'}")
-        if _cai_result:
-            _as_ai = pct(_cai_result.get("aplus_score",0))
-            _ac2 = "#22c55e" if _as_ai>=75 else ("#f59e0b" if _as_ai>=50 else "#ef4444")
-            st.markdown(f"🧠 A+ AI: <span style='color:{_ac2};font-weight:700'>{_as_ai}%</span>", unsafe_allow_html=True)
     with tab_photo:
         _cimgs = c.get("images",[])
         if _cimgs:
-            # Vision results come from the combined AI Анализ button above
             if _vision_key in st.session_state and st.session_state[_vision_key]:
                 _cv_imgs, _cv_text = st.session_state[_vision_key]
                 _cv_blocks = re.split(r"PHOTO_BLOCK_\d+", _cv_text)
@@ -2833,7 +2486,8 @@ elif _is_competitor_page:
                             if _pstrg: st.success(f"✅ {_cstrip(_pstrg.group(1))}")
                             if _pweak: st.warning(f"⚠️ {_cstrip(_pweak.group(1))}")
             else:
-                # Show photos without analysis
+                if not st.session_state.get("do_comp_vision", True):
+                    st.info("👁️ Vision конкурентов был отключён. Нажми 🧠 Анализ выше для анализа этого конкурента.")
                 for _rs in range(0, min(len(_cimgs),9), 3):
                     _rc = st.columns(3)
                     for _ci2,_iu in enumerate(_cimgs[_rs:_rs+3]):
@@ -2851,8 +2505,6 @@ elif _is_competitor_page:
         _ccolors = c.get("customization_options",{}).get("color",[])
         _csizes  = c.get("customization_options",{}).get("size",[])
         _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
-        st.caption(f"Размеры: {[s.get('value','') for s in _csizes]}")
-        st.caption(f"Цвета: {[s.get('value','') for s in _ccolors]}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Workflow
@@ -2865,14 +2517,12 @@ elif page == "📋 Workflow":
     if not _board:
         st.info("Нет данных. Запусти анализ хотя бы одного листинга.")
     else:
-        # ── Kanban columns ──────────────────────────────────────────────────
         _status_cols = {key: [] for _, key, _ in WORKFLOW_STATUSES}
         for item in _board:
             _s = item.get("status", "new_audit")
             if _s not in _status_cols: _s = "new_audit"
             _status_cols[_s].append(item)
 
-        # Show as columns
         _wf_cols = st.columns(len(WORKFLOW_STATUSES))
         for _ci, (icon, key, label) in enumerate(WORKFLOW_STATUSES):
             with _wf_cols[_ci]:
@@ -2889,8 +2539,6 @@ elif page == "📋 Workflow":
                         if _it.get("note"): st.caption(f"📝 {_it['note']}")
 
         st.divider()
-
-        # ── Detail editor ───────────────────────────────────────────────────
         st.subheader("✏️ Изменить статус")
         if _board:
             _sel_asin = st.selectbox("ASIN", [i["asin"] for i in _board], key="wf_sel_asin")
