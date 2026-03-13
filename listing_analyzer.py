@@ -368,20 +368,36 @@ def scrapingdog_product(asin, log):
             params={"api_key": sd_key, "asin": asin, "domain": "com"}, timeout=60)
         if not r.ok: log(f"⚠️ {r.status_code}: {r.text[:100]}"); return {}, []
         data = r.json()
-        # A+ banners = images[] after product photos (grey-pixel = JS lazy load, useless)
+        # A+ banners — try aplus_images first, fallback to images[split+]
         if data.get("aplus"):
-            _prod_imgs = data.get("images_of_specified_asin", [])
-            _all_imgs  = data.get("images", [])
-            _split = len(_prod_imgs) if _prod_imgs else 6
-            _aplus_candidates = [u for u in _all_imgs[_split:]
-                                 if isinstance(u, str) and u.startswith("http")
-                                 and "grey-pixel" not in u
-                                 and "_SS4" not in u and "_SR3" not in u][:12]
-            if _aplus_candidates:
-                data["aplus_image_urls"] = _aplus_candidates
-                log(f"  ✅ A+ баннеры: {len(_aplus_candidates)} шт (images[{_split}+])")
+            # 1. aplus_images field — real banners when ScrapingDog renders JS
+            _api_aplus = data.get("aplus_images", [])
+            _real_aplus = []
+            for _u in _api_aplus:
+                if not isinstance(_u, str): continue
+                if "grey-pixel" in _u: continue
+                if not _u.startswith("http"): continue
+                # Remove crop suffix to get full image
+                import re as _re
+                _u2 = _re.sub(r'\.__CR[^.]+_PT0_SX\d+_V\d+___', '', _u)
+                _real_aplus.append(_u2)
+            if _real_aplus:
+                data["aplus_image_urls"] = _real_aplus[:8]
+                log(f"  ✅ A+ из aplus_images: {len(_real_aplus)} баннеров")
             else:
-                log("  ℹ️ A+ баннеры не найдены в images[]")
+                # 2. Fallback: images[] after product photos
+                _prod_imgs = data.get("images_of_specified_asin", [])
+                _all_imgs  = data.get("images", [])
+                _split = len(_prod_imgs) if _prod_imgs else 6
+                _aplus_candidates = [u for u in _all_imgs[_split:]
+                                     if isinstance(u, str) and u.startswith("http")
+                                     and "grey-pixel" not in u
+                                     and "_SS4" not in u and "_SR3" not in u][:12]
+                if _aplus_candidates:
+                    data["aplus_image_urls"] = _aplus_candidates
+                    log(f"  ✅ A+ из images[{_split}+]: {len(_aplus_candidates)} шт")
+                else:
+                    log("  ℹ️ A+ баннеры недоступны")
         # Extract image URLs
         urls = []
         for field in ["images_of_specified_asin","images"]:
