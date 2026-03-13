@@ -911,6 +911,9 @@ with st.sidebar:
 <div style="font-size:0.75rem;color:#94a3b8;margin-top:2px">⚠️ Не путать с подпиской Claude.ai — это разные счета</div>
 </div>""", unsafe_allow_html=True)
         st.link_button("🔗 Пополнить баланс", "https://console.anthropic.com/settings/billing", use_container_width=True)
+        if st.button("✅ Уже пополнил", use_container_width=True, key="dismiss_balance_err"):
+            st.session_state.pop("_api_balance_error", None)
+            st.rerun()
         st.divider()
 
     if "page" not in st.session_state:
@@ -2571,4 +2574,4 @@ elif page == "📋 Workflow":
                         st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}")
                         st.rerun()
                     else:
-                        st.error("Ошибка сохранения") 
+                        st.error("Ошибка сохранения")
