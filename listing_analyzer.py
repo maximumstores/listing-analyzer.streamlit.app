@@ -275,7 +275,11 @@ def _anthropic_post(payload, retries=3):
     for attempt in range(retries):
         r = requests.post(ANTHROPIC_URL, headers=headers, json=payload, timeout=300)
         if r.ok:
+            st.session_state.pop("_api_balance_error", None)
             return r.json()["content"][0]["text"]
+        if r.status_code == 402 or "credit balance" in r.text.lower() or "insufficient" in r.text.lower():
+            st.session_state["_api_balance_error"] = True
+            raise Exception("❌ Баланс Claude API исчерпан — пополни на console.anthropic.com")
         if r.status_code == 529:
             wait = 20 * (attempt + 1)
             st.toast(f"⏳ Anthropic перегружен, жду {wait}с... ({attempt+1}/{retries})")
@@ -897,6 +901,16 @@ st.set_page_config(page_title="Listing Analyzer", page_icon="🔍", layout="wide
 with st.sidebar:
     st.markdown("## 🔍 Listing Analyzer")
     st.divider()
+
+    # ── API balance warning ───────────────────────────────────────────────────
+    if st.session_state.get("_api_balance_error"):
+        st.markdown("""
+<div style="background:#fef2f2;border:1.5px solid #ef4444;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+<div style="font-size:0.85rem;font-weight:700;color:#dc2626">💳 Баланс API исчерпан</div>
+<div style="font-size:0.75rem;color:#64748b;margin-top:3px">Анализатор не работает до пополнения</div>
+</div>""", unsafe_allow_html=True)
+        st.link_button("🔗 Пополнить баланс", "https://console.anthropic.com/settings/billing", use_container_width=True)
+        st.divider()
 
     if "page" not in st.session_state:
         st.session_state["page"] = "🏠 Обзор"
