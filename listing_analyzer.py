@@ -900,7 +900,7 @@ st.set_page_config(page_title="Listing Analyzer", page_icon="https://merino.tech
 
 with st.sidebar:
     st.image("https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260", width=120)
-    st.markdown("## 🔍 Listing Analyzer")
+    st.markdown("## <span style='color:#c0392b'>Listing Analyzer</span>", unsafe_allow_html=True)
     st.divider()
 
     # ── API balance warning ───────────────────────────────────────────────────
