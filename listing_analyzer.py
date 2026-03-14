@@ -1786,15 +1786,23 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         for _m in _re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", vision_text, _re.DOTALL):
             _all_blocks[int(_m.group(1))] = _m.group(2).strip()
         for i, img_d in enumerate(images[:5]):
-            blk = _all_blocks.get(i+1, "")
+            blk    = _all_blocks.get(i+1, "")
             typ_m  = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
             sc_m   = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", blk)
             str_m  = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.+)", blk)
             weak_m = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.+)", blk)
             act_m  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.+)", blk)
+            conv_m = _re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.+)", blk)
+            emot_m = _re.search(r"(?:Эмоция|Emotion)\s*[:\-]\s*(.+)", blk)
             sc_val  = int(sc_m.group(1)) if sc_m else 0
             sc_col  = colors.HexColor("#15803d") if sc_val>=8 else (colors.HexColor("#d97706") if sc_val>=6 else colors.HexColor("#dc2626"))
             sc_lbl  = "Отлично" if sc_val>=8 else ("Хорошо" if sc_val>=6 else "Слабо")
+            emot_txt = _clean(emot_m.group(1)) if emot_m else ""
+            _emot_key = emot_txt.split()[0].lower().rstrip("/:") if emot_txt else ""
+            _emot_col = {"доверие":"#15803d","trust":"#15803d","desire":"#15803d",
+                         "желание":"#d97706","сомнение":"#dc2626","doubt":"#dc2626",
+                         "любопытство":"#1d4ed8","curiosity":"#1d4ed8",
+                         "безразличие":"#64748b","indifference":"#64748b"}.get(_emot_key, "#7c3aed")
             try:
                 _b64_data = img_d.get("b64","") if isinstance(img_d, dict) else img_d
                 img_bytes = base64.b64decode(_b64_data)
@@ -1811,11 +1819,16 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
                 Paragraph(f"<b>Фото #{i+1}</b> — {_clean(typ_m.group(1)) if typ_m else ''}", S["h2"]),
                 Paragraph(f"<font color='{hex_str(sc_col)}'><b>{sc_val}/10</b></font>  {sc_lbl}", S["body"]),
             ]
-            if str_m:  info_content.append(Paragraph(f"+ {_clean(str_m.group(1))}", S["green"]))
-            if weak_m: info_content.append(Paragraph(f"! {_clean(weak_m.group(1))}", S["orange"]))
-            if act_m:  info_content.append(Paragraph(f"> {_clean(act_m.group(1))}", S["action"]))
+            if str_m:  info_content.append(Paragraph(f"✅ {_clean(str_m.group(1))}", S["green"]))
+            if weak_m: info_content.append(Paragraph(f"⚠️ {_clean(weak_m.group(1))}", S["orange"]))
+            if act_m:  info_content.append(Paragraph(f"🛠 {_clean(act_m.group(1))}", S["action"]))
+            if conv_m: info_content.append(Paragraph(f"💡 {_clean(conv_m.group(1))}", S["body"]))
+            if emot_txt:
+                _es = ParagraphStyle("emot", fontSize=8, fontName=_FB,
+                    textColor=colors.HexColor(_emot_col), spaceAfter=2)
+                info_content.append(Paragraph(f"😶 ЭМОЦИЯ: {emot_txt}", _es))
             if not str_m and blk:
-                info_content.append(Paragraph(blk[:300], S["small"]))
+                info_content.append(Paragraph(blk[:200], S["small"]))
 
             from reportlab.platypus import KeepTogether
             row_tbl = Table([[rl_img, info_content]], colWidths=[40*mm, W-40*mm])
@@ -1826,6 +1839,69 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
                 ("PADDING",    (0,0), (-1,-1), 6),
             ]))
             story.append(KeepTogether([row_tbl, Spacer(1, 3*mm)]))
+
+    # ── A+ страница в PDF ─────────────────────────────────────────────────────
+    _pdf_aplus_vision = st.session_state.get("aplus_vision", "")
+    _pdf_aplus_urls   = st.session_state.get("aplus_img_urls", [])
+    if _pdf_aplus_vision or _pdf_aplus_urls:
+        story.append(PageBreak())
+        story.append(Paragraph("A+ Контент", S["h1"]))
+        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
+        story.append(Spacer(1, 3*mm))
+        _aplus_score_pdf = pct(result.get("aplus_score", 0))
+        if _aplus_score_pdf:
+            _asc = score_color(_aplus_score_pdf)
+            story.append(Paragraph(
+                f"A+ Score: <font color='{hex_str(_asc)}'><b>{_aplus_score_pdf}%</b></font>", S["h2"]))
+            story.append(Spacer(1, 2*mm))
+
+        _ap_blocks = {}
+        if _pdf_aplus_vision:
+            for _m in _re.finditer(r"APLUS_BLOCK_(\d+)\s*(.*?)(?=APLUS_BLOCK_\d+|$)",
+                                    _pdf_aplus_vision, _re.DOTALL):
+                _ap_blocks[int(_m.group(1))] = _m.group(2).strip()
+
+        for _bi in range(max(len(_pdf_aplus_urls), len(_ap_blocks))):
+            _apblk  = _ap_blocks.get(_bi+1, "")
+            _ap_mod  = _re.search(r"(?:Модуль|Module)\s*[:\-]\s*(.+)", _apblk)
+            _ap_sum  = _re.search(r"(?:Содержание|Summary)\s*[:\-]\s*(.+)", _apblk)
+            _ap_sc   = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", _apblk)
+            _ap_str  = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.+)", _apblk)
+            _ap_weak = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.+)", _apblk)
+            _ap_act  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.+)", _apblk)
+            _ap_conv = _re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.+)", _apblk)
+            _ap_scv  = int(_ap_sc.group(1)) if _ap_sc else 0
+            _ap_scc  = colors.HexColor("#15803d") if _ap_scv>=8 else (colors.HexColor("#d97706") if _ap_scv>=6 else colors.HexColor("#dc2626"))
+            _ap_sclbl= "Отлично" if _ap_scv>=8 else ("Хорошо" if _ap_scv>=6 else "Слабо")
+
+            # Try to load banner image
+            _ap_rl_img = Paragraph(f"(баннер {_bi+1})", S["small"])
+            if _bi < len(_pdf_aplus_urls):
+                try:
+                    _ap_r = requests.get(_pdf_aplus_urls[_bi], timeout=10,
+                                         headers={"User-Agent":"Mozilla/5.0"})
+                    if _ap_r.ok:
+                        _ap_pil = PILImage.open(io.BytesIO(_ap_r.content)).convert("RGB")
+                        _ap_pil.thumbnail((400, 200))
+                        _ap_buf = io.BytesIO()
+                        _ap_pil.save(_ap_buf, format="JPEG", quality=70)
+                        _ap_buf.seek(0)
+                        _ap_rl_img = RLImage(_ap_buf, width=W, height=40*mm)
+                except: pass
+
+            _ap_info = []
+            _ap_head = f"Баннер #{_bi+1}" + (f" — {_clean(_ap_mod.group(1))}" if _ap_mod else "")
+            _ap_info.append(Paragraph(f"<b>{_ap_head}</b>", S["h2"]))
+            if _ap_sum: _ap_info.append(Paragraph(_clean(_ap_sum.group(1)), S["small"]))
+            if _ap_scv: _ap_info.append(Paragraph(
+                f"<font color='{hex_str(_ap_scc)}'><b>{_ap_scv}/10</b></font>  {_ap_sclbl}", S["body"]))
+            if _ap_str:  _ap_info.append(Paragraph(f"✅ {_clean(_ap_str.group(1))}", S["green"]))
+            if _ap_weak: _ap_info.append(Paragraph(f"⚠️ {_clean(_ap_weak.group(1))}", S["orange"]))
+            if _ap_act:  _ap_info.append(Paragraph(f"🛠 {_clean(_ap_act.group(1))}", S["action"]))
+            if _ap_conv: _ap_info.append(Paragraph(f"💡 {_clean(_ap_conv.group(1))}", S["body"]))
+
+            from reportlab.platypus import KeepTogether
+            story.append(KeepTogether([_ap_rl_img, Spacer(1,2*mm)] + _ap_info + [Spacer(1,4*mm)]))
 
     story.append(PageBreak())
 
@@ -2629,4 +2705,4 @@ elif page == "📋 Workflow":
                         st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}")
                         st.rerun()
                     else:
-                        st.error("Ошибка сохранения") 
+                        st.error("Ошибка сохранения")
