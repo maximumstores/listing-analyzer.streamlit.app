@@ -496,7 +496,7 @@ MAIN IMAGE AMAZON REQUIREMENTS (apply strictly for photo #1):
 ✅ ONLY the sold product — FORBIDDEN: other clothing on model, accessories, props not included
 ✅ For apparel: the sold item must be the primary focus
 IMPORTANT: Look carefully — are there any items in the photo that are NOT the sold product? If yes — deduct 2 pts and name exactly what violates the rule."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 5 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength]\nWeakness: [1 specific problem — ONLY what you actually see]\nAction: [1 fix starting with a verb: Reshoot / Remove / Crop / Replace / Reduce. Be specific about what to do.]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 7 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength]\nWeakness: [1 specific problem — ONLY what you actually see]\nAction: [1 fix starting with a verb: Reshoot / Remove / Crop / Replace / Reduce. Be specific about what to do.]\nConversion: [1 buyer psychology insight — what would make them click Add to Cart based on this photo]\nEmotion: [primary emotion this photo triggers in buyer: Trust / Desire / Doubt / Curiosity / Indifference — explain why in 1 sentence]"
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
 
@@ -528,7 +528,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 ✅ Реальная фотография (не иллюстрация)
 ✅ ТОЛЬКО продаваемый товар — ЗАПРЕЩЕНЫ: другая одежда на модели, аксессуары не из комплекта
 ВАЖНО: Посмотри внимательно — есть ли на фото предметы которые НЕ являются продаваемым товаром? Если да — это нарушение, снять 2 балла и написать конкретно что нарушает правило."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 5 строк:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона]\nСлабость: [1 конкретная проблема — ТОЛЬКО то что видишь на фото]\nДействие: [1 конкретное исправление начиная с глагола: Переснять / Убрать / Обрезать / Заменить / Уменьшить. Конкретно что сделать.]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 7 строк:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона]\nСлабость: [1 конкретная проблема — ТОЛЬКО то что видишь на фото]\nДействие: [1 конкретное исправление начиная с глагола: Переснять / Убрать / Обрезать / Заменить / Уменьшить. Конкретно что сделать.]\nКонверсия: [1 инсайт из психологии покупателя — что конкретно сделать с этим фото чтобы он нажал Добавить в корзину]\nЭмоция: [основная эмоция которую это фото вызывает у покупателя: Доверие / Желание / Сомнение / Любопытство / Безразличие — объясни почему в 1 предложении]"
 
     results = []
     if st.session_state.get("use_gemini"):
@@ -1965,11 +1965,15 @@ elif page == "📸 Фото":
             strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
             weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
             actn = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]?\s*(.{3,})", text)
+            conv = re.search(r"(?:[Кк]онверсия|Conversion)\s*[:\-]?\s*(.{3,})", text)
+            emot = re.search(r"(?:[Ээ]моция|Emotion)\s*[:\-]?\s*(.{3,})", text)
             _strip = lambda s: s.strip().strip("*").strip()
             ptype = _strip(typ.group(1)) if typ else ""
             stxt  = _strip(strg.group(1)) if strg else ""
             wtxt  = _strip(weak.group(1)) if weak else ""
             atxt  = _strip(actn.group(1)) if actn else ""
+            ctxt  = _strip(conv.group(1)) if conv else ""
+            etxt  = _strip(emot.group(1)) if emot else ""
             if wtxt and any(x in wtxt.lower() for x in ["none","n/a","no weakness","нет слабостей"]):
                 wtxt = ""
             with st.container(border=True):
@@ -1983,6 +1987,20 @@ elif page == "📸 Фото":
                 if score > 0 and score < 8 and (atxt or wtxt):
                     with st.expander("🛠 Что делать"):
                         st.markdown(f"→ {atxt or wtxt}")
+                if ctxt:
+                    with st.expander("💡 Конверсия"):
+                        st.info(f"🎯 {ctxt}")
+                if etxt:
+                    _ec = {"доверие":"#22c55e","trust":"#22c55e","desire":"#22c55e",
+                           "желание":"#f59e0b","сомнение":"#ef4444","doubt":"#ef4444",
+                           "любопытство":"#3b82f6","curiosity":"#3b82f6",
+                           "безразличие":"#94a3b8","indifference":"#94a3b8"}.get(
+                           etxt.split()[0].lower().rstrip("/:"), "#8b5cf6")
+                    st.markdown(
+                        f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px">'
+                        f'<span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span>'
+                        f'<span style="font-size:0.82rem;color:#e2e8f0">{etxt}</span></div>',
+                        unsafe_allow_html=True)
         st.stop()
 
     if not imgs:
@@ -2002,11 +2020,15 @@ elif page == "📸 Фото":
         strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
         weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
         actn = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]?\s*(.{3,})", text)
+        conv = re.search(r"(?:[Кк]онверсия|Conversion)\s*[:\-]?\s*(.{3,})", text)
+        emot = re.search(r"(?:[Ээ]моция|Emotion)\s*[:\-]?\s*(.{3,})", text)
         _strip = lambda s: s.strip().strip("*").strip()
         ptype = _strip(typ.group(1)) if typ else ""
         stxt  = _strip(strg.group(1)) if strg else ""
         wtxt  = _strip(weak.group(1)) if weak else ""
         atxt  = _strip(actn.group(1)) if actn else ""
+        ctxt  = _strip(conv.group(1)) if conv else ""
+        etxt  = _strip(emot.group(1)) if emot else ""
         if wtxt and any(x in wtxt.lower() for x in ["none", "n/a", "no weakness", "нет слабостей"]):
             wtxt = ""
 
@@ -2028,6 +2050,20 @@ elif page == "📸 Фото":
                         st.markdown(f"→ {atxt or wtxt}")
                         if score <= 5 and i == 0:
                             st.error("🔴 Приоритет ВЫСОКИЙ — риск suppression листинга Amazon")
+                if ctxt:
+                    with st.expander("💡 Конверсия"):
+                        st.info(f"🎯 {ctxt}")
+                if etxt:
+                    _ec = {"доверие":"#22c55e","trust":"#22c55e","desire":"#22c55e",
+                           "желание":"#f59e0b","сомнение":"#ef4444","doubt":"#ef4444",
+                           "любопытство":"#3b82f6","curiosity":"#3b82f6",
+                           "безразличие":"#94a3b8","indifference":"#94a3b8"}.get(
+                           etxt.split()[0].lower().rstrip("/:"), "#8b5cf6")
+                    st.markdown(
+                        f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px">'
+                        f'<span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span>'
+                        f'<span style="font-size:0.82rem;color:#e2e8f0">{etxt}</span></div>',
+                        unsafe_allow_html=True)
                 if not stxt and text:
                     with st.expander("🔧 Raw (Strength не распознан)"):
                         st.code(text[:400])
