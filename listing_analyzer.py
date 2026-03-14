@@ -2053,8 +2053,18 @@ elif page == "🎨 A+ Контент":
         if _av_total:
             st.metric("A+ Score", f"{_av_total}%")
 
-        _av_blocks = re.split(r"APLUS_BLOCK_\d+", _av)
-        _av_blocks = [b.strip() for b in _av_blocks if b.strip()]
+        _av_blocks = []
+        for _m in re.finditer(r"APLUS_BLOCK_\d+\s*(.*?)(?=APLUS_BLOCK_\d+|$)", _av, re.DOTALL):
+            _blk = _m.group(1).strip()
+            if _blk:
+                _av_blocks.append(_blk)
+        # Убираем мусор из начала каждого блока (заголовки AI типа "# АНАЛИЗ A+ CONTENT ---")
+        _clean_blocks = []
+        for _blk in _av_blocks:
+            _lines = _blk.split("\n")
+            _lines = [l for l in _lines if not re.match(r"^#+\s|^---", l.strip())]
+            _clean_blocks.append("\n".join(_lines).strip())
+        _av_blocks = [b for b in _clean_blocks if b]
         st.markdown(f"**{len(_av_blocks)} баннер(ов) проанализировано**")
         st.divider()
 
@@ -2075,32 +2085,28 @@ elif page == "🎨 A+ Контент":
             _av_sl = "Отлично" if _av_score>=8 else ("Хорошо" if _av_score>=6 else "Слабо")
 
             with st.container(border=True):
-                c_img, c_txt = st.columns([1, 1])
                 if _av_urls and _bi < len(_av_urls):
-                    with c_img:
-                        st.image(_av_urls[_bi], use_container_width=True)
-                with c_txt:
-                    _av_head = f"Баннер #{_bi+1}" + (f" — {_av_mod}" if _av_mod else "")
-                    st.markdown(f"**{_av_head}**")
-                    if _av_sum:
-                        st.markdown(f"_{_av_sum}_")
-                    elif _block:
-                        # показать первые 2 строки если summary не распознан
-                        _raw_lines = [l.strip() for l in _block.split("\n") if l.strip()][:2]
-                        st.markdown(f"_{' '.join(_raw_lines)}_")
-                    if _av_score:
-                        st.markdown(
-                            f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">' +
-                            f'<div style="font-size:2.5rem;font-weight:800;color:{_av_bc}">{_av_score}/10</div>' +
-                            f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">' +
-                            f'<div style="background:{_av_bc};width:{_av_score*10}%;height:10px;border-radius:6px"></div></div>' +
-                            f'<div style="color:{_av_bc};font-size:0.85rem;margin-top:3px">{_av_sl}</div></div></div>',
-                            unsafe_allow_html=True)
-                    if _av_str:  st.success(f"✅ {_av_str}")
-                    if _av_weak: st.warning(f"⚠️ {_av_weak}")
-                    if _av_act:
-                        with st.expander("🛠 Что делать"):
-                            st.markdown(f"→ {_av_act}")
+                    st.image(_av_urls[_bi], use_container_width=True)
+                _av_head = f"Баннер #{_bi+1}" + (f" — {_av_mod}" if _av_mod else "")
+                st.markdown(f"**{_av_head}**")
+                if _av_sum:
+                    st.markdown(f"_{_av_sum}_")
+                elif _block:
+                    _raw_lines = [l.strip() for l in _block.split("\n") if l.strip() and not re.match(r"^#+|^---", l)][:2]
+                    if _raw_lines: st.markdown(f"_{' '.join(_raw_lines)}_")
+                if _av_score:
+                    st.markdown(
+                        f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">' +
+                        f'<div style="font-size:2.5rem;font-weight:800;color:{_av_bc}">{_av_score}/10</div>' +
+                        f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">' +
+                        f'<div style="background:{_av_bc};width:{_av_score*10}%;height:10px;border-radius:6px"></div></div>' +
+                        f'<div style="color:{_av_bc};font-size:0.85rem;margin-top:3px">{_av_sl}</div></div></div>',
+                        unsafe_allow_html=True)
+                if _av_str:  st.success(f"✅ {_av_str}")
+                if _av_weak: st.warning(f"⚠️ {_av_weak}")
+                if _av_act:
+                    with st.expander("🛠 Что делать"):
+                        st.markdown(f"→ {_av_act}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Контент
