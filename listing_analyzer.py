@@ -2075,14 +2075,19 @@ elif page == "🎨 A+ Контент":
             _av_sl = "Отлично" if _av_score>=8 else ("Хорошо" if _av_score>=6 else "Слабо")
 
             with st.container(border=True):
-                c_img, c_txt = st.columns([1, 2])
+                c_img, c_txt = st.columns([1, 1])
                 if _av_urls and _bi < len(_av_urls):
                     with c_img:
                         st.image(_av_urls[_bi], use_container_width=True)
                 with c_txt:
                     _av_head = f"Баннер #{_bi+1}" + (f" — {_av_mod}" if _av_mod else "")
                     st.markdown(f"**{_av_head}**")
-                    if _av_sum: st.caption(_av_sum)
+                    if _av_sum:
+                        st.markdown(f"_{_av_sum}_")
+                    elif _block:
+                        # показать первые 2 строки если summary не распознан
+                        _raw_lines = [l.strip() for l in _block.split("\n") if l.strip()][:2]
+                        st.markdown(f"_{' '.join(_raw_lines)}_")
                     if _av_score:
                         st.markdown(
                             f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">' +
