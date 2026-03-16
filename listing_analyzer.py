@@ -772,7 +772,7 @@ Map the gap between what the buyer needs and what the listing communicates.
 - 50-79% = partial fit, feature-heavy but outcome-light  
 - <50% = poor fit, listing talks about product, not buyer
 
-**VPC Verdict**: McKinsey-style 1-2 sentence conclusion — "The product solves X but the listing communicates Y, creating a Z% value communication gap that costs conversion"
+**VPC Verdict**: AI CRO Consultant style 1-2 sentence conclusion — "The product solves X but the listing communicates Y, creating a Z% value communication gap that costs conversion"
 Buyers don't buy products — they HIRE them to do a job. Analyze what job this product is hired for.
 
 **3 types of jobs:**
@@ -2594,7 +2594,7 @@ elif page == "🎯 VPC / JTBD":
     if _vpc.get("vpc_verdict"):
         st.markdown(f"""<div style="background:#0f172a;border-left:4px solid {_fc};border-radius:8px;
 padding:14px 18px;margin:16px 0;font-size:0.95rem;color:#e2e8f0;line-height:1.6">
-<b style="color:{_fc}">McKinsey Verdict:</b> {_vpc['vpc_verdict']}</div>""", unsafe_allow_html=True)
+<b style="color:{_fc}">🤖 AI CRO Консультант:</b> {_vpc['vpc_verdict']}</div>""", unsafe_allow_html=True)
 
     # ── JTBD Job Story ─────────────────────────────────────────────────────────
     if _jtbd.get("job_story"):
