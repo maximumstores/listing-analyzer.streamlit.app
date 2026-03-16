@@ -197,7 +197,7 @@ ANTHROPIC_URL          = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL        = "claude-sonnet-4-5-20250929"
 ANTHROPIC_MODEL_VISION = "claude-sonnet-4-5-20250929"
 
-SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
+SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"jtbd_analysis":{"functional_job":"main functional job — what task does buyer hire this product for","emotional_job":"main emotional job — how buyer wants to feel","social_job":"main social job — how buyer wants to be perceived","job_story":"When [situation], I want to [motivation], so I can [outcome]","alignment_score":"XX%","listing_communicates_job":true,"jtbd_gaps":["gap 1 — what job signal is missing from listing"],"jtbd_recs":["rec 1 — specific change to better communicate the job"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
 
 
 def get_asin(url):
@@ -753,6 +753,25 @@ Gender, Style/Aesthetic, Quality Tier, Problem Solved, Unique Value
 
 ## RUFUS RECOMMENDATION POTENTIAL
 Evaluate: Relevance to Queries, Proof & Evidence, Visual Clarity (OCR), Completeness, Competitive Position
+
+## JTBD ANALYSIS — Jobs To Be Done
+Buyers don't buy products — they HIRE them to do a job. Analyze what job this product is hired for.
+
+**3 types of jobs:**
+1. **Functional job** — the core task: "stay fresh and odor-free during workouts without changing clothes"
+2. **Emotional job** — desired feeling: "feel confident and professional even after the gym"
+3. **Social job** — desired perception: "be seen as someone who has their life together"
+
+**Job Story format:** "When [situation/context], I want to [motivation/job], so I can [outcome/benefit]"
+Example: "When I go from gym to office, I want to not smell or sweat through my shirt, so I can feel confident in meetings without changing"
+
+**Alignment score:** How well does the CURRENT listing communicate this job? Does the title/bullets/A+ speak to the job or just describe features?
+- 90%+ = listing directly addresses the job scenario
+- 70-89% = listing hints at the job but buries it in features
+- <70% = listing is feature-focused, job is invisible
+
+**JTBD gaps:** What job signals are MISSING from the listing? (e.g., no scenario/context described, no outcome stated, no "when X happens" trigger)
+**JTBD recs:** Specific changes — rewrite title to include job context, add job scenario to bullet #1, etc.
 
 CRITICAL RULES:
 - Return ONLY valid JSON, no markdown, no explanation
@@ -2470,6 +2489,45 @@ elif page == "🧠 COSMO / Rufus":
     if _ra.get("issues"):
         for iss in _ra["issues"]:
             st.warning(f"⚠️ {iss}")
+
+    # ── JTBD ─────────────────────────────────────────────────────────────────
+    _jtbd = r.get("jtbd_analysis", {})
+    if _jtbd:
+        st.divider()
+        st.subheader("🎯 JTBD — Jobs To Be Done")
+        st.caption("Покупатель не покупает продукт — он нанимает его для работы")
+
+        _jtbd_score = pct(_jtbd.get("alignment_score", 0))
+        _jc = "#22c55e" if _jtbd_score>=75 else ("#f59e0b" if _jtbd_score>=50 else "#ef4444")
+        _jlbl = "Листинг говорит на языке покупателя" if _jtbd_score>=75 else ("Работа частично видна" if _jtbd_score>=50 else "Листинг говорит о фичах, не о работе")
+
+        st.markdown(
+            f'<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:12px">'
+            f'<div style="font-size:2rem;font-weight:800;color:{_jc}">{_jtbd_score}%</div>'
+            f'<div style="color:{_jc};font-size:0.85rem;font-weight:600">{_jlbl}</div>'
+            f'</div>', unsafe_allow_html=True)
+
+        _js = _jtbd.get("job_story","")
+        if _js:
+            st.info(f"**📖 Job Story:**\n\n_{_js}_")
+
+        _j1, _j2, _j3 = st.columns(3)
+        if _jtbd.get("functional_job"):
+            _j1.markdown(f"**⚙️ Функциональная работа**\n\n{_jtbd['functional_job']}")
+        if _jtbd.get("emotional_job"):
+            _j2.markdown(f"**❤️ Эмоциональная работа**\n\n{_jtbd['emotional_job']}")
+        if _jtbd.get("social_job"):
+            _j3.markdown(f"**👥 Социальная работа**\n\n{_jtbd['social_job']}")
+
+        if _jtbd.get("jtbd_gaps"):
+            st.subheader("❌ Что листинг не коммуницирует")
+            for g in _jtbd["jtbd_gaps"]:
+                st.error(f"✗ {g}")
+
+        if _jtbd.get("jtbd_recs"):
+            st.subheader("✅ Как переписать под JTBD")
+            for rec in _jtbd["jtbd_recs"]:
+                st.success(f"→ {rec}")
 
     with st.expander("🔧 Raw JSON"):
         st.json(r)
