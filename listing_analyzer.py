@@ -197,7 +197,7 @@ ANTHROPIC_URL          = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL        = "claude-sonnet-4-5-20250929"
 ANTHROPIC_MODEL_VISION = "claude-sonnet-4-5-20250929"
 
-SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"jtbd_analysis":{"functional_job":"main functional job — what task does buyer hire this product for","emotional_job":"main emotional job — how buyer wants to feel","social_job":"main social job — how buyer wants to be perceived","job_story":"When [situation], I want to [motivation], so I can [outcome]","alignment_score":"XX%","listing_communicates_job":true,"jtbd_gaps":["gap 1 — what job signal is missing from listing"],"jtbd_recs":["rec 1 — specific change to better communicate the job"]},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
+SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","qa_score":"XX%","reviews_score":"XX%","aplus_score":"XX%","price_score":"XX%","availability_score":"XX%","average_rating_score":"XX%","total_reviews_score":"XX%","bsr_score":"XX%","keywords_score":"XX%","prime_score":"XX%","returns_score":"XX%","customization_score":"XX%","first_available_score":"XX%","title_gaps":["specific title issue"],"title_rec":"specific title recommendation","bullets_gaps":["specific bullets issue"],"bullets_rec":"specific bullets recommendation","description_gaps":["specific description issue"],"description_rec":"specific description recommendation","aplus_gaps":["specific A+ issue"],"aplus_rec":"specific A+ recommendation","images_gaps":["specific images issue"],"images_rec":"specific images recommendation","images_breakdown":{"main_image":"XX% - reason","gallery":"XX% - reason","ocr_readability":"XX% - reason"},"cosmo_analysis":{"score":"XX%","signals_present":["signal with evidence"],"signals_missing":["missing signal"]},"rufus_analysis":{"score":"XX%","issues":["specific issue"]},"jtbd_analysis":{"functional_job":"main functional job","emotional_job":"main emotional job","social_job":"main social job","job_story":"When [situation], I want to [motivation], so I can [outcome]","alignment_score":"XX%","listing_communicates_job":true,"jtbd_gaps":["gap 1"],"jtbd_recs":["rec 1"]},"vpc_analysis":{"fit_score":"XX%","customer_jobs":["job 1","job 2","job 3"],"customer_pains":["pain 1","pain 2","pain 3"],"customer_gains":["gain 1","gain 2","gain 3"],"pain_relievers_present":["what listing already addresses from pains"],"pain_relievers_missing":["what pains listing does NOT address"],"gain_creators_present":["what gains listing already communicates"],"gain_creators_missing":["what gains listing does NOT communicate"],"products_services":["feature/benefit listing has"],"vpc_verdict":"1-2 sentence McKinsey-style summary: product solves X but listing fails to communicate Y — leading to Z% conversion loss"},"priority_improvements":["1. specific action","2. specific action","3. specific action"],"missing_chars":[{"name":"characteristic name","how_competitors_use":"how they use it","priority":"HIGH"}],"tech_params":[{"param":"parameter name","competitor_value":"their value","our_gap":"our gap"}],"actions":[{"action":"specific action","impact":"HIGH","effort":"LOW","details":"details"}]}'
 
 
 def get_asin(url):
@@ -754,7 +754,25 @@ Gender, Style/Aesthetic, Quality Tier, Problem Solved, Unique Value
 ## RUFUS RECOMMENDATION POTENTIAL
 Evaluate: Relevance to Queries, Proof & Evidence, Visual Clarity (OCR), Completeness, Competitive Position
 
-## JTBD ANALYSIS — Jobs To Be Done
+## VALUE PROPOSITION CANVAS (VPC)
+Map the gap between what the buyer needs and what the listing communicates.
+
+**Customer Profile** (what buyer brings):
+- Customer Jobs: functional/emotional/social jobs they hire this product for
+- Pains: frustrations, risks, obstacles before/during/after the job
+- Gains: outcomes and benefits they desire (required, expected, desired, unexpected)
+
+**Value Map** (what listing offers):
+- Products & Services: features/attributes listed
+- Pain Relievers: how listing addresses customer pains (explicitly or implicitly)
+- Gain Creators: how listing communicates desired outcomes
+
+**Fit Score**: % of customer pains + gains that listing explicitly addresses
+- 80%+ = strong fit, listing speaks buyer's language
+- 50-79% = partial fit, feature-heavy but outcome-light  
+- <50% = poor fit, listing talks about product, not buyer
+
+**VPC Verdict**: McKinsey-style 1-2 sentence conclusion — "The product solves X but the listing communicates Y, creating a Z% value communication gap that costs conversion"
 Buyers don't buy products — they HIRE them to do a job. Analyze what job this product is hired for.
 
 **3 types of jobs:**
@@ -948,6 +966,7 @@ with st.sidebar:
         ("📝", "Контент"),
         ("🏆", "Benchmark"),
         ("🧠", "COSMO / Rufus"),
+        ("🎯", "VPC / JTBD"),
     ]
 
     if "result" in st.session_state:
@@ -2531,6 +2550,136 @@ elif page == "🧠 COSMO / Rufus":
 
     with st.expander("🔧 Raw JSON"):
         st.json(r)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: VPC / JTBD
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "🎯 VPC / JTBD":
+    st.title("🎯 Value Proposition Canvas + JTBD")
+
+    _vpc  = r.get("vpc_analysis", {})
+    _jtbd = r.get("jtbd_analysis", {})
+    _asin_vpc = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
+
+    if not _vpc and not _jtbd:
+        st.info("Данные VPC/JTBD появятся после следующего анализа — перезапусти с новым ключом API")
+        st.stop()
+
+    # ── Fit Score header ──────────────────────────────────────────────────────
+    _fit  = pct(_vpc.get("fit_score", _jtbd.get("alignment_score", 0)))
+    _jfit = pct(_jtbd.get("alignment_score", 0))
+    _fc   = "#22c55e" if _fit>=75 else ("#f59e0b" if _fit>=50 else "#ef4444")
+    _jfc  = "#22c55e" if _jfit>=75 else ("#f59e0b" if _jfit>=50 else "#ef4444")
+
+    _hc1, _hc2, _hc3 = st.columns(3)
+    _hc1.markdown(f"""<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center">
+<div style="font-size:2.5rem;font-weight:800;color:{_fc}">{_fit}%</div>
+<div style="color:{_fc};font-size:0.85rem;font-weight:600">VPC Fit Score</div>
+<div style="color:#64748b;font-size:0.75rem;margin-top:2px">Product–Market fit</div>
+</div>""", unsafe_allow_html=True)
+    _hc2.markdown(f"""<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center">
+<div style="font-size:2.5rem;font-weight:800;color:{_jfc}">{_jfit}%</div>
+<div style="color:{_jfc};font-size:0.85rem;font-weight:600">JTBD Alignment</div>
+<div style="color:#64748b;font-size:0.75rem;margin-top:2px">Листинг говорит о работе</div>
+</div>""", unsafe_allow_html=True)
+    _gap = 100 - max(_fit, _jfit)
+    _gc3 = "#ef4444" if _gap>50 else ("#f59e0b" if _gap>25 else "#22c55e")
+    _hc3.markdown(f"""<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center">
+<div style="font-size:2.5rem;font-weight:800;color:{_gc3}">{_gap}%</div>
+<div style="color:{_gc3};font-size:0.85rem;font-weight:600">Value Gap</div>
+<div style="color:#64748b;font-size:0.75rem;margin-top:2px">Ценность не коммуницирована</div>
+</div>""", unsafe_allow_html=True)
+
+    # ── VPC Verdict ────────────────────────────────────────────────────────────
+    if _vpc.get("vpc_verdict"):
+        st.markdown(f"""<div style="background:#0f172a;border-left:4px solid {_fc};border-radius:8px;
+padding:14px 18px;margin:16px 0;font-size:0.95rem;color:#e2e8f0;line-height:1.6">
+<b style="color:{_fc}">McKinsey Verdict:</b> {_vpc['vpc_verdict']}</div>""", unsafe_allow_html=True)
+
+    # ── JTBD Job Story ─────────────────────────────────────────────────────────
+    if _jtbd.get("job_story"):
+        st.markdown(f"""<div style="background:#1e293b;border-radius:10px;padding:14px 18px;margin-bottom:16px">
+<div style="font-size:0.75rem;font-weight:700;color:#64748b;letter-spacing:0.08em;margin-bottom:6px">JOB STORY</div>
+<div style="font-size:0.95rem;color:#e2e8f0;font-style:italic;line-height:1.6">{_jtbd['job_story']}</div>
+</div>""", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── VPC Canvas ─────────────────────────────────────────────────────────────
+    st.subheader("📊 Value Proposition Canvas")
+    _lc, _rc = st.columns(2)
+
+    with _lc:
+        st.markdown("**👤 Профиль покупателя**")
+
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#3b82f6;letter-spacing:0.06em;margin:8px 0 4px">ЗАДАЧИ (JOBS)</div>', unsafe_allow_html=True)
+        _jobs = _vpc.get("customer_jobs", [
+            _jtbd.get("functional_job",""),
+            _jtbd.get("emotional_job",""),
+            _jtbd.get("social_job","")
+        ])
+        for j in [x for x in _jobs if x]:
+            st.markdown(f'<div style="background:#1e3a5f22;border-left:3px solid #3b82f6;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem;color:var(--text)">{j}</div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#ef4444;letter-spacing:0.06em;margin:10px 0 4px">БОЛИ (PAINS)</div>', unsafe_allow_html=True)
+        for p in _vpc.get("customer_pains", []):
+            st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{p}</div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#22c55e;letter-spacing:0.06em;margin:10px 0 4px">ВЫГОДЫ (GAINS)</div>', unsafe_allow_html=True)
+        for g in _vpc.get("customer_gains", []):
+            st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{g}</div>', unsafe_allow_html=True)
+
+    with _rc:
+        st.markdown("**📦 Карта ценности (листинг)**")
+
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#94a3b8;letter-spacing:0.06em;margin:8px 0 4px">ПРОДУКТ / ФИЧИ</div>', unsafe_allow_html=True)
+        for ps in _vpc.get("products_services", []):
+            st.markdown(f'<div style="background:#33333322;border-left:3px solid #94a3b8;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{ps}</div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#ef4444;letter-spacing:0.06em;margin:10px 0 4px">ОБЕЗБОЛИВАЮЩИЕ (PAIN RELIEVERS)</div>', unsafe_allow_html=True)
+        for pr in _vpc.get("pain_relievers_present", []):
+            st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">✅ {pr}</div>', unsafe_allow_html=True)
+        for pr in _vpc.get("pain_relievers_missing", []):
+            st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">❌ {pr}</div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#22c55e;letter-spacing:0.06em;margin:10px 0 4px">ГЕНЕРАТОРЫ ВЫГОД (GAIN CREATORS)</div>', unsafe_allow_html=True)
+        for gc in _vpc.get("gain_creators_present", []):
+            st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">✅ {gc}</div>', unsafe_allow_html=True)
+        for gc in _vpc.get("gain_creators_missing", []):
+            st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">❌ {gc}</div>', unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── JTBD 3 Jobs ────────────────────────────────────────────────────────────
+    st.subheader("🎯 JTBD — 3 типа работ")
+    _j1, _j2, _j3 = st.columns(3)
+    with _j1:
+        st.markdown("**⚙️ Функциональная**")
+        if _jtbd.get("functional_job"):
+            st.info(_jtbd["functional_job"])
+    with _j2:
+        st.markdown("**❤️ Эмоциональная**")
+        if _jtbd.get("emotional_job"):
+            st.info(_jtbd["emotional_job"])
+    with _j3:
+        st.markdown("**👥 Социальная**")
+        if _jtbd.get("social_job"):
+            st.info(_jtbd["social_job"])
+
+    # ── Gaps & Recs ────────────────────────────────────────────────────────────
+    st.divider()
+    _gc1, _gc2 = st.columns(2)
+    with _gc1:
+        st.subheader("❌ Что не коммуницирует")
+        for g in _jtbd.get("jtbd_gaps", []):
+            st.error(f"✗ {g}")
+        for g in _vpc.get("pain_relievers_missing", []):
+            if g not in str(_jtbd.get("jtbd_gaps",[])):
+                st.error(f"✗ {g}")
+    with _gc2:
+        st.subheader("✅ Как переписать")
+        for rec in _jtbd.get("jtbd_recs", []):
+            st.success(f"→ {rec}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: Конкурент N
