@@ -736,9 +736,31 @@ FACTUAL STATS (do NOT contradict these):
         start, end = s.find("{"), s.rfind("}")
         if start == -1: raise ValueError(f"JSON не найден: {s[:200]}")
         s = s[start:end+1]
+        # Aggressive JSON repair
         s = re.sub(r",\s*([}\]])", r"\1", s)
-        try: return json.loads(s)
-        except: return json.loads(re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace("\n"," ")+'"', s))
+        s = re.sub(r'[\x00-\x1f\x7f]', ' ', s)  # remove control chars
+        try:
+            return json.loads(s)
+        except:
+            # Fix unescaped quotes inside strings
+            s2 = re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace("\n"," ").replace("\r"," ").replace('"','\\"')+'"', s)
+            try:
+                return json.loads(s2)
+            except:
+                # Last resort: truncate and close brackets
+                for cut in range(len(s2)-1, max(len(s2)-500, 0), -1):
+                    if s2[cut] in ('"', '}', ']', '0123456789'):
+                        candidate = s2[:cut+1]
+                        candidate += "]" * max(0, candidate.count("[") - candidate.count("]"))
+                        candidate += "}" * max(0, candidate.count("{") - candidate.count("}"))
+                        try: return json.loads(candidate)
+                        except: continue
+                # Return minimal fallback
+                return {"overall_score": "50%", "title_score": "50%", "bullets_score": "50%",
+                        "description_score": "50%", "images_score": "50%", "aplus_score": "0%",
+                        "reviews_score": "50%", "bsr_score": "50%", "price_score": "50%",
+                        "customization_score": "50%", "prime_score": "50%",
+                        "priority_improvements": ["JSON repair failed — rerun analysis"]}
 
     prompt = f"""You are an expert Amazon listing analyst specializing in the Listing 3.0 era where AI visibility (Cosmo + Rufus) determines 50% of success.
 
