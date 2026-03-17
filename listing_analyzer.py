@@ -2922,8 +2922,17 @@ elif _is_competitor_page:
         if not _b2: st.caption("Нет буллетов")
         st.divider()
         st.markdown("**Описание**")
-        if _d2: st.markdown(str(_d2)[:600])
-        else: st.warning("Описание отсутствует")
+        if _d2:
+            st.markdown(str(_d2)[:600])
+        elif _ap2:
+            st.markdown(
+                '<div style="background:#1e3a1e;border-left:4px solid #22c55e;border-radius:8px;'
+                'padding:10px 14px">'
+                '<span style="color:#22c55e;font-weight:700">✅ Скрыто A+ контентом — это нормально</span><br>'
+                '<span style="color:#94a3b8;font-size:0.82rem">Amazon показывает A+ вместо описания покупателю.</span>'
+                '</div>', unsafe_allow_html=True)
+        else:
+            st.warning("Описание отсутствует")
         st.divider()
         st.markdown(f"**A+:** {'✅' if _ap2 else '❌'}  |  **Видео:** {'✅ '+str(int(c.get('number_of_videos',0) or 0))+' шт.' if _vid2 else '❌'}")
     with tab_photo:
@@ -3035,7 +3044,7 @@ elif _is_competitor_page:
                 _bstrip = lambda s: s.strip().strip("*").strip() if s else ""
 
                 with st.container(border=True):
-                    _bc1, _bc2 = st.columns([1, 1])
+                    _bc1, _bc2 = st.columns([3, 2])
                     with _bc1:
                         try: st.image(_burl, use_container_width=True)
                         except: st.caption(f"❌ {_burl[:50]}")
