@@ -267,7 +267,7 @@ def section(label, score, gaps, rec, raw_text="", char_limit=0):
             for g in gaps: st.markdown(f"- {g}")
     if rec: st.info(f"💡 {rec}")
 
-def _anthropic_post(payload, retries=3):
+def _anthropic_post(payload, retries=4):
     import time
     key = st.secrets.get("ANTHROPIC_API_KEY","")
     if not key: raise Exception("ANTHROPIC_API_KEY не задан")
@@ -280,6 +280,11 @@ def _anthropic_post(payload, retries=3):
         if r.status_code == 402 or "credit balance" in r.text.lower() or "insufficient" in r.text.lower():
             st.session_state["_api_balance_error"] = True
             raise Exception("❌ Баланс Claude API исчерпан — пополни на console.anthropic.com")
+        if r.status_code == 500:
+            wait = 15 * (attempt + 1)
+            st.toast(f"⏳ Anthropic 500, жду {wait}с и повторяю... ({attempt+1}/{retries})")
+            import time; time.sleep(wait)
+            continue
         if r.status_code == 529:
             wait = 20 * (attempt + 1)
             st.toast(f"⏳ Anthropic перегружен, жду {wait}с... ({attempt+1}/{retries})")
@@ -631,8 +636,11 @@ APLUS_BLOCK_{{i}}
         log(f"⚠️ A+ Vision: {e}"); return ""
 
 # ── Text analysis ─────────────────────────────────────────────────────────────
-def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang="ru"):
+def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang="ru", is_competitor=False):
     log("🧠 Финальный анализ...")
+
+    # Лёгкая схема для конкурентов — без VPC/JTBD/COSMO/Rufus
+    COMP_SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","aplus_score":"XX%","reviews_score":"XX%","bsr_score":"XX%","price_score":"XX%","customization_score":"XX%","prime_score":"XX%","title_gaps":["issue"],"bullets_gaps":["issue"],"images_gaps":["issue"],"priority_improvements":["1. action","2. action","3. action"],"actions":[{"action":"action","impact":"HIGH","effort":"LOW","details":"details"}]}'
 
     def fmt(data):
         if not data: return "нет данных"
@@ -694,6 +702,43 @@ FACTUAL STATS (do NOT contradict these):
 
     _ctx = st.session_state.get("ai_context_saved", st.session_state.get("ai_context","")).strip()
     context_section = f"\n\n## BRAND CONTEXT (provided by seller):\n{_ctx}" if _ctx else ""
+
+    # ── Упрощённый промпт для конкурентов ────────────────────────────────────
+    if is_competitor:
+        # Урезанные данные для конкурента — только нужное
+        _d = our_data
+        _pi = _d.get("product_information", {})
+        _buls = _d.get("feature_bullets", [])
+        _comp_text_slim = "\n".join(filter(None, [
+            f"Title: {_d.get('title','')}",
+            f"Price: {_d.get('price','')} | Rating: {_d.get('average_rating','')} | Reviews: {_pi.get('Customer Reviews',{}).get('ratings_count','')}",
+            f"BSR: {str(_pi.get('Best Sellers Rank',''))[:80]}",
+            f"A+: {'Yes' if _d.get('aplus') else 'No'} | Prime: {_d.get('is_prime_exclusive',False)} | Images: {len(_d.get('images',[]))}",
+            f"Description: {'Yes' if _d.get('description') else 'No'}",
+            "Bullets:\n" + "\n".join(f"- {b[:150]}" for b in _buls[:5]) if _buls else "",
+        ]))
+        _vis_slim = vision_result[:600] if vision_result else ""
+        prompt = f"""Score this Amazon listing (ASIN {asin}). Return ONLY JSON. All text in {lang_name}.
+
+{_comp_text_slim}
+{_vis_slim}
+
+{COMP_SCHEMA}"""
+        sys_prompt = f"Amazon scorer. JSON only. {lang_name}."
+        raw = ai_call(sys_prompt, prompt, max_tokens=1500)
+        log(f"✅ Конкурент JSON: {len(raw) if raw else 0} chars")
+        if not raw or not raw.strip():
+            raise ValueError("AI вернул пустой ответ для конкурента")
+        s = raw.strip()
+        s = re.sub(r"^```[a-z]*\s*", "", s, flags=re.MULTILINE)
+        s = re.sub(r"```\s*$", "", s, flags=re.MULTILINE)
+        s = s.strip()
+        start, end = s.find("{"), s.rfind("}")
+        if start == -1: raise ValueError(f"JSON не найден: {s[:200]}")
+        s = s[start:end+1]
+        s = re.sub(r",\s*([}\]])", r"\1", s)
+        try: return json.loads(s)
+        except: return json.loads(re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace("\n"," ")+'"', s))
 
     prompt = f"""You are an expert Amazon listing analyst specializing in the Listing 3.0 era where AI visibility (Cosmo + Rufus) determines 50% of success.
 
@@ -922,7 +967,7 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
                 log(f"⏭️ Vision конкурент {i+1} пропущен (отключён)")
 
         _prog(base_pct + 8, f"🧠 Конкурент {i+1}: AI анализ...")
-        cai = analyze_text(cdata, [], cvision, casin, log, lang=_lang)
+        cai = analyze_text(cdata, [], cvision, casin, log, lang=_lang, is_competitor=True)
 
         st.session_state[f"comp_ai_{i}"] = cai
         if cimgs_dl:
@@ -2758,7 +2803,7 @@ elif _is_competitor_page:
                 _prog.progress(33, text="👁️ Vision анализ фото...")
                 _comp_vision = analyze_vision(_cimgs_dl, c, casin, lambda m: None, lang=_clang) if _cimgs_dl else ""
                 _prog.progress(66, text="🧠 AI анализ текста...")
-                _cai_result = analyze_text(c, [], _comp_vision, casin, lambda m: None, lang=_clang)
+                _cai_result = analyze_text(c, [], _comp_vision, casin, lambda m: None, lang=_clang, is_competitor=True)
                 st.session_state[_cai_key]    = _cai_result
                 st.session_state[_vision_key] = (_cimgs_dl, _comp_vision) if _cimgs_dl else None
                 _prog.progress(100, text="✅ Готово!")
