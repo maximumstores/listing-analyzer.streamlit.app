@@ -1170,7 +1170,7 @@ with st.sidebar:
 
 # ── Input always visible at top ───────────────────────────────────────────────
 with st.expander("📎 Листинги", expanded=("result" not in st.session_state)):
-    our_url = st.text_input("🔵 НАШ листинг", value=st.session_state.get("our_url_saved","https://www.amazon.com/dp/B0D6WBQ7G1"))
+    our_url = st.text_input("🔵 НАШ листинг", value=st.session_state.get("our_url_saved",""), placeholder="https://www.amazon.com/dp/...")
     c1, c2, c3, c4, c5 = st.columns(5)
     comp1 = c1.text_input("Конкурент 1", key="c0", value=st.session_state.get("c0_saved",""), placeholder="https://www.amazon.com/dp/...")
     comp2 = c2.text_input("Конкурент 2", key="c1", value=st.session_state.get("c1_saved",""), placeholder="https://www.amazon.com/dp/...")
