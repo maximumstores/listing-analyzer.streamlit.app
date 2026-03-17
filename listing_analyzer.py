@@ -2881,33 +2881,62 @@ elif _is_competitor_page:
         if _cimgs:
             if _vision_key in st.session_state and st.session_state[_vision_key]:
                 _cv_imgs, _cv_text = st.session_state[_vision_key]
-                _cv_blocks = re.split(r"PHOTO_BLOCK_\d+", _cv_text)
-                _cv_blocks = [b.strip() for b in _cv_blocks if b.strip()]
+                # Use finditer for correct block mapping
+                _cv_blocks = {}
+                for _m in re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _cv_text, re.DOTALL):
+                    _cv_blocks[int(_m.group(1))] = _m.group(2).strip()
+
+                _cstrip2 = lambda s: s.strip().strip("*").strip() if s else ""
+
                 for _pi3, _pimg in enumerate(_cv_imgs):
-                    _ptext = _cv_blocks[_pi3] if _pi3 < len(_cv_blocks) else ""
-                    _psm = re.search(r"(\d+)/10", _ptext)
+                    _ptext = _cv_blocks.get(_pi3+1, "")
+                    _psm   = re.search(r"(\d+)/10", _ptext)
                     _pscore = int(_psm.group(1)) if _psm else 0
-                    _pbc = "#22c55e" if _pscore>=8 else ("#f59e0b" if _pscore>=6 else "#ef4444")
+                    _pbc   = "#22c55e" if _pscore>=8 else ("#f59e0b" if _pscore>=6 else "#ef4444")
                     _pslbl = "Отлично" if _pscore>=8 else ("Хорошо" if _pscore>=6 else "Слабо")
-                    _ptyp = re.search(r"(?:[Тт]ип|Type):\s*(.+)", _ptext)
-                    _pstrg = re.search(r"(?:[Сс]ильная сторона|Strength):\s*(.+)", _ptext)
-                    _pweak = re.search(r"(?:[Сс]лабость|Weakness):\s*(.+)", _ptext)
-                    _cstrip = lambda s: s.strip().strip("*").strip() if s else ""
+                    _ptyp  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", _ptext)
+                    _pstrg = re.search(r"(?:[Сс]ильная\s+сторона|Strength)\s*[:\-]\s*(.{3,})", _ptext)
+                    _pweak = re.search(r"(?:[Сс]лабость|Weakness)\s*[:\-]\s*(.{3,})", _ptext)
+                    _pact  = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]\s*(.{3,})", _ptext)
+                    _pconv = re.search(r"(?:[Кк]онверсия|Conversion)\s*[:\-]\s*(.{3,})", _ptext)
+                    _pemot = re.search(r"(?:[Ээ]моция|Emotion)\s*[:\-]\s*(.{3,})", _ptext)
+
                     with st.container(border=True):
                         _pc1,_pc2 = st.columns([1,2])
                         with _pc1:
                             st.image(__import__("base64").b64decode(_pimg["b64"]), use_container_width=True)
                         with _pc2:
-                            st.markdown(f"**Фото #{_pi3+1} — {_cstrip(_ptyp.group(1)) if _ptyp else ''}**")
-                            st.markdown(
-                                f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">'
-                                f'<div style="font-size:2rem;font-weight:800;color:{_pbc}">{_pscore}/10</div>'
-                                f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">'
-                                f'<div style="background:{_pbc};width:{_pscore*10}%;height:10px;border-radius:6px"></div>'
-                                f'</div><div style="color:{_pbc};font-size:0.8rem;margin-top:2px">{_pslbl}</div></div></div>',
-                                unsafe_allow_html=True)
-                            if _pstrg: st.success(f"✅ {_cstrip(_pstrg.group(1))}")
-                            if _pweak: st.warning(f"⚠️ {_cstrip(_pweak.group(1))}")
+                            _phead = f"Фото #{_pi3+1}" + (f" — {_cstrip2(_ptyp.group(1))}" if _ptyp else "")
+                            st.markdown(f"**{_phead}**")
+                            if _pscore > 0:
+                                st.markdown(
+                                    f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">'
+                                    f'<div style="font-size:2rem;font-weight:800;color:{_pbc}">{_pscore}/10</div>'
+                                    f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">'
+                                    f'<div style="background:{_pbc};width:{_pscore*10}%;height:10px;border-radius:6px"></div>'
+                                    f'</div><div style="color:{_pbc};font-size:0.8rem;margin-top:2px">{_pslbl}</div></div></div>',
+                                    unsafe_allow_html=True)
+                            else:
+                                st.warning("⚠️ Оценка не распознана")
+                            if _pstrg: st.success(f"✅ {_cstrip2(_pstrg.group(1))}")
+                            if _pweak: st.warning(f"⚠️ {_cstrip2(_pweak.group(1))}")
+                            if _pact:
+                                with st.expander("🛠 Что делать"):
+                                    st.markdown(f"→ {_cstrip2(_pact.group(1))}")
+                            if _pconv:
+                                with st.expander("💡 Конверсия"):
+                                    st.info(f"🎯 {_cstrip2(_pconv.group(1))}")
+                            if _pemot:
+                                _etxt2 = _cstrip2(_pemot.group(1))
+                                _ec2 = {"доверие":"#22c55e","trust":"#22c55e","желание":"#f59e0b",
+                                        "сомнение":"#ef4444","doubt":"#ef4444","любопытство":"#3b82f6",
+                                        "curiosity":"#3b82f6","безразличие":"#94a3b8"}.get(
+                                        _etxt2.split()[0].lower().rstrip("/:"), "#8b5cf6")
+                                st.markdown(
+                                    f'<div style="background:{_ec2}22;border-left:3px solid {_ec2};border-radius:6px;padding:8px 12px;margin-top:4px">'
+                                    f'<span style="font-size:0.8rem;font-weight:700;color:{_ec2}">😶 ЭМОЦИЯ: </span>'
+                                    f'<span style="font-size:0.82rem">{_etxt2}</span></div>',
+                                    unsafe_allow_html=True)
             else:
                 if not st.session_state.get("do_comp_vision", True):
                     st.info("👁️ Vision конкурентов был отключён. Нажми 🧠 Анализ выше для анализа этого конкурента.")
