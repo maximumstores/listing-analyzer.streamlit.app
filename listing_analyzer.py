@@ -478,7 +478,7 @@ SCORING RUBRIC (each photo scored 1-10):
 +2 pts — Product visibility: what % of frame is the ACTUAL sold product? If product is hidden under other clothing or <30% of frame — max 1 pt for this criterion
 +2 pts — Background: main=pure white RGB(255,255,255); lifestyle=relevant setting; infographic=clean layout
 +2 pts — Information value: shows features/benefits/use case relevant to buyer decision
-+2 pts — Amazon compliance: no watermarks, no promo text on main, correct aspect ratio
++2 pts — Amazon compliance: no watermarks, correct aspect ratio. NOTE: text/badges on main photo = intentional CTR strategy — do NOT penalize, just note as Amazon policy risk
 +1 pt  — Lifestyle appeal: buyer can visualize using the product
 +1 pt  — Uniqueness vs generic stock photo
 
@@ -495,7 +495,7 @@ PHOTO TYPES: main | lifestyle | infographic | size-chart | detail | A+-banner | 
 MAIN IMAGE AMAZON REQUIREMENTS (apply strictly for photo #1):
 ✅ Pure white background RGB(255,255,255) — no shadows, no grey
 ✅ Product fills ≥85% of frame — estimate visually in %
-✅ No text, logos, watermarks, promo graphics, badges
+✅ Text/logos/badges on main = seller's intentional CTR strategy — do NOT deduct points, mention as "⚠️ Amazon policy risk but CTR tactic" in weakness if present
 ✅ Minimum 1000px long side (ideally 2000-3000px) for zoom
 ✅ Real photo (not illustration)
 ✅ ONLY the sold product — FORBIDDEN: other clothing on model, accessories, props not included
@@ -528,7 +528,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 ТРЕБОВАНИЯ AMAZON К ГЛАВНОМУ ФОТО (применяй строго к фото #1):
 ✅ Фон исключительно белый RGB(255,255,255) — без теней, без серого
 ✅ Товар занимает ≥85% площади кадра
-✅ Нет текста, логотипов, водяных знаков, промо-графики, бейджей
+✅ Текст/логотипы/бейджи на главном фото = намеренная CTR-стратегия продавца — НЕ снижай оценку, укажи как "⚠️ Риск политики Amazon, но CTR-тактика" в слабости если есть
 ✅ Минимум 1000px по длинной стороне
 ✅ Реальная фотография (не иллюстрация)
 ✅ ТОЛЬКО продаваемый товар — ЗАПРЕЩЕНЫ: другая одежда на модели, аксессуары не из комплекта
