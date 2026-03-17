@@ -2869,7 +2869,7 @@ elif _is_competitor_page:
 
     st.divider()
 
-    tab_cont, tab_photo, tab_data = st.tabs(["📝 Контент", "📸 Фото", "📊 Данные"])
+    tab_cont, tab_photo, tab_aplus, tab_data = st.tabs(["📝 Контент", "📸 Фото", "🎨 A+", "📊 Данные"])
     with tab_cont:
         _tcc = "#ef4444" if tlen>125 else "#22c55e"
         st.markdown(f"**Title** — <span style='color:{_tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
@@ -2960,6 +2960,32 @@ elif _is_competitor_page:
                         except: _rc[_ci2].caption(f"#{_rs+_ci2+1} ошибка")
             st.caption(f"Всего: {len(_cimgs)} фото")
         else: st.warning("Нет фото")
+    with tab_aplus:
+        _cap2 = c.get("aplus_content","")
+        _cap2_urls = c.get("aplus_image_urls", [])
+        _cvid2 = int(c.get("number_of_videos", 0) or 0)
+        # Stats
+        _ac1, _ac2, _ac3 = st.columns(3)
+        _ac1.metric("A+ Контент", "✅ Есть" if _ap2 else "❌ Нет")
+        _ac2.metric("Видео", f"✅ {_cvid2} шт." if _cvid2 > 0 else "❌ Нет")
+        _ac3.metric("A+ баннеры", f"{len(_cap2_urls)} шт." if _cap2_urls else "—")
+        st.divider()
+        # A+ images
+        if _cap2_urls:
+            st.markdown("**A+ баннеры:**")
+            for _apu in _cap2_urls[:8]:
+                try:
+                    st.image(_apu, use_container_width=True)
+                except:
+                    st.caption(f"❌ Не загрузился: {_apu[:60]}")
+        elif _ap2:
+            st.info("A+ есть, но баннеры не загружены ScrapingDog")
+        else:
+            st.warning("❌ A+ контент отсутствует")
+        # A+ text content
+        if _cap2:
+            with st.expander("📄 A+ текст"):
+                st.markdown(str(_cap2)[:2000])
     with tab_data:
         _da1,_da2 = st.columns(2)
         _da1.metric("Цена", cprice); _da2.metric("Рейтинг", crating)
