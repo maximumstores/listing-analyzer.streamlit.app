@@ -927,39 +927,49 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     _do_aplus       = st.session_state.get("do_aplus_vision", True)
     _do_comp_vision = st.session_state.get("do_comp_vision", True)
 
-    _prog(5,  f"🌐 Загружаю данные листинга {asin}...")
-    our_data, img_urls = scrapingdog_product(asin, log)
-
-    _prog(15, f"⬇️ Скачиваю фото ({len(img_urls)} шт.)...")
-    images = download_images(img_urls, log) if img_urls else []
-    st.session_state["images"] = images
-
-    # ── Vision фото (основной листинг) ───────────────────────────────────────
-    if images and _do_vision:
-        _prog(30, "👁️ Vision анализ фото...")
-        vision_result = analyze_vision(images, our_data, asin, log, lang=_lang)
-    else:
+    # ── Если нашего URL нет — пропускаем наш листинг ────────────────────────
+    if not our_url.strip() or asin == "unknown":
+        log("ℹ️ НАШ листинг не указан — анализируем только конкурентов")
+        our_data = {}
+        images = []
         vision_result = ""
-        if not images:
-            log("⚠️ Фото не загружены")
-        else:
-            log("⏭️ Vision фото пропущен (отключён)")
-
-    # ── A+ Vision ─────────────────────────────────────────────────────────────
-    _aplus_urls = our_data.get("aplus_image_urls", [])
-    if _aplus_urls and _do_aplus:
-        _prog(35, f"🎨 A+ Vision: {len(_aplus_urls)} баннеров...")
-        aplus_vision = analyze_aplus_vision(_aplus_urls, our_data, log, lang=_lang)
-        st.session_state["aplus_vision"] = aplus_vision
-        log(f"✅ A+ Vision: {len(_aplus_urls)} баннеров проанализировано")
-    else:
+        st.session_state["images"] = []
         st.session_state["aplus_vision"] = ""
-        if _aplus_urls and not _do_aplus:
-            log("⏭️ A+ Vision пропущен (отключён)")
+        st.session_state["aplus_img_urls"] = []
+        st.session_state["our_data"] = {}
+    else:
+        _prog(5,  f"🌐 Загружаю данные листинга {asin}...")
+        our_data, img_urls = scrapingdog_product(asin, log)
+
+        _prog(15, f"⬇️ Скачиваю фото ({len(img_urls)} шт.)...")
+        images = download_images(img_urls, log) if img_urls else []
+        st.session_state["images"] = images
+
+        # ── Vision фото (основной листинг) ───────────────────────────────────────
+        if images and _do_vision:
+            _prog(30, "👁️ Vision анализ фото...")
+            vision_result = analyze_vision(images, our_data, asin, log, lang=_lang)
         else:
-            log("ℹ️ A+ баннеры не найдены (нет aplus_image_urls)")
-    # URLs сохраняем всегда — чтобы картинки показывались даже без анализа
-    st.session_state["aplus_img_urls"] = _aplus_urls
+            vision_result = ""
+            if not images:
+                log("⚠️ Фото не загружены")
+            else:
+                log("⏭️ Vision фото пропущен (отключён)")
+
+        # ── A+ Vision ─────────────────────────────────────────────────────────────
+        _aplus_urls = our_data.get("aplus_image_urls", [])
+        if _aplus_urls and _do_aplus:
+            _prog(35, f"🎨 A+ Vision: {len(_aplus_urls)} баннеров...")
+            aplus_vision = analyze_aplus_vision(_aplus_urls, our_data, log, lang=_lang)
+            st.session_state["aplus_vision"] = aplus_vision
+            log(f"✅ A+ Vision: {len(_aplus_urls)} баннеров проанализировано")
+        else:
+            st.session_state["aplus_vision"] = ""
+            if _aplus_urls and not _do_aplus:
+                log("⏭️ A+ Vision пропущен (отключён)")
+            else:
+                log("ℹ️ A+ баннеры не найдены (нет aplus_image_urls)")
+        st.session_state["aplus_img_urls"] = _aplus_urls
 
     # ── Конкуренты ────────────────────────────────────────────────────────────
     active = [u.strip() for u in competitor_urls if u.strip()]
@@ -1301,9 +1311,10 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
         if positioning != "Не указано": _ctx_parts.append(f"Brand positioning: {positioning}")
         st.session_state["ai_context"] = " | ".join(_ctx_parts)
 
+    _has_any_url = bool(our_url.strip()) or any(u.strip() for u in competitor_urls)
     _bcol1, _bcol2 = st.columns([3, 1])
     with _bcol1:
-        _run_btn = st.button(btn_label, type="primary", disabled=not our_url.strip(), use_container_width=True)
+        _run_btn = st.button(btn_label, type="primary", disabled=not _has_any_url, use_container_width=True)
     with _bcol2:
         if st.button("🗑️ Сброс", type="secondary", use_container_width=True, help="Очистить всё и начать заново"):
             for _k in list(st.session_state.keys()):
