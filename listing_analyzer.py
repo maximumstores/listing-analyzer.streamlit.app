@@ -680,8 +680,9 @@ FACTUAL STATS (do NOT contradict these):
 - Number of bullets: {len(_bullets)}
 - Bullet byte lengths: {_bullet_bytes}
 - Any bullet over 250 bytes: {'YES - ' + str([i+1 for i,x in enumerate(_bullet_bytes) if x>250]) if any(x>250 for x in _bullet_bytes) else 'NO'}
-- Description present: {'YES' if our_data.get('description') else 'NO - score must be 0%'}
-- A+ present: {'YES' if our_data.get('aplus_content') else 'NO'}
+- Description present: {'YES' if our_data.get('description') else 'NO'}
+- A+ present: {'YES' if our_data.get('aplus_content') or our_data.get('aplus') else 'NO'}
+- IMPORTANT: If A+ is present AND description is empty → description_score = "0%" is acceptable (A+ replaces description for buyers, but description still matters for SEO indexing)
 """
     our_text = _facts + "\n" + fmt(our_data)[:2500]
     def fmt_comp(d):
@@ -870,6 +871,20 @@ CRITICAL RULES:
 - aplus_gaps: if no A+ exists write ["A+ контент отсутствует — создать"], else real issues only.
 - CRITICAL: Read the actual listing text before writing gaps. Never hallucinate missing elements that are already present.
 
+AMAZON BANNED WORDS — NEVER recommend using these (instant listing suppression):
+antimicrobial, antibacterial, antifungal, antiviral, kills bacteria, eliminates odor-causing bacteria,
+pesticide, repels insects, UV protection (unless certified), SPF, sunscreen, medical claims,
+treats, prevents, cures, heals, clinically proven, dermatologist tested (unless certified)
+If the listing uses any banned word — flag it as HIGH priority risk, do NOT recommend adding it.
+
+RECOMMENDATION PLACEMENT RULES — every rec must specify WHERE to implement:
+- Title: "Add to Title: '...'"
+- Bullet: "Rewrite Bullet #N: '...'"  
+- A+ module: "Add A+ module: '...'"
+- A+ carousel: "Add carousel with: '...'"
+- Description: "Add to Description: '...'"
+NEVER give a vague rec like "mention X somewhere" — always specify exact placement.
+
 {SCHEMA}"""
 
     sys_prompt = f"Amazon listing expert. Return ONLY valid JSON. No markdown. No preamble. All text in {lang_name}."
@@ -991,12 +1006,23 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
 
         # ── Vision конкурента — управляется чекбоксом ─────────────────────
         if cimgs_dl and _do_comp_vision:
-            _prog(base_pct + 5, f"👁️ Конкурент {i+1}: Vision анализ...")
+            _prog(base_pct + 5, f"👁️ Конкурент {i+1}: Vision анализ фото...")
             cvision = analyze_vision(cimgs_dl, cdata, casin, log, lang=_lang)
         else:
             cvision = ""
             if cimgs_dl:
                 log(f"⏭️ Vision конкурент {i+1} пропущен (отключён)")
+
+        # ── A+ Vision конкурента ───────────────────────────────────────────
+        _cap_urls = cdata.get("aplus_image_urls", [])
+        if _cap_urls and _do_comp_vision:
+            _prog(base_pct + 6, f"🎨 Конкурент {i+1}: A+ Vision ({len(_cap_urls)} баннеров)...")
+            _caplus_vision = analyze_aplus_vision(_cap_urls, cdata, log, lang=_lang)
+            st.session_state[f"comp_aplus_vision_{i}"] = _caplus_vision
+            st.session_state[f"comp_aplus_urls_{i}"] = _cap_urls
+        else:
+            st.session_state[f"comp_aplus_vision_{i}"] = ""
+            st.session_state[f"comp_aplus_urls_{i}"] = _cap_urls  # URLs сохраняем всегда
 
         _prog(base_pct + 8, f"🧠 Конкурент {i+1}: AI анализ...")
         cai = analyze_text(cdata, [], cvision, casin, log, lang=_lang, is_competitor=True)
@@ -2397,7 +2423,20 @@ elif page == "📝 Контент":
     bullets_text = "\n".join([f"• {b}" for b in our_bullets]) if our_bullets else ""
     _sec("Bullets", "bullets_score", raw_text=bullets_text)
     st.divider()
-    _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
+    _desc_score = pct(r.get("description_score", 0))
+    _has_aplus  = bool(od.get("aplus") or od.get("aplus_content"))
+    if _desc_score == 0 and _has_aplus:
+        # Description hidden by A+ — this is normal
+        st.markdown("**Description**")
+        st.markdown(
+            '<div style="background:#1e3a1e;border-left:4px solid #22c55e;border-radius:8px;'
+            'padding:10px 14px;margin:4px 0">'
+            '<span style="color:#22c55e;font-weight:700">✅ Скрыто A+ контентом — это нормально</span><br>'
+            '<span style="color:#94a3b8;font-size:0.82rem">Amazon показывает A+ вместо описания. '
+            'Описание не видит покупатель, но индексируется поиском — заполни для SEO.</span>'
+            '</div>', unsafe_allow_html=True)
+    else:
+        _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
     st.divider()
     _sec("A+", "aplus_score")
 
@@ -2962,7 +3001,8 @@ elif _is_competitor_page:
         else: st.warning("Нет фото")
     with tab_aplus:
         _cap2 = c.get("aplus_content","")
-        _cap2_urls = c.get("aplus_image_urls", [])
+        _cap2_urls = st.session_state.get(f"comp_aplus_urls_{cidx}", c.get("aplus_image_urls", []))
+        _cav_text  = st.session_state.get(f"comp_aplus_vision_{cidx}", "")
         _cvid2 = int(c.get("number_of_videos", 0) or 0)
         # Stats
         _ac1, _ac2, _ac3 = st.columns(3)
@@ -2970,19 +3010,64 @@ elif _is_competitor_page:
         _ac2.metric("Видео", f"✅ {_cvid2} шт." if _cvid2 > 0 else "❌ Нет")
         _ac3.metric("A+ баннеры", f"{len(_cap2_urls)} шт." if _cap2_urls else "—")
         st.divider()
-        # A+ images
-        if _cap2_urls:
+
+        if not _cap2_urls:
+            st.warning("❌ A+ баннеры не загружены")
+        elif _cav_text:
+            # Show Vision analysis like our A+ page
+            _cav_blocks = {}
+            for _m in re.finditer(r"APLUS_BLOCK_(\d+)\s*(.*?)(?=APLUS_BLOCK_\d+|$)", _cav_text, re.DOTALL):
+                _cav_blocks[int(_m.group(1))] = _m.group(2).strip()
+
+            st.markdown(f"**{len(_cap2_urls)} баннер(ов) проанализировано**")
+            for _bi, _burl in enumerate(_cap2_urls[:8]):
+                _bblk  = _cav_blocks.get(_bi+1, "")
+                _bmod  = re.search(r"(?:Модуль|Module)\s*[:\-]\s*(.+)", _bblk)
+                _bsum  = re.search(r"(?:Содержание|Summary)\s*[:\-]\s*(.+)", _bblk)
+                _bsc   = re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", _bblk)
+                _bstr  = re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})", _bblk)
+                _bweak = re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})", _bblk)
+                _bact  = re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})", _bblk)
+                _bconv = re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.{3,})", _bblk)
+                _bscv  = int(_bsc.group(1)) if _bsc else 0
+                _bbc   = "#22c55e" if _bscv>=8 else ("#f59e0b" if _bscv>=6 else "#ef4444")
+                _bsl   = "Отлично" if _bscv>=8 else ("Хорошо" if _bscv>=6 else "Слабо")
+                _bstrip = lambda s: s.strip().strip("*").strip() if s else ""
+
+                with st.container(border=True):
+                    _bc1, _bc2 = st.columns([1, 1])
+                    with _bc1:
+                        try: st.image(_burl, use_container_width=True)
+                        except: st.caption(f"❌ {_burl[:50]}")
+                    with _bc2:
+                        _bhead = f"Баннер #{_bi+1}" + (f" — {_bstrip(_bmod.group(1))}" if _bmod else "")
+                        st.markdown(f"**{_bhead}**")
+                        if _bsum: st.caption(_bstrip(_bsum.group(1)))
+                        if _bscv:
+                            st.markdown(
+                                f'<div style="display:flex;align-items:center;gap:12px;margin:10px 0">'
+                                f'<div style="font-size:2.8rem;font-weight:800;color:{_bbc};line-height:1">{_bscv}/10</div>'
+                                f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">'
+                                f'<div style="background:{_bbc};width:{_bscv*10}%;height:10px;border-radius:6px"></div></div>'
+                                f'<div style="color:{_bbc};font-size:0.85rem;margin-top:3px;font-weight:600">{_bsl}</div>'
+                                f'</div></div>', unsafe_allow_html=True)
+                        if _bstr:  st.success(f"✅ {_bstrip(_bstr.group(1))}")
+                        if _bweak: st.warning(f"⚠️ {_bstrip(_bweak.group(1))}")
+                        if _bact:
+                            with st.expander("🛠 Что делать"):
+                                st.markdown(f"→ {_bstrip(_bact.group(1))}")
+                        if _bconv:
+                            with st.expander("💡 Конверсия"):
+                                st.info(f"🎯 {_bstrip(_bconv.group(1))}")
+        else:
+            # No Vision analysis — just show images
+            if not st.session_state.get("do_comp_vision", True):
+                st.info("👁️ Vision конкурентов отключён — баннеры без анализа")
             st.markdown("**A+ баннеры:**")
             for _apu in _cap2_urls[:8]:
-                try:
-                    st.image(_apu, use_container_width=True)
-                except:
-                    st.caption(f"❌ Не загрузился: {_apu[:60]}")
-        elif _ap2:
-            st.info("A+ есть, но баннеры не загружены ScrapingDog")
-        else:
-            st.warning("❌ A+ контент отсутствует")
-        # A+ text content
+                try: st.image(_apu, use_container_width=True)
+                except: st.caption(f"❌ {_apu[:60]}")
+
         if _cap2:
             with st.expander("📄 A+ текст"):
                 st.markdown(str(_cap2)[:2000])
