@@ -1706,11 +1706,19 @@ def health_card():
         ("Варианты",r.get("customization_score",0)),
         ("Prime",   r.get("prime_score",0)),
     ]
+    _has_aplus_od = bool(od.get("aplus") or od.get("aplus_content"))
     cols = st.columns(len(items))
     for col,(lbl,val) in zip(cols,items):
         p2 = pct(val)
-        cc = "#22c55e" if p2>=75 else ("#f59e0b" if p2>=50 else "#ef4444")
-        col.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid {cc}"><div style="font-size:1.2rem;font-weight:700;color:{cc}">{p2}%</div><div style="font-size:0.68rem;color:#64748b">{lbl}</div></div>', unsafe_allow_html=True)
+        if lbl == "Описание" and p2 == 0 and _has_aplus_od:
+            col.markdown(
+                '<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid #64748b">'
+                '<div style="font-size:1rem;font-weight:700;color:#64748b">A+</div>'
+                '<div style="font-size:0.68rem;color:#64748b">Описание</div></div>',
+                unsafe_allow_html=True)
+        else:
+            cc = "#22c55e" if p2>=75 else ("#f59e0b" if p2>=50 else "#ef4444")
+            col.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid {cc}"><div style="font-size:1.2rem;font-weight:700;color:{cc}">{p2}%</div><div style="font-size:0.68rem;color:#64748b">{lbl}</div></div>', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2844,7 +2852,7 @@ elif _is_competitor_page:
 <div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:14px;padding:18px;color:white;margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
     <div>
-      <div style="font-size:0.78rem;opacity:0.6">{cbrand} - {casin}</div>
+      <div style="font-size:0.78rem;opacity:0.6">{cbrand} - <a href="https://www.amazon.com/dp/{casin}" target="_blank" style="color:#93c5fd;text-decoration:none">{casin} ↗</a></div>
       <div style="font-size:0.95rem;font-weight:600;max-width:500px;margin-top:3px">{_t2[:80]}{"..." if tlen>80 else ""}</div>
       <div style="display:flex;gap:12px;margin-top:7px;font-size:0.8rem;opacity:0.8;flex-wrap:wrap">
         <span>Price: {cprice}</span><span>Rating: {crating} ({crev} reviews)</span>
@@ -2903,8 +2911,17 @@ elif _is_competitor_page:
 
     _sc2 = st.columns(len(_sitems))
     for _col3,(_lbl3,_p3) in zip(_sc2,_sitems):
-        _c3 = "#22c55e" if _p3>=75 else ("#f59e0b" if _p3>=50 else "#ef4444")
-        _col3.markdown(f'<div style="border-left:3px solid {_c3};padding:5px 4px;text-align:center;background:#f8fafc;border-radius:4px"><div style="font-size:1.05rem;font-weight:700;color:{_c3}">{_p3}%</div><div style="font-size:0.62rem;color:#64748b">{_lbl3}</div></div>', unsafe_allow_html=True)
+        # Special case: description 0% but A+ present → show as grey "A+"
+        if _lbl3 == "Описание" and _p3 == 0 and _ap2:
+            _col3.markdown(
+                '<div style="border-left:3px solid #64748b;padding:5px 4px;text-align:center;'
+                'background:#f8fafc;border-radius:4px">'
+                '<div style="font-size:0.85rem;font-weight:700;color:#64748b">A+</div>'
+                '<div style="font-size:0.62rem;color:#64748b">Описание</div></div>',
+                unsafe_allow_html=True)
+        else:
+            _c3 = "#22c55e" if _p3>=75 else ("#f59e0b" if _p3>=50 else "#ef4444")
+            _col3.markdown(f'<div style="border-left:3px solid {_c3};padding:5px 4px;text-align:center;background:#f8fafc;border-radius:4px"><div style="font-size:1.05rem;font-weight:700;color:{_c3}">{_p3}%</div><div style="font-size:0.62rem;color:#64748b">{_lbl3}</div></div>', unsafe_allow_html=True)
 
     st.divider()
 
