@@ -2429,7 +2429,7 @@ elif page == "🏆 Benchmark":
         title2  = d.get("title",""); imgs2 = d.get("images",[])
         bul2    = d.get("feature_bullets",[]); desc2 = d.get("description","")
         rating2 = float(d.get("average_rating",0) or 0)
-        rev_cnt = int(pi2.get("Customer Reviews",{}).get("ratings_count","0") or 0)
+        rev_cnt = int(str(pi2.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").replace(".","").strip() or 0)
         has_vid = int(d.get("number_of_videos",0) or 0) > 0
         has_ap  = bool(d.get("aplus")); is_prime = bool(d.get("is_prime_exclusive"))
         bsr_num = 99999
@@ -2763,7 +2763,7 @@ elif _is_competitor_page:
     casin = get_asin_from_data(c)
     _t2 = c.get("title",""); _i2 = c.get("images",[]); _b2 = c.get("feature_bullets",[])
     _d2 = c.get("description",""); _rat2 = float(c.get("average_rating",0) or 0)
-    _rev2 = int(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0)
+    _rev2 = int(str(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").replace(".","").strip() or 0)
     _vid2 = int(c.get("number_of_videos",0) or 0)>0; _ap2 = bool(c.get("aplus"))
     _pr2  = bool(c.get("is_prime_exclusive"))
     _bsr2 = 99999
