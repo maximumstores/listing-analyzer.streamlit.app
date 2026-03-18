@@ -2203,6 +2203,19 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 if page == "🏠 Обзор":
     st.title("🏠 Обзор листинга")
     health_card()
+
+    # ── Frequently Returned warning ───────────────────────────────────────────
+    if od.get("is_frequently_returned"):
+        st.markdown("""
+<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:10px;padding:14px 18px;margin:8px 0">
+<div style="font-size:1.1rem;font-weight:800;color:#fca5a5">🔴 ВНИМАНИЕ: Amazon пометил листинг как "Часто возвращают"</div>
+<div style="color:#fca5a5;font-size:0.88rem;margin-top:6px;line-height:1.6">
+Amazon показывает покупателям предупреждение прямо на странице товара. Это <b>критично убивает конверсию</b>.<br>
+Причины: несоответствие описания реальному товару, проблемы с качеством, неверный размерный ряд, плохая упаковка.<br>
+<b>Приоритет #1</b> — разобраться с причиной возвратов до любых других улучшений листинга.
+</div>
+</div>""", unsafe_allow_html=True)
+
     st.divider()
 
     _sum = r.get("summary", "")
@@ -3012,7 +3025,12 @@ elif _is_competitor_page:
   </div>
 </div>""", unsafe_allow_html=True)
 
-    _cai_key    = f"comp_ai_{cidx}"
+    # Frequently returned warning
+    if c.get("is_frequently_returned"):
+        st.markdown("""
+<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:8px;padding:10px 14px;margin-bottom:8px">
+<span style="font-size:0.95rem;font-weight:800;color:#fca5a5">🔴 Amazon: "Часто возвращают" — конкурент имеет проблемы с возвратами!</span>
+</div>""", unsafe_allow_html=True)
     _vision_key = f"comp_vision_{cidx}"
     _cai_result = st.session_state.get(_cai_key)
 
