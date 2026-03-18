@@ -3025,6 +3025,10 @@ elif _is_competitor_page:
   </div>
 </div>""", unsafe_allow_html=True)
 
+    _cai_key    = f"comp_ai_{cidx}"
+    _vision_key = f"comp_vision_{cidx}"
+    _cai_result = st.session_state.get(_cai_key)
+
     # Frequently returned warning
     if c.get("is_frequently_returned"):
         st.markdown("""
