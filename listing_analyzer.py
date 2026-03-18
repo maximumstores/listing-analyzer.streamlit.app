@@ -207,6 +207,67 @@ def get_asin(url):
 def sc(s): return "🟢" if s>=8 else ("🟡" if s>=6 else "🔴")
 def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"}.get(p,p)
 
+# ── Amazon Stop Words ─────────────────────────────────────────────────────────
+AMAZON_STOP_WORDS = {
+    "do_not_use": [
+        "ailment","all natural","all-natural","antibacterial","anti-bacterial",
+        "antifungal","antimicrobial","anti-microbial","antimicrobian","antiseptic",
+        "bacteria","biodegradable","bpa free","bisphenol a","bug","cannabinoid",
+        "cannabis","cbd","cannabidiol","compliance","compostable","contaminants",
+        "corona","coronavirus","covid","cure","decomposable","degradable","detox",
+        "detoxification","detoxify","detoxifying","disease","diseases","drugged",
+        "ecofriendly","eco-friendly","environmentally friendly","fairness",
+        "fungicide","fungicides","germ","gluten-free","harmless","heal","illness",
+        "insecticide","insects","insect","knockoff","made in the usa","maladies",
+        "malady","marine degradable","medicine","mildew","mold","mold resistant",
+        "mold spores","non-injurious","non-poisonous","non-toxic","organic",
+        "parasitic","pesticide","pesticides","pests","pest","poppy","price",
+        "refund","remedies","remedy","repel","repellent","repelling","safe",
+        "sanitize","sanitizes","self defense","stun guns","swastika","thc",
+        "tetrahydrocannabinol","the world's strongest","the world's best",
+        "toxic","toxin","toxins","treat","viral","virus","viruses","weapon",
+        "weapons","weedkiller","addictive substance withdrawal",
+    ],
+    "try_to_avoid": [
+        "allergy free","allergy safe","anti aging","best seller","bonus","cold",
+        "filter","free","guarantee","healthier","healthy","proven",
+        "recommended by","tested","validated","natural","recyclable",
+        "repairing dead skin","treatment","warranty","weight loss",
+        "hypoallergenic","nano silver","green",
+    ],
+    "a_plus_restricted": [
+        "approved","certified","drug","drugs","pearl","platinum","noncorrosive",
+    ],
+}
+
+def check_stop_words(text):
+    """Check text for Amazon stop words. Returns dict with found words by category."""
+    if not text: return {}
+    text_lower = text.lower()
+    found = {"do_not_use": [], "try_to_avoid": [], "a_plus_restricted": []}
+    for cat, words in AMAZON_STOP_WORDS.items():
+        for w in words:
+            # Word boundary check
+            pattern = r'\b' + re.escape(w) + r'\b'
+            if re.search(pattern, text_lower):
+                found[cat].append(w)
+    return {k: v for k, v in found.items() if v}
+
+def check_listing_stop_words(our_data):
+    """Check all listing fields for stop words."""
+    fields = {
+        "Title": our_data.get("title", ""),
+        "Bullets": " ".join(our_data.get("feature_bullets", [])),
+        "Description": str(our_data.get("description", "")),
+        "A+ Content": str(our_data.get("aplus_content", "")),
+    }
+    results = {}
+    for field, text in fields.items():
+        found = check_stop_words(text)
+        if found:
+            results[field] = found
+    return results
+
 def get_asin_from_data(d):
     return d.get("_input_asin","") or d.get("parent_asin","") or d.get("product_information",{}).get("ASIN","")
 
@@ -2386,6 +2447,32 @@ elif page == "📝 Контент":
     our_bullets = od.get("feature_bullets",[])
     our_desc    = od.get("description","")
 
+    # ── Stop Words Check ──────────────────────────────────────────────────────
+    _sw_results = check_listing_stop_words(od)
+    if _sw_results:
+        _total_banned  = sum(len(v.get("do_not_use",[])) for v in _sw_results.values())
+        _total_warn    = sum(len(v.get("try_to_avoid",[])) for v in _sw_results.values())
+        _total_aplus   = sum(len(v.get("a_plus_restricted",[])) for v in _sw_results.values())
+        _sw_color = "#ef4444" if _total_banned > 0 else ("#f59e0b" if _total_warn > 0 else "#22c55e")
+        _sw_label = f"🚨 {_total_banned} запрещённых слов!" if _total_banned else (
+            f"⚠️ {_total_warn} нежелательных слов" if _total_warn else "✅ Стоп-слов нет")
+        with st.expander(f"🔴 Amazon Stop Words — {_sw_label}", expanded=_total_banned > 0):
+            for field, found in _sw_results.items():
+                st.markdown(f"**{field}:**")
+                if found.get("do_not_use"):
+                    for w in found["do_not_use"]:
+                        st.markdown(f'<span style="background:#ef444433;border:1px solid #ef4444;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#ef4444">🚫 {w}</span>', unsafe_allow_html=True)
+                if found.get("try_to_avoid"):
+                    for w in found["try_to_avoid"]:
+                        st.markdown(f'<span style="background:#f59e0b33;border:1px solid #f59e0b;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#f59e0b">⚠️ {w}</span>', unsafe_allow_html=True)
+                if found.get("a_plus_restricted"):
+                    for w in found["a_plus_restricted"]:
+                        st.markdown(f'<span style="background:#3b82f633;border:1px solid #3b82f6;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#3b82f6">📋 A+ {w}</span>', unsafe_allow_html=True)
+            st.caption("🚫 Запрещено Amazon | ⚠️ Нежелательно | 📋 Запрещено в A+")
+    else:
+        st.success("✅ Стоп-слова Amazon не найдены")
+    st.divider()
+
     def _sec(label, key, **kw):
         val = pct(r.get(key, 0))
         gaps = r.get(key.replace("_score","_gaps"), [])
@@ -2928,8 +3015,31 @@ elif _is_competitor_page:
     tab_cont, tab_photo, tab_aplus, tab_data = st.tabs(["📝 Контент", "📸 Фото", "🎨 A+", "📊 Данные"])
     with tab_cont:
         _tcc = "#ef4444" if tlen>125 else "#22c55e"
+        _cai_title_score = pct(_cai_result.get("title_score",0)) if _cai_result else int(_ts*10)
         st.markdown(f"**Title** — <span style='color:{_tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
+        st.progress(_cai_title_score/100)
         st.markdown(f"> {_t2}")
+
+        # Авто-проверка title
+        _ctwords = [w.lower() for w in _t2.split() if len(w)>3]
+        _chas_repeat = any(_ctwords.count(w)>=3 for w in _ctwords)
+        _chas_spec = any(c in _t2 for c in "!$?{}^¬¦")
+        _chas_kw = any(w in _t2.lower() for w in ["merino","wool","tank","men","women","shirt","beanie","hat","layer","jacket"])
+        _cauto_title = min(100, (15 if tlen<=125 else 0) + (35 if _chas_kw else 15) + 30 + (10 if not _chas_spec else 0) + 10)
+        with st.expander("📐 Рубрика оценки Title"):
+            _ct1, _ct2 = st.columns(2)
+            _ct1.metric("🤖 AI оценка", f"{_cai_title_score}%")
+            _ct2.metric("🔧 Авто-проверка", f"{_cauto_title}%",
+                delta=f"{_cai_title_score - _cauto_title:+d}%" if _cai_title_score != _cauto_title else None,
+                delta_color="normal")
+
+        if _cai_result:
+            _ctgaps = _cai_result.get("title_gaps", [])
+            _ctrec  = _cai_result.get("title_rec", "")
+            if _ctgaps:
+                with st.expander(f"⚠️ Пробелы ({len(_ctgaps)})"):
+                    for g in _ctgaps: st.markdown(f"- {g}")
+            if _ctrec: st.info(f"💡 {_ctrec}")
         st.divider()
         st.markdown(f"**Bullets** ({len(_b2)})")
         for _bul in _b2:
