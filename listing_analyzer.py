@@ -2630,8 +2630,13 @@ elif page == "🏆 Benchmark":
         if bsr_m:
             try: bsr_num = int(bsr_m.group(1).replace(",",""))
             except: pass
-        colors2 = len(d.get("customization_options",{}).get("color",[]))
+        colors2 = len([c for c in d.get("customization_options",{}).get("color",[]) if c.get("asin") and c.get("asin") != "undefined"])
         sizes2  = len(d.get("customization_options",{}).get("size",[]))
+        # One Size products score full on size dimension
+        _pi2 = d.get("product_information", {})
+        _is_one_size = "one size" in str(_pi2.get("Size","")).lower() or "one size" in str(_pi2.get("size","")).lower()
+        if _is_one_size: sizes2 = 3  # treat One Size as having size variants
+
         ts = min(10, max(0, (1.5 if len(title2)<=125 else 0) + (3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5) + 3.0 + (1.0 if not re.search(r"[!$?{}]",title2) else 0) + 1))
         bs = min(10, max(0, (1.5 if len(bul2)<=5 else 0) + (2.5 if any(":" in b for b in bul2) else 1.0) + min(4.0,len(bul2)) + 1.0 + 1))
         ds = 0 if not desc2 else min(10, 4+(3 if len(desc2)>200 else 1))
@@ -2639,8 +2644,10 @@ elif page == "🏆 Benchmark":
         as_ = 0 if not has_ap else 7
         rs = 10 if (rating2>=4.4 and rev_cnt>=50) else (7 if rating2>=4.0 else 4)
         bsrs = 10 if bsr_num<=1000 else (8 if bsr_num<=5000 else 5)
+        has_vid = int(d.get("number_of_videos",0) or 0) > 0
+        has_ap  = bool(d.get("aplus")); is_prime = bool(d.get("is_prime_exclusive") or d.get("is_prime") or "amazon" in str(d.get("ships_from","")).lower())
         prs = 10 if is_prime else 5
-        vs = 10 if (colors2>=5 and sizes2>=3) else (7 if sizes2>=3 else 4)
+        vs = 10 if (colors2>=5 and sizes2>=3) else (8 if colors2>=5 else (7 if sizes2>=3 else 4))
         h = int((ts*0.10+bs*0.10+ds*0.10+ps*0.10+as_*0.10+rs*0.15+bsrs*0.15+7*0.10+vs*0.05+prs*0.05)*10)
         return {"title":round(ts,1),"bullets":round(bs,1),"description":round(ds,1),"photos":round(ps,1),"aplus":as_,"reviews":rs,"bsr":bsrs,"variants":vs,"prime":prs,"health":h}
 
@@ -2958,13 +2965,17 @@ elif _is_competitor_page:
     _d2 = c.get("description",""); _rat2 = float(c.get("average_rating",0) or 0)
     _rev2 = int(str(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").replace(".","").strip() or 0)
     _vid2 = int(c.get("number_of_videos",0) or 0)>0; _ap2 = bool(c.get("aplus"))
-    _pr2  = bool(c.get("is_prime_exclusive"))
+    _pr2  = bool(c.get("is_prime_exclusive") or c.get("is_prime") or
+                 "amazon" in str(c.get("ships_from","")).lower())
     _bsr2 = 99999
     _bm = re.search(r"#([\d,]+)", str(cpi.get("Best Sellers Rank","")))
     if _bm:
         try: _bsr2 = int(_bm.group(1).replace(",",""))
         except: pass
-    _col2 = len(c.get("customization_options",{}).get("color",[])); _sz2 = len(c.get("customization_options",{}).get("size",[]))
+    _col2 = len([_cv for _cv in c.get("customization_options",{}).get("color",[]) if isinstance(_cv, dict) and _cv.get("asin","") not in ("","undefined")])
+    _sz2  = len(c.get("customization_options",{}).get("size",[]))
+    _cis_one_size = "one size" in str(cpi.get("Size","")).lower()
+    if _cis_one_size: _sz2 = 3
     _ts = min(10, max(0, (1.5 if len(_t2)<=125 else 0)+(3.5 if any(k in _t2.lower() for k in ["merino","wool","tank","shirt","base layer"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",_t2) else 0)+1))
     _bs = min(10, max(0, (1.5 if len(_b2)<=5 else 0)+(2.5 if any(":" in b for b in _b2) else 1)+min(4,len(_b2))+1+1))
     _ds = 0 if not _d2 else min(10, 4+(3 if len(_d2)>200 else 1))
@@ -2973,7 +2984,7 @@ elif _is_competitor_page:
     _rs = 10 if (_rat2>=4.4 and _rev2>=50) else (7 if _rat2>=4.0 else 4)
     _bsrs = 10 if _bsr2<=1000 else (8 if _bsr2<=5000 else 5)
     _prs = 10 if _pr2 else 5
-    _vs = 10 if (_col2>=5 and _sz2>=3) else (7 if _sz2>=3 else 4)
+    _vs = 10 if (_col2>=5 and _sz2>=3) else (8 if _col2>=5 else (7 if _sz2>=3 or _cis_one_size else 4))
     _h = int((_ts*0.10+_bs*0.10+_ds*0.10+_ps*0.10+_as*0.10+_rs*0.15+_bsrs*0.15+7*0.10+_vs*0.05+_prs*0.05)*10)
 
     ch = _h; hc = "#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
