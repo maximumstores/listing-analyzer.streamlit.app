@@ -3062,6 +3062,26 @@ elif _is_competitor_page:
 
     tab_cont, tab_photo, tab_aplus, tab_data = st.tabs(["📝 Контент", "📸 Фото", "🎨 A+", "📊 Данные"])
     with tab_cont:
+        # Stop words check for competitor
+        _csw = check_listing_stop_words(c)
+        if _csw:
+            _csw_banned = sum(len(v.get("do_not_use",[])) for v in _csw.values())
+            _csw_warn   = sum(len(v.get("try_to_avoid",[])) for v in _csw.values())
+            _csw_color  = "#ef4444" if _csw_banned > 0 else ("#f59e0b" if _csw_warn > 0 else "#22c55e")
+            _csw_label  = f"🚨 {_csw_banned} запрещённых!" if _csw_banned else f"⚠️ {_csw_warn} нежелательных"
+            with st.expander(f"🔴 Stop Words — {_csw_label}", expanded=_csw_banned > 0):
+                for _cf, _cfw in _csw.items():
+                    st.markdown(f"**{_cf}:**")
+                    if _cfw.get("do_not_use"):
+                        for _cw in _cfw["do_not_use"]:
+                            st.markdown(f'<span style="background:#ef444433;border:1px solid #ef4444;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.82rem;color:#ef4444">🚫 {_cw}</span>', unsafe_allow_html=True)
+                    if _cfw.get("try_to_avoid"):
+                        for _cw in _cfw["try_to_avoid"]:
+                            st.markdown(f'<span style="background:#f59e0b33;border:1px solid #f59e0b;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.82rem;color:#f59e0b">⚠️ {_cw}</span>', unsafe_allow_html=True)
+                    if _cfw.get("a_plus_restricted"):
+                        for _cw in _cfw["a_plus_restricted"]:
+                            st.markdown(f'<span style="background:#3b82f633;border:1px solid #3b82f6;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.82rem;color:#3b82f6">📋 {_cw}</span>', unsafe_allow_html=True)
+            st.divider()
         _tcc = "#ef4444" if tlen>125 else "#22c55e"
         _cai_title_score = pct(_cai_result.get("title_score",0)) if _cai_result else int(_ts*10)
         st.markdown(f"**Title** — <span style='color:{_tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
