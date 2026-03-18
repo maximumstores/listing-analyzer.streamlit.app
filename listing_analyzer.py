@@ -210,51 +210,99 @@ def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"
 # ── Amazon Stop Words ─────────────────────────────────────────────────────────
 AMAZON_STOP_WORDS = {
     "do_not_use": [
-        "ailment","all natural","all-natural","antibacterial","anti-bacterial",
-        "antifungal","antimicrobial","anti-microbial","antimicrobian","antiseptic",
-        "bacteria","biodegradable","bpa free","bisphenol a","bug","cannabinoid",
-        "cannabis","cbd","cannabidiol","compliance","compostable","contaminants",
-        "corona","coronavirus","covid","cure","decomposable","degradable","detox",
-        "detoxification","detoxify","detoxifying","disease","diseases","drugged",
-        "ecofriendly","eco-friendly","environmentally friendly","fairness",
-        "fungicide","fungicides","germ","gluten-free","harmless","heal","illness",
-        "insecticide","insects","insect","knockoff","made in the usa","maladies",
-        "malady","marine degradable","medicine","mildew","mold","mold resistant",
-        "mold spores","non-injurious","non-poisonous","non-toxic","organic",
-        "parasitic","pesticide","pesticides","pests","pest","poppy","price",
-        "refund","remedies","remedy","repel","repellent","repelling","safe",
-        "sanitize","sanitizes","self defense","stun guns","swastika","thc",
-        "tetrahydrocannabinol","the world's strongest","the world's best",
-        "toxic","toxin","toxins","treat","viral","virus","viruses","weapon",
-        "weapons","weedkiller","addictive substance withdrawal",
+        # Medical/Treatment
+        "ailment","cure","cured","cures","treat","treatment","treats","heal","healing","heals",
+        "prevent","prevents","diagnose","remedy","remedies","medication","pharmaceutical",
+        "detox","detoxify","detoxification","detoxifying","reparative","fast relief","relief",
+        "clinically proven","doctor recommended","no side effects","pain free","proven to work",
+        "performance enhancement","disease","diseases","illness","maladies","malady",
+        # Diseases
+        "aids","add","adhd","als","alzheimer","autism","autistic","cancer","cancroid",
+        "cataract","chlamydia","cmv","cytomegalovirus","concussion","coronavirus","covid",
+        "crabs","cystic fibrosis","dementia","depression","diabetes","diabetic",
+        "epilepsy","flu","glaucoma","gonorrhea","gout","hepatitis","herpes","hsv1","hsv2",
+        "hiv","hodgkin","hpv","influenza","kidney disease","liver disease","lupus",
+        "lymphoma","meningitis","mononucleosis","mono","multiple sclerosis",
+        "muscular dystrophy","obesity","parkinson","pid","pelvic inflammatory",
+        "scabies","seizure","seizures","stroke","syphilis","trichomoniasis","tumor",
+        "ringworm","insomnia","anxiety","inflammation","infection",
+        # Pesticide triggers
+        "antibacterial","anti-bacterial","antimicrobial","anti-microbial","antifungal",
+        "anti-fungal","antiviral","antiseptic","bacteria","bacterial","contaminants",
+        "contamination","disinfect","disinfectant","disinfects","fungal","fungus",
+        "fungicide","fungicides","germ","germs","germ-free","insecticide","mildew",
+        "mold","mould","mold resistant","mold spores","nano silver","parasitic",
+        "pathogen","pest","pesticide","pesticides","pesticide-free","protozoa",
+        "repel","repellent","repelling","sanitize","sanitizes","viral","virus","viruses",
+        "mites","yeast","biological contaminants",
+        # Drugs/Substances
+        "cbd","cannabinoid","thc","cannabidiol","cannabis","marijuana","kratom","hemp",
+        "kanna","weed","dab","shatter","ketamine","psilocybin","ephedrine",
+        "minoxidil","ketoconazole","hordenine","ayahuasca","picamilon","dmt",
+        # Other prohibited
+        "knockoff","fake","weapon","weapons","stun guns","self defense","pepper spray",
+        "swastika","poppy","iv therapy","intravenous therapy","fetal doppler",
+        "heartbeat monitor","batons","drugged",
+        # Competitor/Amazon endorsement
+        "amazon approved","amazon certified","amazon recommended","amazon endorsed",
+        "amazon authorized","amazon licensed","amazon verified",
     ],
     "try_to_avoid": [
-        "allergy free","allergy safe","anti aging","best seller","bonus","cold",
-        "filter","free","guarantee","healthier","healthy","proven",
-        "recommended by","tested","validated","natural","recyclable",
-        "repairing dead skin","treatment","warranty","weight loss",
-        "hypoallergenic","nano silver","green",
+        # Superlatives
+        "best","best seller","best selling","best buy","best deal","best price",
+        "best value","bestseller","#1","number one","top","top notch","top rated",
+        "top selling","amazing","award winning","champion","elite","finest","flawless",
+        "foremost","greatest","hallmark","highest rated","hot item","hottest item",
+        "ideal","impeccable","incomparable","in-demand","infallible","invincible",
+        "irresistible","leading","masterful","matchless","most popular","optimal",
+        "outstanding","paramount","peerless","perfect","pinnacle","premier","prime",
+        "pristine","professional quality","record-breaking","sought-after","superb",
+        "supreme","ultimate","unbeatable","unblemished","unmatched","unparalleled",
+        "unrivaled","magic solution","instant fix","the world's best","the world's strongest",
+        # Environmental (banned Oct 2024)
+        "eco-friendly","eco friendly","ecofriendly","environmentally friendly",
+        "earth-friendly","sustainable","biodegradable","compostable","home compostable",
+        "marine degradable","decomposable","degradable","carbon-reducing",
+        "all natural","all-natural","natural","recyclable","vegan","non-toxic",
+        "bpa free","bisphenol a","hypoallergenic","organic","green",
+        # Health claims (avoid)
+        "allergy free","allergy safe","anti aging","healthy","healthier","proven",
+        "recommended by","tested","validated","treatment","weight loss","hypoallergenic",
+        "nano silver","safe","harmless","non-poisonous","non-injurious","non-toxic",
+        "reduce anxiety","boost immunity","lower blood pressure","increase metabolism",
+        "suppress appetite","slimming","fat burning","keto approved","appetite suppressant",
+        # Pricing/Promo
+        "free","bonus","guarantee","money back","refund","warranty","price",
+        "on sale","best deal","limited time","buy now","add to cart","get yours now",
+        "shop now","don't miss","last chance","supplies won't last","available now",
+        "save","discount","bargain","cheap","cheapest","clearance","closeout","overstock",
+        "special offer","buy 1 get 1","wholesale","% off","affordable",
+        # Made in USA (requires FTC compliance)
+        "made in the usa","made in usa",
     ],
     "a_plus_restricted": [
+        # Strictly prohibited in A+ Content
         "approved","certified","drug","drugs","pearl","platinum","noncorrosive",
+        "satisfaction guaranteed","100% satisfaction","buy now","add to cart",
+        "get yours now","shop with us","free shipping","free gift","now","new","latest",
+        "affordable","bonus","warranty","guarantee","money back","copyright",
+        "trademark","patent pending","™","®","competitors","versus","vs.",
+        "better than","unlike other brands","unlike competitors",
     ],
 }
 
 def check_stop_words(text):
-    """Check text for Amazon stop words. Returns dict with found words by category."""
     if not text: return {}
     text_lower = text.lower()
     found = {"do_not_use": [], "try_to_avoid": [], "a_plus_restricted": []}
     for cat, words in AMAZON_STOP_WORDS.items():
         for w in words:
-            # Word boundary check
             pattern = r'\b' + re.escape(w) + r'\b'
             if re.search(pattern, text_lower):
                 found[cat].append(w)
     return {k: v for k, v in found.items() if v}
 
 def check_listing_stop_words(our_data):
-    """Check all listing fields for stop words."""
     fields = {
         "Title": our_data.get("title", ""),
         "Bullets": " ".join(our_data.get("feature_bullets", [])),
