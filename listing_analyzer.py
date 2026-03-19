@@ -67,6 +67,9 @@ def db_init():
 def db_save(asin, result, vision_text, our_title):
     conn = get_db()
     if not conn: return False
+    # Не сохраняем если анализ упал (overall = 0)
+    if pct(result.get("overall_score", 0)) == 0:
+        return False
     try:
         cosmo = pct(result.get("cosmo_analysis",{}).get("score",0)) if isinstance(result.get("cosmo_analysis"),dict) else 0
         rufus = pct(result.get("rufus_analysis",{}).get("score",0)) if isinstance(result.get("rufus_analysis"),dict) else 0
@@ -206,6 +209,231 @@ def get_asin(url):
 
 def sc(s): return "🟢" if s>=8 else ("🟡" if s>=6 else "🔴")
 def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"}.get(p,p)
+
+# ── Apify Reviews + Return Analysis ──────────────────────────────────────────
+def fetch_sp_returns(asin, days=30, log=None):
+    """Fetch return reasons from SP-API for our ASINs."""
+    import hashlib, hmac, urllib.parse
+    from datetime import datetime, timedelta, timezone
+
+    _log = log or (lambda m: None)
+
+    client_id     = st.secrets.get("LWA_CLIENT_ID","")
+    client_secret = st.secrets.get("LWA_CLIENT_SECRET","")
+    refresh_token = st.secrets.get("LWA_REFRESH_TOKEN","")
+    aws_key       = st.secrets.get("AWS_ACCESS_KEY_ID","")
+    aws_secret    = st.secrets.get("AWS_SECRET_ACCESS_KEY","")
+    marketplace   = st.secrets.get("MARKETPLACE_ID","ATVPDKIKX0DER")
+
+    if not all([client_id, client_secret, refresh_token, aws_key, aws_secret]):
+        _log("⚠️ SP-API credentials не заданы в Secrets")
+        return []
+
+    # Step 1: Get LWA access token
+    try:
+        _log("🔑 SP-API: получаю access token...")
+        tok_r = requests.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type":    "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id":     client_id,
+            "client_secret": client_secret,
+        }, timeout=30)
+        if not tok_r.ok:
+            _log(f"⚠️ LWA ошибка: {tok_r.status_code} {tok_r.text[:100]}")
+            return []
+        access_token = tok_r.json()["access_token"]
+    except Exception as e:
+        _log(f"⚠️ LWA: {e}"); return []
+
+    # Step 2: Request Returns report
+    try:
+        _log("📋 SP-API: запрашиваю отчёт возвратов...")
+        end_dt   = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(days=days)
+
+        endpoint = "https://sellingpartnerapi-na.amazon.com"
+        path     = "/reports/2021-06-30/reports"
+        body     = json.dumps({
+            "reportType":        "GET_CUSTOMER_RETURNS_DATA",
+            "marketplaceIds":    [marketplace],
+            "dataStartTime":     start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "dataEndTime":       end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        })
+
+        # AWS SigV4
+        import hmac as _hmac, hashlib as _hs
+        now      = datetime.now(timezone.utc)
+        amzdate  = now.strftime("%Y%m%dT%H%M%SZ")
+        datestamp= now.strftime("%Y%m%d")
+        region   = "us-east-1"
+        service  = "execute-api"
+
+        def _sign(key, msg):
+            return _hmac.new(key, msg.encode("utf-8"), _hs.sha256).digest()
+        def _get_sig_key(key, date, region, service):
+            return _sign(_sign(_sign(_sign(("AWS4"+key).encode("utf-8"), date), region), service), "aws4_request")
+
+        payload_hash = _hs.sha256(body.encode("utf-8")).hexdigest()
+        canonical = "\n".join([
+            "POST", path, "",
+            f"content-type:application/json\nhost:sellingpartnerapi-na.amazon.com\nx-amz-access-token:{access_token}\nx-amz-date:{amzdate}\n",
+            "content-type;host;x-amz-access-token;x-amz-date",
+            payload_hash
+        ])
+        string_to_sign = "\n".join([
+            "AWS4-HMAC-SHA256", amzdate,
+            f"{datestamp}/{region}/{service}/aws4_request",
+            _hs.sha256(canonical.encode("utf-8")).hexdigest()
+        ])
+        sig_key   = _get_sig_key(aws_secret, datestamp, region, service)
+        signature = _hmac.new(sig_key, string_to_sign.encode("utf-8"), _hs.sha256).hexdigest()
+        auth      = (f"AWS4-HMAC-SHA256 Credential={aws_key}/{datestamp}/{region}/{service}/aws4_request, "
+                     f"SignedHeaders=content-type;host;x-amz-access-token;x-amz-date, Signature={signature}")
+
+        headers = {
+            "Content-Type":       "application/json",
+            "x-amz-access-token": access_token,
+            "x-amz-date":         amzdate,
+            "Authorization":      auth,
+        }
+        rep_r = requests.post(endpoint + path, headers=headers, data=body, timeout=60)
+        if not rep_r.ok:
+            _log(f"⚠️ Report request: {rep_r.status_code} {rep_r.text[:200]}")
+            return []
+
+        report_id = rep_r.json().get("reportId","")
+        _log(f"✅ Report requested: {report_id}")
+
+        # Step 3: Poll for completion
+        import time
+        for attempt in range(20):
+            time.sleep(10)
+            status_r = requests.get(
+                f"{endpoint}/reports/2021-06-30/reports/{report_id}",
+                headers=headers, timeout=30)
+            if not status_r.ok: continue
+            status = status_r.json().get("processingStatus","")
+            _log(f"⏳ Report status: {status} ({attempt+1}/20)")
+            if status == "DONE":
+                doc_id = status_r.json().get("reportDocumentId","")
+                break
+            if status in ("CANCELLED","FATAL"):
+                _log(f"❌ Report {status}")
+                return []
+        else:
+            _log("⚠️ Report timeout"); return []
+
+        # Step 4: Download report
+        doc_r = requests.get(
+            f"{endpoint}/reports/2021-06-30/documents/{doc_id}",
+            headers=headers, timeout=30)
+        if not doc_r.ok: return []
+        doc_url = doc_r.json().get("url","")
+        csv_r   = requests.get(doc_url, timeout=60)
+        if not csv_r.ok: return []
+
+        # Step 5: Parse CSV → filter by ASIN
+        import csv, io
+        rows = []
+        reader = csv.DictReader(io.StringIO(csv_r.text), delimiter="\t")
+        for row in reader:
+            if not asin or row.get("asin","") == asin or row.get("ASIN","") == asin:
+                rows.append({
+                    "order_id":    row.get("order-id", row.get("order_id","")),
+                    "return_date": row.get("return-date", row.get("return_date","")),
+                    "reason":      row.get("reason",""),
+                    "comment":     row.get("customer-comments", row.get("customer_comments","")),
+                    "asin":        row.get("asin", row.get("ASIN","")),
+                })
+        _log(f"✅ SP-API returns: {len(rows)} возвратов для {asin}")
+        return rows
+
+    except Exception as e:
+        _log(f"⚠️ SP-API returns: {e}")
+        return []
+
+def analyze_sp_returns(returns, product_title, asin, lang="ru"):
+    """AI analysis of SP-API return data."""
+    if not returns: return "Нет данных о возвратах"
+    lang_name = "Russian" if lang == "ru" else "English"
+
+    # Aggregate reasons
+    reasons = {}
+    for r in returns:
+        reason = r.get("reason","Unknown")
+        reasons[reason] = reasons.get(reason, 0) + 1
+
+    total = len(returns)
+    reasons_text = "\n".join([f"- {k}: {v} ({v*100//total}%)" for k,v in sorted(reasons.items(), key=lambda x:-x[1])])
+    comments = "\n".join([f"[{r.get('return_date','')}] {r.get('reason','')} — {r.get('comment','')[:150]}"
+                          for r in returns[:15] if r.get("comment")])
+
+    prompt = f"""Analyze these Amazon return data for: {product_title} (ASIN: {asin})
+
+RETURN REASONS SUMMARY ({total} total returns, last 30 days):
+{reasons_text}
+
+CUSTOMER COMMENTS:
+{comments}
+
+Provide:
+1. Top 3 root causes with % and whether it's LISTING issue or PRODUCT issue
+2. Specific listing fixes (title/bullets/photos/size chart) to reduce returns
+3. Risk assessment: is this heading toward "Frequently Returned" badge?
+4. Priority actions ranked by impact
+
+Be specific. Use actual data from the returns. Respond in {lang_name}."""
+
+    return ai_call("Amazon returns expert. Actionable analysis only.", prompt, max_tokens=2000)
+
+def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
+    """Fetch 1, 2, 3-star reviews via Apify — 10 each = 30 total."""
+    api_token = st.secrets.get("APIFY_API_TOKEN","")
+    if not api_token:
+        if log: log("⚠️ APIFY_API_TOKEN не задан в Secrets")
+        return []
+    endpoint = f"https://api.apify.com/v2/acts/webdatalabs~amazon-reviews-scraper/run-sync-get-dataset-items?token={api_token}"
+    all_reviews = []
+    for star, label in [("one_star","1★"), ("two_star","2★"), ("three_star","3★")]:
+        payload = {"asin": asin, "domainCode": domain, "maxPages": max_pages, "sortBy": "recent", "filterByStar": star}
+        try:
+            if log: log(f"📥 Apify: {label} отзывы {asin}...")
+            r = requests.post(endpoint, json=payload, timeout=300)
+            if r.ok:
+                reviews = r.json() if isinstance(r.json(), list) else []
+                all_reviews.extend(reviews[:10])
+                if log: log(f"  ✅ {label}: {len(reviews[:10])} отзывов")
+        except Exception as e:
+            if log: log(f"⚠️ Apify {star}: {e}")
+    if log: log(f"✅ Всего: {len(all_reviews)} отзывов (1★+2★)")
+    return all_reviews
+
+def analyze_return_reasons(reviews, product_title, asin, lang="ru"):
+    """AI analysis of return reasons from 1-star reviews."""
+    if not reviews:
+        return "Нет отзывов для анализа"
+    lang_name = "Russian" if lang == "ru" else "English"
+    reviews_text = "\n".join([
+        f"[{r.get('rating','?')}★] {r.get('title','')} — {r.get('body', r.get('text',''))[:300]}"
+        for r in reviews[:10]
+    ])
+    prompt = f"""Analyze these 1-star Amazon reviews for product: {product_title} (ASIN: {asin})
+
+REVIEWS:
+{reviews_text}
+
+Identify the TOP return/complaint reasons. For each reason:
+1. What % of reviews mention it (estimate)
+2. Is it a LISTING problem (wrong description/photos) or PRODUCT problem (quality/design)?
+3. Specific fix recommendation
+
+Also provide:
+- Is_frequently_returned_risk: HIGH/MEDIUM/LOW
+- Quick wins: what can be fixed in the listing TODAY without changing the product
+
+Respond in {lang_name}. Be specific and actionable. Format as clear sections."""
+
+    return ai_call("Amazon return analysis expert. Be specific and data-driven.", prompt, max_tokens=2000)
 
 # ── Amazon Stop Words ─────────────────────────────────────────────────────────
 AMAZON_STOP_WORDS = {
@@ -1777,9 +2005,32 @@ def health_card():
     brand_h   = od.get("brand","")
     asin_h    = od.get("parent_asin","") or pi.get("ASIN","")
     price_h   = od.get("price","")
+    prev_price = od.get("previous_price","") or od.get("list_price","")
     rating_h  = od.get("average_rating","")
     reviews_h = pi.get("Customer Reviews",{}).get("ratings_count","")
     bsr_h     = str(pi.get("Best Sellers Rank",""))[:50]
+    coupon    = od.get("coupon_text","") or ("🎟️ Купон" if od.get("is_coupon_exists") else "")
+    promo     = od.get("promo_text","")
+    is_prime  = od.get("is_prime_exclusive") or od.get("is_prime")
+    bought    = od.get("number_of_people_bought","")
+
+    # Build price line
+    price_parts = []
+    if price_h:
+        price_str = f"💰 <b>{price_h}</b>"
+        if prev_price and prev_price != price_h:
+            price_str += f" <span style='text-decoration:line-through;opacity:0.5'>{prev_price}</span>"
+        price_parts.append(price_str)
+    if coupon:
+        price_parts.append(f"<span style='background:#16a34a;color:white;border-radius:4px;padding:1px 6px;font-size:0.78rem'>🎟️ {coupon}</span>")
+    if promo:
+        _promo_clean = promo.replace("Save","Save ").replace("Savings","").strip()[:40]
+        price_parts.append(f"<span style='background:#1d4ed8;color:white;border-radius:4px;padding:1px 6px;font-size:0.78rem'>📦 {_promo_clean}</span>")
+    if is_prime:
+        price_parts.append(f"<span style='background:#f59e0b;color:#1c1917;border-radius:4px;padding:1px 6px;font-size:0.78rem'>👑 Prime</span>")
+    if bought:
+        price_parts.append(f"<span style='opacity:0.7;font-size:0.78rem'>🛒 {bought}</span>")
+    price_line = "  ".join(price_parts)
 
     st.markdown(f"""
 <div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
@@ -1787,8 +2038,11 @@ def health_card():
     <div>
       <a href="https://www.amazon.com/dp/{asin_h}" target="_blank" style="font-size:0.8rem;opacity:0.6;color:#93c5fd;text-decoration:none">{brand_h} · {asin_h} ↗</a>
       <div style="font-size:1rem;font-weight:600;max-width:520px;line-height:1.4;margin-top:4px">{title_h[:80]}{"..." if tlen>80 else ""}</div>
-      <div style="display:flex;gap:14px;margin-top:8px;font-size:0.82rem;opacity:0.8;flex-wrap:wrap">
-        <span>💰 {price_h}</span><span>⭐ {rating_h} ({reviews_h} отз.)</span>
+      <div style="display:flex;gap:10px;margin-top:8px;font-size:0.82rem;flex-wrap:wrap;align-items:center">
+        {price_line}
+      </div>
+      <div style="display:flex;gap:14px;margin-top:6px;font-size:0.82rem;opacity:0.8;flex-wrap:wrap">
+        <span>⭐ {rating_h} ({reviews_h} отз.)</span>
         <span>📊 {bsr_h}</span>
         <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">📝 Title: {tlen} симв.</span>
       </div>
@@ -2209,12 +2463,58 @@ if page == "🏠 Обзор":
         st.markdown("""
 <div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:10px;padding:14px 18px;margin:8px 0">
 <div style="font-size:1.1rem;font-weight:800;color:#fca5a5">🔴 ВНИМАНИЕ: Amazon пометил листинг как "Часто возвращают"</div>
-<div style="color:#fca5a5;font-size:0.88rem;margin-top:6px;line-height:1.6">
-Amazon показывает покупателям предупреждение прямо на странице товара. Это <b>критично убивает конверсию</b>.<br>
-Причины: несоответствие описания реальному товару, проблемы с качеством, неверный размерный ряд, плохая упаковка.<br>
-<b>Приоритет #1</b> — разобраться с причиной возвратов до любых других улучшений листинга.
+<div style="color:#fca5a5;font-size:0.88rem;margin-top:6px;line-height:1.7">
+Amazon показывает покупателям предупреждение прямо на странице товара — это <b>критично убивает конверсию</b>.<br><br>
+<b>Как убрать метку:</b><br>
+1. Проверь соответствие фото и описания реальному товару — самая частая причина<br>
+2. Исправь размерную сетку — добавь точные замеры, фото на модели с указанием роста<br>
+3. Добавь видео распаковки — снижает ожидание vs реальность<br>
+4. Улучши упаковку — товар должен доходить без повреждений<br>
+5. Снизи % возвратов ниже ~10% за 30 дней — только тогда Amazon снимет метку
 </div>
 </div>""", unsafe_allow_html=True)
+
+    # Return analysis button — available always (not only for frequently_returned)
+    _our_asin_ret = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
+    if _our_asin_ret:
+        _ret_col1, _ret_col2, _ret_col3 = st.columns([2, 2, 3])
+        with _ret_col1:
+            if st.button("🔍 Анализ возвратов (1★+2★)", key="btn_return_analysis", use_container_width=True):
+                with st.spinner("📥 Загружаю 1★ отзывы через Apify..."):
+                    _ret_lines = []
+                    _ret_reviews = fetch_1star_reviews(_our_asin_ret, domain="com", max_pages=1, log=lambda m: _ret_lines.append(m))
+                if _ret_reviews:
+                    with st.spinner("🧠 AI анализирует..."):
+                        _ret_analysis = analyze_return_reasons(_ret_reviews, od.get("title",""), _our_asin_ret, lang=st.session_state.get("analysis_lang","ru"))
+                    st.session_state["_return_analysis"] = _ret_analysis
+                    st.session_state["_return_reviews_count"] = len(_ret_reviews)
+                    st.session_state["_return_source"] = "Apify 1★"
+                else:
+                    st.warning("Отзывы не загружены — проверь APIFY_API_TOKEN")
+        with _ret_col2:
+            if st.button("📦 Возвраты SP-API (наши)", key="btn_sp_returns", use_container_width=True):
+                _sp_lines = []
+                _sp_log = lambda m: _sp_lines.append(m)
+                _prog_sp = st.progress(0, text="🔑 Подключаюсь к SP-API...")
+                _sp_returns = fetch_sp_returns(_our_asin_ret, days=30, log=_sp_log)
+                _prog_sp.empty()
+                for _l in _sp_lines: st.caption(_l)
+                if _sp_returns:
+                    with st.spinner("🧠 AI анализирует причины возвратов..."):
+                        _sp_analysis = analyze_sp_returns(_sp_returns, od.get("title",""), _our_asin_ret, lang=st.session_state.get("analysis_lang","ru"))
+                    st.session_state["_return_analysis"] = _sp_analysis
+                    st.session_state["_return_reviews_count"] = len(_sp_returns)
+                    st.session_state["_return_source"] = "SP-API"
+                else:
+                    st.warning("SP-API: данные не получены — проверь credentials в Secrets")
+        with _ret_col3:
+            st.caption("1★ — публичные отзывы (любой ASIN) | SP-API — реальные данные возвратов (только наши)")
+
+        if st.session_state.get("_return_analysis"):
+            src = st.session_state.get("_return_source","")
+            cnt = st.session_state.get("_return_reviews_count",0)
+            with st.expander(f"📊 Анализ возвратов {src} — {cnt} записей", expanded=True):
+                st.markdown(st.session_state["_return_analysis"])
 
     st.divider()
 
@@ -3004,6 +3304,27 @@ elif _is_competitor_page:
     tlen = len(_t2); cprice = c.get("price",""); cbrand = c.get("brand","")
     crating = c.get("average_rating",""); crev = cpi.get("Customer Reviews",{}).get("ratings_count","")
     cbsr_s = str(cpi.get("Best Sellers Rank",""))[:50]
+    _cprev   = c.get("previous_price","") or c.get("list_price","")
+    _ccoupon = c.get("coupon_text","") or ("🎟️ Купон" if c.get("is_coupon_exists") else "")
+    _cpromo  = c.get("promo_text","")
+    _cbought = c.get("number_of_people_bought","")
+
+    # Competitor price line
+    _cprice_parts = []
+    if cprice:
+        _ps = f"💰 <b>{cprice}</b>"
+        if _cprev and _cprev != cprice:
+            _ps += f" <span style='text-decoration:line-through;opacity:0.5'>{_cprev}</span>"
+        _cprice_parts.append(_ps)
+    if _ccoupon:
+        _cprice_parts.append(f"<span style='background:#16a34a;color:white;border-radius:4px;padding:1px 6px;font-size:0.75rem'>🎟️ {_ccoupon}</span>")
+    if _cpromo:
+        _cprice_parts.append(f"<span style='background:#1d4ed8;color:white;border-radius:4px;padding:1px 6px;font-size:0.75rem'>📦 {_cpromo[:35]}</span>")
+    if _pr2:
+        _cprice_parts.append(f"<span style='background:#f59e0b;color:#1c1917;border-radius:4px;padding:1px 6px;font-size:0.75rem'>👑 Prime</span>")
+    if _cbought:
+        _cprice_parts.append(f"<span style='opacity:0.7;font-size:0.75rem'>🛒 {_cbought}</span>")
+    _cprice_line = "  ".join(_cprice_parts)
 
     st.title(f"🔴 Конкурент {cidx+1}")
 
@@ -3013,9 +3334,12 @@ elif _is_competitor_page:
     <div>
       <div style="font-size:0.78rem;opacity:0.6">{cbrand} - <a href="https://www.amazon.com/dp/{casin}" target="_blank" style="color:#93c5fd;text-decoration:none">{casin} ↗</a></div>
       <div style="font-size:0.95rem;font-weight:600;max-width:500px;margin-top:3px">{_t2[:80]}{"..." if tlen>80 else ""}</div>
-      <div style="display:flex;gap:12px;margin-top:7px;font-size:0.8rem;opacity:0.8;flex-wrap:wrap">
-        <span>Price: {cprice}</span><span>Rating: {crating} ({crev} reviews)</span>
-        <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">{tlen} chars</span>
+      <div style="display:flex;gap:8px;margin-top:7px;font-size:0.8rem;flex-wrap:wrap;align-items:center">
+        {_cprice_line}
+      </div>
+      <div style="display:flex;gap:12px;margin-top:5px;font-size:0.78rem;opacity:0.8;flex-wrap:wrap">
+        <span>⭐ {crating} ({crev} отз.)</span>
+        <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">{tlen} симв.</span>
       </div>
     </div>
     <div style="text-align:center">
@@ -3029,12 +3353,37 @@ elif _is_competitor_page:
     _vision_key = f"comp_vision_{cidx}"
     _cai_result = st.session_state.get(_cai_key)
 
-    # Frequently returned warning
+    # Frequently returned warning + analysis button
     if c.get("is_frequently_returned"):
         st.markdown("""
-<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:8px;padding:10px 14px;margin-bottom:8px">
-<span style="font-size:0.95rem;font-weight:800;color:#fca5a5">🔴 Amazon: "Часто возвращают" — конкурент имеет проблемы с возвратами!</span>
+<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:8px;padding:12px 16px;margin-bottom:8px">
+<div style="font-size:0.95rem;font-weight:800;color:#fca5a5">🔴 Amazon: "Часто возвращают" — конкурент имеет проблемы с возвратами!</div>
+<div style="color:#fca5a5;font-size:0.8rem;margin-top:6px;line-height:1.6">
+Это их слабое место — изучи причины и сделай наш листинг лучше по этим пунктам.
+</div>
 </div>""", unsafe_allow_html=True)
+
+    # Return analysis button for competitor (always available)
+    _comp_ret_col1, _comp_ret_col2 = st.columns([2,4])
+    with _comp_ret_col1:
+        if st.button("🔍 Анализ возвратов (1★+2★)", key=f"btn_comp_ret_{cidx}", use_container_width=True):
+            with st.spinner("📥 Загружаю 1★ отзывы..."):
+                _cret_reviews = fetch_1star_reviews(casin, domain="com", max_pages=1)
+            if _cret_reviews:
+                with st.spinner("🧠 AI анализирует..."):
+                    _cret_analysis = analyze_return_reasons(
+                        _cret_reviews, _t2, casin,
+                        lang=st.session_state.get("analysis_lang","ru"))
+                st.session_state[f"_comp_ret_{cidx}"] = _cret_analysis
+                st.session_state[f"_comp_ret_cnt_{cidx}"] = len(_cret_reviews)
+            else:
+                st.warning("Отзывы не загружены — проверь APIFY_API_TOKEN")
+    with _comp_ret_col2:
+        st.caption("10 однозвёздочных отзывов → AI находит слабые места конкурента")
+
+    if st.session_state.get(f"_comp_ret_{cidx}"):
+        with st.expander(f"📊 Анализ возвратов конкурента ({st.session_state.get(f'_comp_ret_cnt_{cidx}',0)} отзывов)", expanded=True):
+            st.markdown(st.session_state[f"_comp_ret_{cidx}"])
     _vision_key = f"comp_vision_{cidx}"
     _cai_result = st.session_state.get(_cai_key)
 
