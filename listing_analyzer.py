@@ -395,7 +395,12 @@ def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
     endpoint = f"https://api.apify.com/v2/acts/webdatalabs~amazon-reviews-scraper/run-sync-get-dataset-items?token={api_token}"
     all_reviews = []
     for star, label in [("one_star","1★"), ("two_star","2★"), ("three_star","3★")]:
-        payload = {"asin": asin, "domainCode": domain, "maxPages": max_pages, "sortBy": "recent", "filterByStar": star}
+        payload = {
+            "productUrls": [{"url": f"https://www.amazon.com/dp/{asin}"}],
+            "maxReviews": 10,
+            "filterByStar": star,
+            "sortBy": "recent",
+        }
         try:
             if log: log(f"📥 Apify: {label} отзывы {asin}...")
             r = requests.post(endpoint, json=payload, timeout=300)
