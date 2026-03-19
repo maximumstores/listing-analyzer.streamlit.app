@@ -1817,8 +1817,12 @@ def page_history():
     sel = st.selectbox("ASIN", asin_opts)
     sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
 
-    # Amazon link
-    st.markdown(f'<a href="https://www.amazon.com/dp/{sel_asin}" target="_blank" style="color:#93c5fd;font-size:0.85rem">🔗 Открыть на Amazon → amazon.com/dp/{sel_asin}</a>', unsafe_allow_html=True)
+    # Full title + Amazon link
+    _sel_data = next((a for a in all_asins if a["asin"] == sel_asin), {})
+    _full_title = _sel_data.get("title","")
+    if _full_title:
+        st.caption(f"📦 {_full_title}")
+    st.markdown(f'<a href="https://www.amazon.com/dp/{sel_asin}" target="_blank" style="color:#93c5fd;font-size:0.85rem">🔗 amazon.com/dp/{sel_asin} ↗</a>', unsafe_allow_html=True)
 
     history = db_history(sel_asin, limit=20)
     if not history:
