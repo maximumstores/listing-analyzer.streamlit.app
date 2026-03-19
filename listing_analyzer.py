@@ -2053,6 +2053,9 @@ def health_card():
     if bought:
         price_parts.append(f"<span style='opacity:0.7;font-size:0.78rem'>🛒 {bought}</span>")
     price_line = "  ".join(price_parts)
+    _rat_val = float(rating_h or 0)
+    _rat_c = "#22c55e" if _rat_val >= 4.4 else ("#f59e0b" if _rat_val >= 4.3 else "#ef4444")
+    _title_c = "#fca5a5" if tlen > 125 else "#86efac"
 
     st.markdown(f"""
 <div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
@@ -2063,10 +2066,10 @@ def health_card():
       <div style="display:flex;gap:10px;margin-top:8px;font-size:0.82rem;flex-wrap:wrap;align-items:center">
         {price_line}
       </div>
-      <div style="display:flex;gap:14px;margin-top:6px;font-size:0.82rem;opacity:0.8;flex-wrap:wrap">
-        <span>⭐ {rating_h} ({reviews_h} отз.)</span>
-        <span>📊 {bsr_h}</span>
-        <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">📝 Title: {tlen} симв.</span>
+      <div style="display:flex;gap:14px;margin-top:6px;font-size:0.82rem;flex-wrap:wrap">
+        <span style="color:{_rat_c};font-weight:600">&#11088; {rating_h} ({reviews_h} отз.)</span>
+        <span style="opacity:0.8">&#128202; {bsr_h}</span>
+        <span style="color:{_title_c}">&#128221; Title: {tlen} симв.</span>
       </div>
     </div>
     <div style="text-align:center">
@@ -2654,7 +2657,7 @@ elif page == "📸 Фото":
                     st.markdown(
                         f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px">'
                         f'<span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span>'
-                        f'<span style="font-size:0.82rem;color:#e2e8f0">{etxt}</span></div>',
+                        f'<span style="font-size:0.82rem;color:#1e293b">{etxt}</span></div>',
                         unsafe_allow_html=True)
         st.stop()
 
@@ -2717,7 +2720,7 @@ elif page == "📸 Фото":
                     st.markdown(
                         f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px">'
                         f'<span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span>'
-                        f'<span style="font-size:0.82rem;color:#e2e8f0">{etxt}</span></div>',
+                        f'<span style="font-size:0.82rem;color:#1e293b">{etxt}</span></div>',
                         unsafe_allow_html=True)
                 if not stxt and text:
                     with st.expander("🔧 Raw (Strength не распознан)"):
@@ -3345,7 +3348,7 @@ elif _is_competitor_page:
         {_cprice_line}
       </div>
       <div style="display:flex;gap:12px;margin-top:5px;font-size:0.78rem;opacity:0.8;flex-wrap:wrap">
-        <span>⭐ {crating} ({crev} отз.)</span>
+        <span style="color:{'#22c55e' if float(crating or 0)>=4.4 else ('#f59e0b' if float(crating or 0)>=4.3 else '#ef4444')};font-weight:600">⭐ {crating} ({crev} отз.)</span>
         <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">{tlen} симв.</span>
       </div>
     </div>
@@ -3578,7 +3581,7 @@ elif _is_competitor_page:
                                 st.markdown(
                                     f'<div style="background:{_ec2}22;border-left:3px solid {_ec2};border-radius:6px;padding:8px 12px;margin-top:4px">'
                                     f'<span style="font-size:0.8rem;font-weight:700;color:{_ec2}">😶 ЭМОЦИЯ: </span>'
-                                    f'<span style="font-size:0.82rem">{_etxt2}</span></div>',
+                                    f'<span style="font-size:0.82rem;color:#1e293b">{_etxt2}</span></div>',
                                     unsafe_allow_html=True)
             else:
                 if not st.session_state.get("do_comp_vision", True):
