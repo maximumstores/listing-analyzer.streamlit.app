@@ -2564,26 +2564,196 @@ Amazon показывает покупателям предупреждение 
     priority_improvements = r.get("priority_improvements", [])
     if actions or priority_improvements:
         st.subheader("🎯 Приоритетные действия")
+
+        # Merge priority_improvements + actions into unified card list
+        _all_actions = []
         for item in priority_improvements:
-            with st.container(border=True):
-                st.markdown(f"**{item}**")
-        for i, a in enumerate(actions):
+            _all_actions.append({"action": item, "impact": "HIGH", "effort": "MEDIUM", "details": ""})
+        for a in actions:
             if isinstance(a, dict):
-                with st.container(border=True):
-                    c1,c2,c3 = st.columns([5,1,1])
-                    c1.markdown(f"**{i+1}. {a.get('action','')}**")
-                    c2.markdown(badge(a.get("impact","MEDIUM")))
-                    c3.caption(f"Усилия: {a.get('effort','')}")
-                    if a.get("details"): st.caption(a["details"])
+                _all_actions.append(a)
+
+        # Sort: HIGH first
+        _order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+        _all_actions.sort(key=lambda x: _order.get(x.get("impact","MEDIUM"), 1))
+
+        # Group by impact
+        _high = [a for a in _all_actions if a.get("impact","") == "HIGH"]
+        _med  = [a for a in _all_actions if a.get("impact","") == "MEDIUM"]
+        _low  = [a for a in _all_actions if a.get("impact","") == "LOW"]
+
+        def _action_cards(items, color, label, icon):
+            if not items: return
+            st.markdown(f'<div style="font-size:0.75rem;font-weight:700;color:{color};letter-spacing:0.08em;margin:12px 0 6px">{icon} {label} — {len(items)} действий</div>', unsafe_allow_html=True)
+            for i, a in enumerate(items):
+                _effort = a.get("effort","MEDIUM")
+                _effort_c = {"LOW":"#22c55e","MEDIUM":"#f59e0b","HIGH":"#ef4444"}.get(_effort,"#94a3b8")
+                _act_text = a.get("action","")
+                _det_text = a.get("details","")
+                st.markdown(f"""<div style="background:#0f172a;border-left:4px solid {color};border-radius:8px;padding:12px 16px;margin-bottom:8px">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+  <div style="font-size:0.9rem;font-weight:600;color:#e2e8f0;flex:1">{_act_text}</div>
+  <span style="background:{_effort_c}22;color:{_effort_c};border:1px solid {_effort_c};border-radius:4px;padding:2px 8px;font-size:0.72rem;font-weight:700;white-space:nowrap">⚡ {_effort}</span>
+</div>
+{f'<div style="font-size:0.8rem;color:#94a3b8;margin-top:6px;line-height:1.5">{_det_text}</div>' if _det_text else ''}
+</div>""", unsafe_allow_html=True)
+
+        _action_cards(_high, "#ef4444", "КРИТИЧНО", "🔴")
+        _action_cards(_med,  "#f59e0b", "ВАЖНО",    "🟡")
+        _action_cards(_low,  "#22c55e", "УЛУЧШЕНИЕ","🟢")
 
     if r.get("missing_chars"):
         st.subheader("🔍 Отсутствующие характеристики")
-        for ch in r["missing_chars"]:
-            with st.container(border=True):
-                col1,col2 = st.columns([5,1])
-                col1.markdown(f"**{ch.get('name','')}**")
-                col1.caption(ch.get("how_competitors_use",""))
-                col2.markdown(badge(ch.get("priority","MEDIUM")))
+        _mc_high = [c for c in r["missing_chars"] if c.get("priority","") == "HIGH"]
+        _mc_med  = [c for c in r["missing_chars"] if c.get("priority","") != "HIGH"]
+        for _mc_group, _mc_color in [(_mc_high,"#ef4444"), (_mc_med,"#f59e0b")]:
+            for ch in _mc_group:
+                st.markdown(f"""<div style="background:#0f172a;border-left:4px solid {_mc_color};border-radius:8px;padding:10px 14px;margin-bottom:6px">
+<div style="font-size:0.88rem;font-weight:600;color:#e2e8f0">{ch.get('name','')}</div>
+<div style="font-size:0.78rem;color:#94a3b8;margin-top:3px">{ch.get('how_competitors_use','')}</div>
+</div>""", unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("🤖 AI Инструменты")
+
+    _tool_cols = st.columns(5)
+
+    # 1. AI Listing Rewriter
+    with _tool_cols[0]:
+        if st.button("✍️ Переписать листинг", use_container_width=True, key="btn_rewriter"):
+            with st.spinner("✍️ AI пишет title + 5 буллетов..."):
+                _rw_prompt = f"""You are an expert Amazon listing copywriter. Using the full analysis below, write an optimized listing.
+
+PRODUCT: {od.get('title','')}
+ASIN: {od.get('parent_asin','')}
+
+ANALYSIS CONTEXT:
+- VPC gaps: {r.get('vpc_analysis',{}).get('pain_relievers_missing',[])}
+- JTBD Job Story: {r.get('jtbd_analysis',{}).get('job_story','')}
+- Title gaps: {r.get('title_gaps',[])}
+- Bullets gaps: {r.get('bullets_gaps',[])}
+- Stop words to avoid: check all output
+
+Write:
+1. TITLE (max 125 chars, include material+type+gender+use case)
+2. BULLET 1-5 (max 200 chars each, format: "Feature: Benefit. Context.")
+
+Rules: NO stop words (free/best/guarantee/organic/natural/safe), include job context, temperature ranges if relevant, quantify benefits.
+Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English')}."""
+                _rw = ai_call("Amazon listing copywriter. Write compelling, compliant copy.", _rw_prompt, max_tokens=1500)
+                st.session_state["_ai_rewrite"] = _rw
+
+    # 2. Keyword Gap
+    with _tool_cols[1]:
+        if st.button("🔑 Keyword Gap", use_container_width=True, key="btn_kwgap"):
+            with st.spinner("🔑 Анализирую keyword gaps..."):
+                _comps = st.session_state.get("comp_data_list", [])
+                _our_words = set((od.get("title","") + " " + " ".join(od.get("feature_bullets",[]))).lower().split())
+                _comp_texts = []
+                for _cd in _comps:
+                    _comp_texts.append(_cd.get("title","") + " " + " ".join(_cd.get("feature_bullets",[])))
+                _comp_all = " ".join(_comp_texts).lower()
+                _kw_prompt = f"""Analyze keyword gaps between OUR listing and COMPETITORS.
+
+OUR TITLE+BULLETS:
+{od.get('title','')}
+{chr(10).join(od.get('feature_bullets',[]))}
+
+COMPETITORS COMBINED:
+{_comp_all[:3000]}
+
+Find TOP 15 keywords/phrases that:
+1. Appear in competitor listings but NOT in ours
+2. Are high-value search terms (not stop words)
+3. Would improve ranking if added
+
+Format each as:
+- KEYWORD | where competitors use it | where to add in our listing (title/bullet/backend)
+
+Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English')}."""
+                _kw = ai_call("Amazon SEO expert.", _kw_prompt, max_tokens=1200)
+                st.session_state["_ai_kwgap"] = _kw
+
+    # 3. Health Score Chart
+    with _tool_cols[2]:
+        if st.button("📈 График Health Score", use_container_width=True, key="btn_chart"):
+            _hist_asin = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
+            if _hist_asin:
+                _hconn = get_db()
+                if _hconn:
+                    try:
+                        _hcur = _hconn.cursor()
+                        _hcur.execute("SELECT created_at, overall_score FROM listing_analysis WHERE asin=%s AND overall_score>0 ORDER BY created_at ASC LIMIT 30", (_hist_asin,))
+                        _hrows = _hcur.fetchall()
+                        _hconn.close()
+                        st.session_state["_health_chart"] = _hrows
+                    except: pass
+
+    # 4. Review Mining (позитив)
+    with _tool_cols[3]:
+        if st.button("💬 Mining отзывов", use_container_width=True, key="btn_review_mine"):
+            _mine_asin = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
+            if _mine_asin:
+                with st.spinner("📥 Загружаю 4-5★ отзывы..."):
+                    _mine_reviews = fetch_1star_reviews(_mine_asin, domain="com", max_pages=1)
+                if _mine_reviews:
+                    _pos = [rv for rv in _mine_reviews if int(float(str(rv.get("rating",1) or 1).split()[0])) >= 4][:15]
+                    with st.spinner("🧠 AI извлекает инсайты..."):
+                        _mine_text = "\n".join([f"[{rv.get('rating')}★] {rv.get('title','')} — {rv.get('body',rv.get('text',rv.get('reviewText','')))[:200]}" for rv in _pos])
+                        _mine_prompt = f"""Extract buyer insights from these 4-5★ reviews for: {od.get('title','')}
+
+REVIEWS:
+{_mine_text}
+
+Extract:
+1. TOP 5 phrases buyers use to describe what they love (exact language to use in bullets)
+2. TOP 3 use cases/scenarios mentioned
+3. TOP 3 objections buyers say were WRONG (e.g. "I was worried about X but...")
+4. Suggested bullet rewrites using actual buyer language
+
+Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English')}."""
+                        _mine_result = ai_call("Amazon VOC expert.", _mine_prompt, max_tokens=1200)
+                        st.session_state["_ai_mining"] = _mine_result
+
+    # 5. AI Chat
+    with _tool_cols[4]:
+        st.markdown('<div style="font-size:0.75rem;color:#94a3b8;text-align:center;margin-top:4px">💬 AI Chat</div>', unsafe_allow_html=True)
+        _chat_q = st.text_input("Спроси про листинг", placeholder="Почему низкий BSR?", key="ai_chat_input", label_visibility="collapsed")
+        if _chat_q and st.session_state.get("_chat_last") != _chat_q:
+            st.session_state["_chat_last"] = _chat_q
+            with st.spinner("🧠"):
+                _chat_ctx = f"Listing: {od.get('title','')} | Overall: {pct(r.get('overall_score',0))}% | BSR: {od.get('product_information',{}).get('Best Sellers Rank','')} | Gaps: {r.get('title_gaps',[])} {r.get('bullets_gaps',[])}"
+                _chat_ans = ai_call("Amazon expert. Answer concisely about this listing.", f"Context: {_chat_ctx}\n\nQuestion: {_chat_q}", max_tokens=600)
+                st.session_state["_ai_chat_ans"] = _chat_ans
+
+    # Show results
+    if st.session_state.get("_ai_rewrite"):
+        with st.expander("✍️ Переписанный листинг", expanded=True):
+            st.markdown(st.session_state["_ai_rewrite"])
+            if st.button("📋 Скопировать", key="btn_copy_rw"):
+                st.code(st.session_state["_ai_rewrite"])
+
+    if st.session_state.get("_ai_kwgap"):
+        with st.expander("🔑 Keyword Gap — что добавить", expanded=True):
+            st.markdown(st.session_state["_ai_kwgap"])
+
+    if st.session_state.get("_health_chart"):
+        with st.expander("📈 История Health Score", expanded=True):
+            _rows = st.session_state["_health_chart"]
+            if len(_rows) >= 2:
+                import pandas as pd
+                _df = pd.DataFrame(_rows, columns=["Дата","Score"])
+                st.line_chart(_df.set_index("Дата"))
+            else:
+                st.info(f"Данных пока мало ({len(_rows)} запись) — нужно минимум 2 анализа")
+
+    if st.session_state.get("_ai_mining"):
+        with st.expander("💬 Voice of Customer — язык покупателей", expanded=True):
+            st.markdown(st.session_state["_ai_mining"])
+
+    if st.session_state.get("_ai_chat_ans"):
+        with st.expander("💬 AI ответ", expanded=True):
+            st.markdown(st.session_state["_ai_chat_ans"])
 
     st.divider()
     st.subheader("📥 Скачать PDF отчёт")
