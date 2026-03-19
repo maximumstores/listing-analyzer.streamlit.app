@@ -407,7 +407,7 @@ def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
             if log: log(f"  → тип: {type(data).__name__}, кол-во: {len(data) if isinstance(data, list) else '?'}")
             reviews = data if isinstance(data, list) else []
             # Фильтруем 1★ 2★ 3★ локально
-            low_reviews = [rv for rv in reviews if rv.get("rating","").startswith(("1","2","3"))]
+            low_reviews = [rv for rv in reviews if int(rv.get("rating", 5) or 5) <= 3]
             all_reviews = low_reviews[:30]
             if log: log(f"  ✅ Всего: {len(reviews)}, 1-3★: {len(all_reviews)}")
         else:
@@ -423,8 +423,8 @@ def analyze_return_reasons(reviews, product_title, asin, lang="ru"):
         return "Нет отзывов для анализа"
     lang_name = "Russian" if lang == "ru" else "English"
     reviews_text = "\n".join([
-        f"[{r.get('rating','?')}★] {r.get('title','')} — {r.get('body', r.get('text',''))[:300]}"
-        for r in reviews[:10]
+        f"[{r.get('rating','?')}★] {r.get('title', r.get('reviewTitle',''))} — {r.get('body', r.get('text', r.get('reviewText', r.get('content',''))))[:300]}"
+        for r in reviews[:30]
     ])
     prompt = f"""Analyze these 1-star Amazon reviews for product: {product_title} (ASIN: {asin})
 
