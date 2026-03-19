@@ -406,10 +406,17 @@ def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
             data = r.json()
             if log: log(f"  → тип: {type(data).__name__}, кол-во: {len(data) if isinstance(data, list) else '?'}")
             reviews = data if isinstance(data, list) else []
-            # Фильтруем 1★ 2★ 3★ локально
-            low_reviews = [rv for rv in reviews if int(rv.get("rating", 5) or 5) <= 3]
-            all_reviews = low_reviews[:30]
-            if log: log(f"  ✅ Всего: {len(reviews)}, 1-3★: {len(all_reviews)}")
+            # Debug: show first 3 rating values
+            if log and reviews:
+                sample = [(rv.get("rating"), type(rv.get("rating")).__name__) for rv in reviews[:3]]
+                log(f"  → sample ratings: {sample}")
+            # Фильтруем 1★ 2★ 3★ локально — берём всё если нет низких
+            try:
+                low_reviews = [rv for rv in reviews if int(float(str(rv.get("rating", 5) or 5).split()[0])) <= 3]
+            except:
+                low_reviews = []
+            all_reviews = low_reviews[:30] if low_reviews else reviews[:30]
+            if log: log(f"  ✅ Всего: {len(reviews)}, 1-3★: {len(low_reviews)}, передаём: {len(all_reviews)}")
         else:
             if log: log(f"  ❌ {r.status_code}: {r.text[:200]}")
     except Exception as e:
