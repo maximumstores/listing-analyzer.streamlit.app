@@ -404,19 +404,14 @@ def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
         if log: log(f"  → HTTP {r.status_code}")
         if r.ok:
             data = r.json()
-            if log: log(f"  → тип: {type(data).__name__}, кол-во: {len(data) if isinstance(data, list) else '?'}")
+            if log: log(f"  → {len(data) if isinstance(data, list) else 0} отзывов получено")
             reviews = data if isinstance(data, list) else []
-            # Debug: show first 3 rating values
-            if log and reviews:
-                sample = [(rv.get("rating"), type(rv.get("rating")).__name__) for rv in reviews[:3]]
-                log(f"  → sample ratings: {sample}")
-            # Фильтруем 1★ 2★ 3★ локально — берём всё если нет низких
             try:
                 low_reviews = [rv for rv in reviews if int(float(str(rv.get("rating", 5) or 5).split()[0])) <= 3]
             except:
                 low_reviews = []
             all_reviews = low_reviews[:30] if low_reviews else reviews[:30]
-            if log: log(f"  ✅ Всего: {len(reviews)}, 1-3★: {len(low_reviews)}, передаём: {len(all_reviews)}")
+            if log: log(f"  ✅ 1-3★: {len(low_reviews)}, передаём: {len(all_reviews)}")
         else:
             if log: log(f"  ❌ {r.status_code}: {r.text[:200]}")
     except Exception as e:
@@ -2504,7 +2499,7 @@ Amazon показывает покупателям предупреждение 
     # Return analysis button — available always (not only for frequently_returned)
     _our_asin_ret = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
     if _our_asin_ret:
-        _ret_col1, _ret_col2, _ret_col3 = st.columns([2, 2, 3])
+        _ret_col1, _ret_col2 = st.columns([2, 5])
         with _ret_col1:
             if st.button("🔍 Анализ возвратов (1★+2★+3★)", key="btn_return_analysis", use_container_width=True):
                 _ret_lines = []
@@ -2516,27 +2511,11 @@ Amazon показывает покупателям предупреждение 
                         _ret_analysis = analyze_return_reasons(_ret_reviews, od.get("title",""), _our_asin_ret, lang=st.session_state.get("analysis_lang","ru"))
                     st.session_state["_return_analysis"] = _ret_analysis
                     st.session_state["_return_reviews_count"] = len(_ret_reviews)
-                    st.session_state["_return_source"] = "Apify 1★"
+                    st.session_state["_return_source"] = "Apify"
                 else:
                     st.warning("Отзывы не загружены — проверь APIFY_API_TOKEN")
         with _ret_col2:
-            if st.button("📦 Возвраты SP-API (наши)", key="btn_sp_returns", use_container_width=True):
-                _sp_lines = []
-                _sp_log = lambda m: _sp_lines.append(m)
-                _prog_sp = st.progress(0, text="🔑 Подключаюсь к SP-API...")
-                _sp_returns = fetch_sp_returns(_our_asin_ret, days=30, log=_sp_log)
-                _prog_sp.empty()
-                for _l in _sp_lines: st.caption(_l)
-                if _sp_returns:
-                    with st.spinner("🧠 AI анализирует причины возвратов..."):
-                        _sp_analysis = analyze_sp_returns(_sp_returns, od.get("title",""), _our_asin_ret, lang=st.session_state.get("analysis_lang","ru"))
-                    st.session_state["_return_analysis"] = _sp_analysis
-                    st.session_state["_return_reviews_count"] = len(_sp_returns)
-                    st.session_state["_return_source"] = "SP-API"
-                else:
-                    st.warning("SP-API: данные не получены — проверь credentials в Secrets")
-        with _ret_col3:
-            st.caption("1★ — публичные отзывы (любой ASIN) | SP-API — реальные данные возвратов (только наши)")
+            st.caption("Загружает отзывы 1-3★ → AI находит топ причины возвратов и что исправить в листинге")
 
         if st.session_state.get("_return_analysis"):
             src = st.session_state.get("_return_source","")
