@@ -397,9 +397,9 @@ def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
     for star, label in [("one_star","1★"), ("two_star","2★"), ("three_star","3★")]:
         payload = {
             "productUrls": [{"url": f"https://www.amazon.com/dp/{asin}"}],
-            "maxReviews": 10,
             "filterByStar": star,
             "sortBy": "recent",
+            "maxPages": max_pages,
         }
         try:
             if log: log(f"📥 Apify: {label} отзывы {asin}...")
