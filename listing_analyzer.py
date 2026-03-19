@@ -1341,7 +1341,8 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
                 log("⏭️ Vision фото пропущен (отключён)")
 
         # ── A+ Vision ─────────────────────────────────────────────────────────────
-        _aplus_urls = our_data.get("aplus_image_urls", [])
+        _aplus_urls = our_data.get("aplus_image_urls", our_data.get("aplus_images", []))
+        _aplus_urls = [re.sub(r'\.__CR[^.]+_PT0_SX\d+_V\d+___', '', u) if isinstance(u,str) else u for u in _aplus_urls if isinstance(u,str) and u.startswith("http")]
         if _aplus_urls and _do_aplus:
             _prog(35, f"🎨 A+ Vision: анализирую {len(_aplus_urls)} баннеров...")
             aplus_vision = analyze_aplus_vision(_aplus_urls, our_data, log, lang=_lang)
@@ -2052,10 +2053,10 @@ def health_card():
     health = pct(r.get("overall_score", r.get("health_score", 0)))
     hc     = "#22c55e" if health>=75 else ("#f59e0b" if health>=50 else "#ef4444")
     hl     = "Отличный листинг" if health>=75 else ("Есть над чем работать" if health>=50 else "Требует срочных улучшений")
-    title_h   = od.get("title","")
+    title_h   = od.get("title","") or st.session_state.get("_hist_title","")
     tlen      = len(title_h)
     brand_h   = od.get("brand","")
-    asin_h    = od.get("parent_asin","") or pi.get("ASIN","")
+    asin_h    = od.get("parent_asin","") or pi.get("ASIN","") or st.session_state.get("our_url_saved","")
     price_h   = od.get("price","")
     prev_price = od.get("previous_price","") or od.get("list_price","")
     rating_h  = od.get("average_rating","")
@@ -2065,6 +2066,9 @@ def health_card():
     promo     = od.get("promo_text","")
     is_prime  = od.get("is_prime_exclusive") or od.get("is_prime")
     bought    = od.get("number_of_people_bought","")
+
+    # If loaded from history — show notice instead of empty fields
+    _is_history = st.session_state.get("_hist_loaded") and not title_h
 
     # Build price line
     price_parts = []
@@ -2083,11 +2087,29 @@ def health_card():
     if bought:
         price_parts.append(f"<span style='opacity:0.7;font-size:0.78rem'>🛒 {bought}</span>")
     price_line = "  ".join(price_parts)
-    _rat_val = float(rating_h or 0)
-    _rat_c = "#22c55e" if _rat_val >= 4.4 else ("#f59e0b" if _rat_val >= 4.3 else "#ef4444")
-    _title_c = "#fca5a5" if tlen > 125 else "#86efac"
 
-    st.markdown(f"""
+    if _is_history:
+        st.markdown(f"""
+<div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+    <div>
+      <div style="font-size:0.8rem;opacity:0.6;color:#93c5fd">📅 Загружено из истории</div>
+      <div style="font-size:0.85rem;color:#94a3b8;margin-top:4px">Данные листинга недоступны — только оценки AI</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:3.5rem;font-weight:800;color:{hc};line-height:1">{health}%</div>
+      <div style="font-size:0.85rem;color:{hc};margin-top:2px">{hl}</div>
+    </div>
+  </div>
+  <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:14px">
+    <div style="background:{hc};width:{health}%;height:10px;border-radius:8px"></div>
+  </div>
+</div>""", unsafe_allow_html=True)
+    else:
+        _rat_val = float(rating_h or 0)
+        _rat_c = "#22c55e" if _rat_val >= 4.4 else ("#f59e0b" if _rat_val >= 4.3 else "#ef4444")
+        _title_c = "#fca5a5" if tlen > 125 else "#86efac"
+        st.markdown(f"""
 <div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
     <div>
@@ -2932,9 +2954,27 @@ elif page == "📸 Фото":
 elif page == "🎨 A+ Контент":
     st.title("🎨 A+ Контент")
     _av = st.session_state.get("aplus_vision","")
-    _av_urls = st.session_state.get("aplus_img_urls", od.get("aplus_image_urls",[]))
+    _av_urls = st.session_state.get("aplus_img_urls", [])
+    if not _av_urls:
+        _av_urls = od.get("aplus_image_urls", od.get("aplus_images", []))
+        # Clean URLs just in case
+        _av_urls = [re.sub(r'\.__CR[^.]+_PT0_SX\d+_V\d+___', '', u) if isinstance(u,str) else u for u in _av_urls if isinstance(u,str) and u.startswith("http")]
+    _aplus_text = od.get("aplus_content","") or ""
+    _desc_text  = od.get("description","") or ""
 
-    if not _av and not _av_urls:
+    # A+ Text content (From the brand / Product description blocks)
+    if _aplus_text or (od.get("aplus") and _desc_text):
+        with st.expander("📄 A+ Текстовый контент (From the brand / Product description)", expanded=not _av_urls):
+            if _aplus_text:
+                st.markdown("**A+ Content:**")
+                st.markdown(str(_aplus_text)[:3000])
+            if od.get("aplus") and _desc_text:
+                st.markdown("**Product Description (часть A+):**")
+                st.markdown(str(_desc_text)[:2000])
+        if not _av_urls:
+            st.info("ℹ️ ScrapingDog вернул A+ как текст — баннеры недоступны через API. Это нормально для 'From the brand' модулей.")
+
+    if not _av and not _av_urls and not _aplus_text:
         if od.get("aplus"):
             st.warning("⚠️ A+ баннеры не проанализированы. Нажми **🔄 Обновить анализ** в меню слева.")
         else:
