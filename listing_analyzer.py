@@ -832,8 +832,15 @@ SCORING RUBRIC (each photo scored 1-10):
 
 CRITICAL PENALTIES (deduct immediately):
 -3 pts — Sold product hidden / barely visible (e.g. tank top under a shirt)
--2 pts — Main photo has clothing/accessories not included in purchase
+-2 pts — Main photo has clearly unrelated clothing/accessories NOT part of the product set (e.g. shoes/sneakers on a base layer listing, a jacket on a t-shirt listing)
 -2 pts — Main photo background is not pure white
+
+IMPORTANT EXCEPTIONS — do NOT penalize for:
+- Socks/underwear on base layer/thermal underwear listings (they are part of the outfit context)
+- Gloves on outerwear listings
+- Small decorative props in corners (ribbons, flowers, small icons)
+- Model's natural body parts (hands, face, feet without shoes)
+- Second item shown when product IS sold as a set/bundle
 
 BE STRICT: real problems must lower the score. 10/10 only if photo is perfect on ALL criteria.
 SCORE MEANINGS: 9-10=excellent, 7-8=good, 5-6=needs improvement, 1-4=poor/replace
@@ -865,8 +872,15 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 
 КРИТИЧЕСКИЕ ШТРАФЫ (вычитай сразу):
 -3 балла — Продаваемый товар скрыт / почти не виден
--2 балла — На главном фото одежда/аксессуары НЕ из комплекта
+-2 балла — На главном фото явно посторонняя одежда/обувь НЕ из комплекта (напр. кроссовки на листинге термобелья, куртка на листинге футболки)
 -2 балла — Фон главного фото не чисто белый
+
+ВАЖНЫЕ ИСКЛЮЧЕНИЯ — НЕ штрафовать за:
+- Носки/нижнее бельё на листингах термобелья/базового слоя (контекст ношения)
+- Перчатки на листингах верхней одежды
+- Небольшие декоративные элементы в углу кадра (ленточки, иконки)
+- Естественные части тела модели (руки, лицо, ступни без обуви)
+- Второй предмет если товар продаётся комплектом/набором
 
 БУДЬ СТРОГ: реальные проблемы должны снижать оценку. 10/10 только если фото идеально по ВСЕМ критериям.
 ЗНАЧЕНИЯ: 9-10=отлично, 7-8=хорошо, 5-6=требует улучшения, 1-4=слабо/заменить
