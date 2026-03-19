@@ -67,6 +67,7 @@ def db_init():
 def db_save(asin, result, vision_text, our_title):
     conn = get_db()
     if not conn: return False
+    if not result or not isinstance(result, dict): return False
     # Не сохраняем если анализ упал (overall = 0)
     if pct(result.get("overall_score", 0)) == 0:
         return False
@@ -1816,12 +1817,19 @@ def page_history():
     sel = st.selectbox("ASIN", asin_opts)
     sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
 
+    # Amazon link
+    st.markdown(f'<a href="https://www.amazon.com/dp/{sel_asin}" target="_blank" style="color:#93c5fd;font-size:0.85rem">🔗 Открыть на Amazon → amazon.com/dp/{sel_asin}</a>', unsafe_allow_html=True)
+
     history = db_history(sel_asin, limit=20)
     if not history:
         st.warning("Нет данных для этого ASIN")
         return
 
     latest = history[0]
+    # Фильтруем 0% записи из отображения таблицы
+    history_valid = [h for h in history if (h.get("overall") or 0) > 0]
+    if not history_valid:
+        st.info("Все записи в истории имеют Overall: 0% — это старые упавшие анализы. Запусти новый анализ.")
     st.subheader(f"Последний анализ: {latest['date'].strftime('%d.%m.%Y %H:%M')}")
 
     cols = st.columns(4)
@@ -1862,12 +1870,16 @@ def page_history():
 
     st.subheader("Все запуски")
     import pandas as pd
-    df = pd.DataFrame([{
-        "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
-        "Overall": h["overall"], "Title": h["title"], "Bullets": h["bullets"],
-        "Images": h["images"], "A+": h["aplus"], "COSMO": h["cosmo"], "Rufus": h["rufus"],
-    } for h in history])
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    history_show = [h for h in history if (h.get("overall") or 0) > 0]
+    if not history_show:
+        st.info("Нет успешных анализов — все записи с Overall 0% скрыты. Запусти новый анализ.")
+    else:
+        df = pd.DataFrame([{
+            "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
+            "Overall": h["overall"], "Title": h["title"], "Bullets": h["bullets"],
+            "Images": h["images"], "A+": h["aplus"], "COSMO": h["cosmo"], "Rufus": h["rufus"],
+        } for h in history_show])
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
     st.divider()
     st.subheader("🔍 Загрузить полный анализ из истории")
