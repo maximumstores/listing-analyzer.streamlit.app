@@ -399,10 +399,15 @@ def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
         try:
             if log: log(f"📥 Apify: {label} отзывы {asin}...")
             r = requests.post(endpoint, json=payload, timeout=300)
+            if log: log(f"  → HTTP {r.status_code}")
             if r.ok:
-                reviews = r.json() if isinstance(r.json(), list) else []
+                data = r.json()
+                if log: log(f"  → тип ответа: {type(data).__name__}, длина: {len(data) if isinstance(data, list) else 'не список'}")
+                reviews = data if isinstance(data, list) else []
                 all_reviews.extend(reviews[:10])
                 if log: log(f"  ✅ {label}: {len(reviews[:10])} отзывов")
+            else:
+                if log: log(f"  ❌ {r.status_code}: {r.text[:150]}")
         except Exception as e:
             if log: log(f"⚠️ Apify {star}: {e}")
     if log: log(f"✅ Всего: {len(all_reviews)} отзывов (1★+2★)")
@@ -1267,8 +1272,11 @@ NEVER give a vague rec like "mention X somewhere" — always specify exact place
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log, prog=None):
+    _steps_done = []
     def _prog(pct, text):
-        if prog: prog.progress(pct, text=text)
+        if prog:
+            _steps_done.append(text)
+            prog.progress(min(pct/100, 1.0), text=f"[{pct}%] {text}")
         log(text)
 
     asin = get_asin(our_url) or "unknown"
@@ -1292,15 +1300,18 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     else:
         _prog(5,  f"🌐 Загружаю данные листинга {asin}...")
         our_data, img_urls = scrapingdog_product(asin, log)
+        _prog(12, f"✅ Данные получены — {len(our_data.get('feature_bullets',[]))} буллетов, {len(img_urls)} фото")
 
         _prog(15, f"⬇️ Скачиваю фото ({len(img_urls)} шт.)...")
         images = download_images(img_urls, log) if img_urls else []
         st.session_state["images"] = images
+        _prog(22, f"✅ Фото скачаны: {len(images)} шт. готовы к анализу")
 
         # ── Vision фото (основной листинг) ───────────────────────────────────────
         if images and _do_vision:
-            _prog(30, "👁️ Vision анализ фото...")
+            _prog(25, f"👁️ Vision AI: анализирую фото 1/{len(images)}...")
             vision_result = analyze_vision(images, our_data, asin, log, lang=_lang)
+            _prog(33, f"✅ Vision готов: {len(images)} фото проанализировано")
         else:
             vision_result = ""
             if not images:
@@ -1311,16 +1322,16 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         # ── A+ Vision ─────────────────────────────────────────────────────────────
         _aplus_urls = our_data.get("aplus_image_urls", [])
         if _aplus_urls and _do_aplus:
-            _prog(35, f"🎨 A+ Vision: {len(_aplus_urls)} баннеров...")
+            _prog(35, f"🎨 A+ Vision: анализирую {len(_aplus_urls)} баннеров...")
             aplus_vision = analyze_aplus_vision(_aplus_urls, our_data, log, lang=_lang)
             st.session_state["aplus_vision"] = aplus_vision
-            log(f"✅ A+ Vision: {len(_aplus_urls)} баннеров проанализировано")
+            _prog(42, f"✅ A+ Vision готов: {len(_aplus_urls)} баннеров")
         else:
             st.session_state["aplus_vision"] = ""
             if _aplus_urls and not _do_aplus:
                 log("⏭️ A+ Vision пропущен (отключён)")
             else:
-                log("ℹ️ A+ баннеры не найдены (нет aplus_image_urls)")
+                log("ℹ️ A+ баннеры не найдены")
         st.session_state["aplus_img_urls"] = _aplus_urls
 
     # ── Конкуренты ────────────────────────────────────────────────────────────
@@ -1331,20 +1342,22 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     for i, url in enumerate(active[:3]):
         casin = get_asin(url)
         if not casin: continue
-        base_pct = 50 + i * (20 // n_active)
+        base_pct = 45 + i * 10
 
-        _prog(base_pct, f"🌐 Конкурент {i+1}: загружаю {casin}...")
+        _prog(base_pct,     f"🌐 Конкурент {i+1}/{len(active)}: загружаю {casin}...")
         cdata, cimg_urls = scrapingdog_product(casin, log)
         cdata["_input_asin"] = casin
         comp_data_list.append(cdata)
+        _prog(base_pct + 2, f"✅ Конкурент {i+1}: данные получены — {cdata.get('title','')[:30]}...")
 
         _prog(base_pct + 3, f"⬇️ Конкурент {i+1}: скачиваю фото...")
         cimgs_dl = download_images(cimg_urls[:5], log) if cimg_urls else []
 
-        # ── Vision конкурента — управляется чекбоксом ─────────────────────
+        # ── Vision конкурента ─────────────────────────────────────────────
         if cimgs_dl and _do_comp_vision:
-            _prog(base_pct + 5, f"👁️ Конкурент {i+1}: Vision анализ фото...")
+            _prog(base_pct + 5, f"👁️ Конкурент {i+1}: Vision {len(cimgs_dl)} фото...")
             cvision = analyze_vision(cimgs_dl, cdata, casin, log, lang=_lang)
+            _prog(base_pct + 6, f"✅ Конкурент {i+1}: Vision готов")
         else:
             cvision = ""
             if cimgs_dl:
@@ -1353,25 +1366,28 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         # ── A+ Vision конкурента ───────────────────────────────────────────
         _cap_urls = cdata.get("aplus_image_urls", [])
         if _cap_urls and _do_comp_vision:
-            _prog(base_pct + 6, f"🎨 Конкурент {i+1}: A+ Vision ({len(_cap_urls)} баннеров)...")
+            _prog(base_pct + 7, f"🎨 Конкурент {i+1}: A+ Vision ({len(_cap_urls)} баннеров)...")
             _caplus_vision = analyze_aplus_vision(_cap_urls, cdata, log, lang=_lang)
             st.session_state[f"comp_aplus_vision_{i}"] = _caplus_vision
             st.session_state[f"comp_aplus_urls_{i}"] = _cap_urls
         else:
             st.session_state[f"comp_aplus_vision_{i}"] = ""
-            st.session_state[f"comp_aplus_urls_{i}"] = _cap_urls  # URLs сохраняем всегда
+            st.session_state[f"comp_aplus_urls_{i}"] = _cap_urls
 
-        _prog(base_pct + 8, f"🧠 Конкурент {i+1}: AI анализ...")
+        _prog(base_pct + 8, f"🧠 Конкурент {i+1}: AI скоринг листинга...")
         cai = analyze_text(cdata, [], cvision, casin, log, lang=_lang, is_competitor=True)
+        _prog(base_pct + 9, f"✅ Конкурент {i+1}: готов — Overall {pct(cai.get('overall_score',0))}%")
 
         st.session_state[f"comp_ai_{i}"] = cai
         if cimgs_dl:
             st.session_state[f"comp_vision_{i}"] = (cimgs_dl, cvision)
 
-    _prog(75, "🧠 AI финальный анализ нашего листинга...")
+    _prog(78, "🧠 AI финальный анализ — COSMO + Rufus + JTBD + VPC...")
     result = analyze_text(our_data, comp_data_list, vision_result, asin, log, lang=_lang)
+    _prog(92, "💾 Сохраняю результаты в историю...")
     st.session_state['our_data'] = our_data
     st.session_state['comp_data_list'] = comp_data_list
+    _prog(98, "✅ Анализ завершён!")
     return result, vision_result
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -2479,10 +2495,11 @@ Amazon показывает покупателям предупреждение 
     if _our_asin_ret:
         _ret_col1, _ret_col2, _ret_col3 = st.columns([2, 2, 3])
         with _ret_col1:
-            if st.button("🔍 Анализ возвратов (1★+2★)", key="btn_return_analysis", use_container_width=True):
-                with st.spinner("📥 Загружаю 1★ отзывы через Apify..."):
-                    _ret_lines = []
+            if st.button("🔍 Анализ возвратов (1★+2★+3★)", key="btn_return_analysis", use_container_width=True):
+                _ret_lines = []
+                with st.spinner("📥 Загружаю отзывы через Apify..."):
                     _ret_reviews = fetch_1star_reviews(_our_asin_ret, domain="com", max_pages=1, log=lambda m: _ret_lines.append(m))
+                for _l in _ret_lines: st.caption(_l)
                 if _ret_reviews:
                     with st.spinner("🧠 AI анализирует..."):
                         _ret_analysis = analyze_return_reasons(_ret_reviews, od.get("title",""), _our_asin_ret, lang=st.session_state.get("analysis_lang","ru"))
