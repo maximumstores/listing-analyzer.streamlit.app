@@ -745,6 +745,12 @@ def scrapingdog_product(asin, log):
         data = r.json()
         if data.get("aplus"):
             _api_aplus = data.get("aplus_images", [])
+            # brand_images contains "From the brand" A+ banners — filter only aplus-media-library URLs
+            _brand_imgs = [u for u in data.get("brand_images", [])
+                          if isinstance(u, str) and "aplus-media-library-service-media" in u]
+            if not _api_aplus and _brand_imgs:
+                _api_aplus = _brand_imgs
+                log(f"  ℹ️ A+ из brand_images (From the brand): {len(_brand_imgs)} шт.")
             _real_aplus = []
             for _u in _api_aplus:
                 if not isinstance(_u, str): continue
@@ -1891,9 +1897,25 @@ def page_history():
 
     st.divider()
     st.subheader("🔍 Загрузить полный анализ из истории")
-    hist_opts = [f"{h['date'].strftime('%d.%m.%Y %H:%M')} — Overall: {h['overall']}%" for h in history]
+    # Показываем все записи — но 0% помечаем серым и перемещаем вниз
+    history_ok   = [h for h in history if (h.get("overall") or 0) > 0]
+    history_zero = [h for h in history if (h.get("overall") or 0) == 0]
+    history_sorted = history_ok + history_zero
+
+    if not history_ok:
+        st.warning("⚠️ Все записи имеют Overall: 0% — это старые упавшие анализы. Запусти новый анализ.")
+
+    hist_opts = []
+    for h in history_sorted:
+        _ov = h.get("overall") or 0
+        _prefix = "✅" if _ov > 0 else "❌"
+        hist_opts.append(f"{_prefix} {h['date'].strftime('%d.%m.%Y %H:%M')} — Overall: {_ov}%")
+
     sel_hist = st.selectbox("Выбери запуск", hist_opts, key="hist_sel")
-    sel_hist_idx = hist_opts.index(sel_hist)
+    sel_hist_idx_sorted = hist_opts.index(sel_hist)
+    # Map back to original history index for DB query
+    sel_hist_date = history_sorted[sel_hist_idx_sorted]["date"]
+    sel_hist_idx = next((i for i, h in enumerate(history) if h["date"] == sel_hist_date), 0)
 
     if st.button("📂 Открыть этот анализ", type="primary", use_container_width=True):
         conn_h = get_db()
@@ -2180,512 +2202,709 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-        Table, TableStyle, HRFlowable, PageBreak, Image as RLImage)
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        Table, TableStyle, HRFlowable, PageBreak, Image as RLImage, KeepTogether)
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.graphics.shapes import Drawing, Rect, String, Line
     from PIL import Image as PILImage
+
+    # ── Palette ───────────────────────────────────────────────────────────────
+    C = {
+        "navy":    colors.HexColor("#0f172a"),
+        "blue":    colors.HexColor("#1d4ed8"),
+        "blue2":   colors.HexColor("#3b82f6"),
+        "slate":   colors.HexColor("#334155"),
+        "muted":   colors.HexColor("#64748b"),
+        "light":   colors.HexColor("#f1f5f9"),
+        "border":  colors.HexColor("#e2e8f0"),
+        "green":   colors.HexColor("#15803d"),
+        "green2":  colors.HexColor("#22c55e"),
+        "yellow":  colors.HexColor("#d97706"),
+        "yellow2": colors.HexColor("#fbbf24"),
+        "red":     colors.HexColor("#dc2626"),
+        "red2":    colors.HexColor("#ef4444"),
+        "white":   colors.white,
+        "accent":  colors.HexColor("#7c3aed"),
+    }
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
-        leftMargin=20*mm, rightMargin=20*mm,
-        topMargin=20*mm, bottomMargin=20*mm)
+        leftMargin=18*mm, rightMargin=18*mm,
+        topMargin=16*mm, bottomMargin=16*mm)
+    W = A4[0] - 36*mm
 
-    W = A4[0] - 40*mm
+    # ── Fonts ─────────────────────────────────────────────────────────────────
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    import os, tempfile
+    import os, tempfile, requests as _req
 
-    def _get_font(name, url):
+    def _try_font(name, url):
         cache = os.path.join(tempfile.gettempdir(), name)
         if not os.path.exists(cache):
             try:
-                r = requests.get(url, timeout=20)
-                if r.ok: open(cache, "wb").write(r.content)
+                r = _req.get(url, timeout=20)
+                if r.ok: open(cache,"wb").write(r.content)
             except: return None
         return cache if os.path.exists(cache) else None
 
-    _SOURCES = [
-        ("NotoSans-Regular.ttf", "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"),
-        ("NotoSans-Regular.ttf", "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"),
-    ]
-    _SOURCES_BOLD = [
-        ("NotoSans-Bold.ttf", "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSans/NotoSans-Bold.ttf"),
-        ("NotoSans-Bold.ttf", "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Bold.ttf"),
-    ]
-
-    def _try_load(font_name, sources):
-        _sys = "/usr/share/fonts/truetype/dejavu/DejaVuSans" + ("-Bold" if "Bold" in font_name else "") + ".ttf"
-        if os.path.exists(_sys):
-            try:
-                pdfmetrics.registerFont(TTFont(font_name, _sys))
-                return True
-            except: pass
-        for _fname, _url in sources:
-            _p = _get_font(_fname, _url)
-            if _p:
-                try:
-                    pdfmetrics.registerFont(TTFont(font_name, _p))
-                    return True
-                except: pass
-        return False
-
-    _ok_r = _try_load("DV",      _SOURCES)
-    _ok_b = _try_load("DV-Bold", _SOURCES_BOLD)
-    if _ok_r and _ok_b:
-        _F, _FB = "DV", "DV-Bold"
+    _sys_r = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    _sys_b = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    if os.path.exists(_sys_r) and os.path.exists(_sys_b):
+        try:
+            pdfmetrics.registerFont(TTFont("F", _sys_r))
+            pdfmetrics.registerFont(TTFont("FB", _sys_b))
+            _F, _FB = "F", "FB"
+        except: _F, _FB = "Helvetica", "Helvetica-Bold"
     else:
         _F, _FB = "Helvetica", "Helvetica-Bold"
 
+    # ── Styles ────────────────────────────────────────────────────────────────
+    def ps(name, **kw):
+        defaults = dict(fontName=_F, fontSize=9, textColor=C["slate"],
+                       spaceAfter=2, leading=13)
+        defaults.update(kw)
+        return ParagraphStyle(name, **defaults)
+
     S = {
-        "title":  ParagraphStyle("t",  fontSize=24, fontName=_FB,  textColor=colors.HexColor("#0f172a"), spaceAfter=4),
-        "h1":     ParagraphStyle("h1", fontSize=16, fontName=_FB,  textColor=colors.HexColor("#1e293b"), spaceBefore=12, spaceAfter=4),
-        "h2":     ParagraphStyle("h2", fontSize=13, fontName=_FB,  textColor=colors.HexColor("#334155"), spaceBefore=8,  spaceAfter=3),
-        "body":   ParagraphStyle("b",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#475569"), spaceAfter=3, leading=14),
-        "small":  ParagraphStyle("s",  fontSize=8,  fontName=_F,   textColor=colors.HexColor("#64748b"), spaceAfter=2),
-        "green":  ParagraphStyle("g",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#15803d"), spaceAfter=2),
-        "orange": ParagraphStyle("o",  fontSize=9,  fontName=_F,   textColor=colors.HexColor("#d97706"), spaceAfter=2),
-        "center": ParagraphStyle("c",  fontSize=9,  fontName=_F,   alignment=TA_CENTER, spaceAfter=2),
-        "action": ParagraphStyle("a",  fontSize=9,  fontName=_FB,  textColor=colors.HexColor("#1d4ed8"), spaceAfter=2),
+        "cover_title": ps("ct", fontName=_FB, fontSize=28, textColor=C["white"], spaceAfter=4, leading=34),
+        "cover_sub":   ps("cs", fontName=_F,  fontSize=11, textColor=colors.HexColor("#93c5fd"), spaceAfter=3),
+        "cover_meta":  ps("cm", fontName=_F,  fontSize=9,  textColor=colors.HexColor("#cbd5e1"), spaceAfter=2),
+        "h1":    ps("h1", fontName=_FB, fontSize=13, textColor=C["navy"],  spaceBefore=8, spaceAfter=3, leading=16),
+        "h2":    ps("h2", fontName=_FB, fontSize=10, textColor=C["slate"], spaceBefore=5, spaceAfter=2),
+        "body":  ps("bd", fontSize=9,  textColor=C["slate"], spaceAfter=2, leading=13),
+        "small": ps("sm", fontSize=8,  textColor=C["muted"], spaceAfter=1, leading=11),
+        "green": ps("gr", fontSize=9,  textColor=C["green"], fontName=_FB, spaceAfter=2),
+        "orange":ps("or", fontSize=9,  textColor=C["yellow"],spaceAfter=2),
+        "red":   ps("rd", fontSize=9,  textColor=C["red"],   fontName=_FB, spaceAfter=2),
+        "center":ps("cn", fontSize=9,  textColor=C["slate"], alignment=TA_CENTER),
+        "action":ps("ac", fontSize=9,  textColor=C["blue"],  fontName=_FB, spaceAfter=2),
+        "footer":ps("ft", fontSize=7,  textColor=C["muted"], alignment=TA_CENTER),
     }
 
-    def score_color(s):
-        if s >= 75: return colors.HexColor("#15803d")
-        if s >= 50: return colors.HexColor("#d97706")
-        return colors.HexColor("#dc2626")
+    story = []
+    date_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+    ov_pct = pct(result.get("overall_score", 0))
+
+    def score_color(v):
+        if v >= 75: return C["green"]
+        if v >= 50: return C["yellow"]
+        return C["red"]
+
+    def score_bg(v):
+        if v >= 75: return colors.HexColor("#dcfce7")
+        if v >= 50: return colors.HexColor("#fef9c3")
+        return colors.HexColor("#fee2e2")
 
     def hex_str(c):
-        return '#{:02x}{:02x}{:02x}'.format(int(c.red*255), int(c.green*255), int(c.blue*255))
+        return '#{:02x}{:02x}{:02x}'.format(int(c.red*255),int(c.green*255),int(c.blue*255))
 
-    def score_label(s):
-        if s >= 75: return "Хорошо"
-        if s >= 50: return "Требует улучшений"
-        return "Критично"
+    def score_label(v):
+        if v >= 75: return "STRONG"
+        if v >= 50: return "NEEDS WORK"
+        return "CRITICAL"
 
-    story = []
+    def _clean(s):
+        return _re.sub(r"\*+","",str(s or "")).strip()
 
-    title_val = our_data.get("title", asin)[:80]
-    price     = our_data.get("price", "")
-    rating    = our_data.get("average_rating", "")
-    reviews   = our_data.get("total_reviews", "")
-    date_str  = datetime.now().strftime("%d.%m.%Y %H:%M")
-    ov_pct    = pct(result.get("overall_score", 0))
-    ov_col    = score_color(ov_pct)
-    _asin_val = asin or our_data.get("parent_asin","") or "—"
+    # ── COVER PAGE ────────────────────────────────────────────────────────────
+    title_val = our_data.get("title", asin)
+    price = our_data.get("price","")
+    rating = our_data.get("average_rating","")
+    brand = our_data.get("brand","")
 
-    story.append(Spacer(1, 10*mm))
-    story.append(Paragraph("Amazon Listing Audit", S["title"]))
-    story.append(Spacer(1, 3*mm))
-    story.append(HRFlowable(width=W, thickness=2, color=colors.HexColor("#3b82f6")))
-    story.append(Spacer(1, 5*mm))
-
-    _asin_link_p = Paragraph(
-        f'<link href="https://www.amazon.com/dp/{_asin_val}" color="#1d4ed8"><b>{_asin_val}</b></link>',
-        S["body"])
-    cover_data = [
-        ["ASIN", _asin_link_p, "Дата", date_str],
-        ["Цена", price, "Рейтинг", f"{rating} ({reviews})"],
-        ["Заголовок", Paragraph(title_val, S["body"]), "", ""],
-    ]
-    cover_tbl = Table(cover_data, colWidths=[25*mm, 65*mm, 25*mm, 55*mm])
+    # Dark cover block
+    cover_tbl = Table([[
+        Paragraph(f"Amazon Listing Audit", S["cover_title"]),
+        Paragraph(f"<b>{ov_pct}%</b>", ps("ov", fontName=_FB, fontSize=52,
+            textColor=score_color(ov_pct) if False else colors.HexColor(
+                "#22c55e" if ov_pct>=75 else ("#fbbf24" if ov_pct>=50 else "#ef4444")),
+            alignment=TA_RIGHT, leading=56)),
+    ]], colWidths=[W*0.65, W*0.35])
     cover_tbl.setStyle(TableStyle([
-        ("FONTNAME", (0,0), (-1,-1), _F),
-        ("FONTNAME", (0,0), (0,-1), _FB),
-        ("FONTNAME", (2,0), (2,-1), _FB),
-        ("FONTSIZE", (0,0), (-1,-1), 9),
-        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f8fafc")),
-        ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("PADDING", (0,0), (-1,-1), 6),
-        ("SPAN", (1,2), (3,2)),
+        ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+        ("BACKGROUND",(0,0),(-1,-1),C["navy"]),
+        ("PADDING",(0,0),(-1,-1),14),
+        ("ROUNDEDCORNERS",(0,0),(-1,-1),4),
     ]))
     story.append(cover_tbl)
-    story.append(Spacer(1, 6*mm))
+    story.append(Spacer(1,3*mm))
 
-    ov_tbl = Table([[
-        Paragraph(f"<font size=32 color='{hex_str(ov_col)}'><b>{ov_pct}%</b></font>", S["center"]),
-        Paragraph(f"<b>Overall Score</b><br/>{score_label(ov_pct)}", S["h2"])
-    ]], colWidths=[55*mm, W-55*mm])
-    ov_tbl.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f1f5f9")),
-        ("PADDING", (0,0), (-1,-1), 10),
-    ]))
-    story.append(ov_tbl)
-    story.append(Spacer(1, 6*mm))
-
-    def _get_score(r, key):
-        v = r.get(key, 0)
-        if isinstance(v, str) and "%" in v: return int(v.replace("%","").strip())
-        if isinstance(v, (int,float)): return int(v)
-        return 0
-
-    _cosmo_sc = pct(_get_score(result.get("cosmo_analysis",{}), "score")) or _get_score(result, "cosmo_score")
-    _rufus_sc = pct(_get_score(result.get("rufus_analysis",{}), "score")) or _get_score(result, "rufus_score")
-    score_map = [
-        ("Title",       _get_score(result, "title_score")),
-        ("Bullets",     _get_score(result, "bullets_score")),
-        ("Описание",    _get_score(result, "description_score")),
-        ("Фото",        _get_score(result, "images_score")),
-        ("A+",          _get_score(result, "aplus_score")),
-        ("Отзывы",      _get_score(result, "reviews_score")),
-        ("BSR",         _get_score(result, "bsr_score")),
-        ("Цена",        _get_score(result, "price_score")),
-        ("Варианты",    _get_score(result, "customization_score")),
-        ("Prime",       _get_score(result, "prime_score")),
-        ("COSMO",       _cosmo_sc),
-        ("Rufus",       _rufus_sc),
+    # Meta strip
+    meta_data = [
+        [Paragraph(f"<b>ASIN</b>", S["small"]),
+         Paragraph(f'<link href="https://www.amazon.com/dp/{asin}" color="#1d4ed8"><b>{asin}</b></link>', S["body"]),
+         Paragraph(f"<b>Дата</b>", S["small"]),
+         Paragraph(date_str, S["body"]),
+         Paragraph(f"<b>Рейтинг</b>", S["small"]),
+         Paragraph(f"{rating}", S["body"])],
+        [Paragraph(f"<b>Бренд</b>", S["small"]),
+         Paragraph(brand[:30], S["body"]),
+         Paragraph(f"<b>Цена</b>", S["small"]),
+         Paragraph(price, S["body"]),
+         Paragraph(f"<b>Overall</b>", S["small"]),
+         Paragraph(f"<font color='{hex_str(score_color(ov_pct))}'><b>{ov_pct}% — {score_label(ov_pct)}</b></font>", S["body"])],
+        [Paragraph(f"<b>Листинг</b>", S["small"]),
+         Paragraph(_clean(title_val)[:80], ps("tt", fontSize=8, textColor=C["slate"])),
+         "", "", "", ""],
     ]
-    def _sc(raw):
-        v = pct(raw)
-        c = score_color(v)
-        return Paragraph(f"<font color='{hex_str(c)}'><b>{v}%</b></font>", S["center"])
-
-    score_rows = [["Метрика", "Оценка", "Метрика", "Оценка"]]
-    pairs = [(score_map[i], score_map[i+1] if i+1 < len(score_map) else None)
-             for i in range(0, len(score_map), 2)]
-    for left, right in pairs:
-        row = [left[0], _sc(left[1])]
-        if right: row += [right[0], _sc(right[1])]
-        else:     row += ["", ""]
-        score_rows.append(row)
-
-    sc_tbl = Table(score_rows, colWidths=[40*mm, 25*mm, 40*mm, 25*mm])
-    sc_tbl.setStyle(TableStyle([
-        ("FONTNAME",   (0,0), (-1,0),  _FB),
-        ("FONTNAME",   (0,1), (-1,-1), _F),
-        ("FONTSIZE",   (0,0), (-1,-1), 9),
-        ("BACKGROUND", (0,0), (-1,0),  colors.HexColor("#1e293b")),
-        ("TEXTCOLOR",  (0,0), (-1,0),  colors.white),
-        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#f8fafc"), colors.white]),
-        ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("PADDING",    (0,0), (-1,-1), 6),
-        ("ALIGN",      (1,0), (1,-1), "CENTER"),
-        ("ALIGN",      (3,0), (3,-1), "CENTER"),
+    mt = Table(meta_data, colWidths=[18*mm, W*0.27, 14*mm, W*0.2, 16*mm, W*0.2])
+    mt.setStyle(TableStyle([
+        ("FONTNAME",(0,0),(-1,-1),_F), ("FONTSIZE",(0,0),(-1,-1),8),
+        ("BACKGROUND",(0,0),(-1,-1),C["light"]),
+        ("GRID",(0,0),(-1,-1),0.3,C["border"]),
+        ("PADDING",(0,0),(-1,-1),5),
+        ("SPAN",(1,2),(5,2)),
+        ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
     ]))
-    story.append(sc_tbl)
-    story.append(Spacer(1, 4*mm))
+    story.append(mt)
+    story.append(Spacer(1,5*mm))
 
-    actions = result.get("priority_improvements", []) or [
-        a.get("action","") for a in result.get("actions",[]) if isinstance(a, dict)]
-    if actions:
-        story.append(Paragraph("Приоритетные действия", S["h2"]))
-        for i, a in enumerate(actions[:6]):
-            story.append(Paragraph(f"{i+1}. {a}", S["action"]))
+    # ── SCORE DASHBOARD ───────────────────────────────────────────────────────
+    story.append(Paragraph("▌ SCORE DASHBOARD", ps("sdh", fontName=_FB, fontSize=11,
+        textColor=C["navy"], spaceBefore=4, spaceAfter=3)))
+
+    score_map = [
+        ("Title",    result.get("title_score",0)),
+        ("Bullets",  result.get("bullets_score",0)),
+        ("Описание", result.get("description_score",0)),
+        ("Фото",     result.get("images_score",0)),
+        ("A+",       result.get("aplus_score",0)),
+        ("Отзывы",   result.get("reviews_score",0)),
+        ("BSR",      result.get("bsr_score",0)),
+        ("Цена",     result.get("price_score",0)),
+        ("Варианты", result.get("customization_score",0)),
+        ("Prime",    result.get("prime_score",0)),
+        ("COSMO",    result.get("cosmo_analysis",{}).get("score",0) if isinstance(result.get("cosmo_analysis"),dict) else 0),
+        ("Rufus",    result.get("rufus_analysis",{}).get("score",0) if isinstance(result.get("rufus_analysis"),dict) else 0),
+    ]
+
+    # Build 2-column score cards
+    def score_card(label, raw):
+        v = pct(raw)
+        sc = score_color(v)
+        bg = score_bg(v)
+        bar_w = max(2, int(v * 0.5))  # 0-50 units
+        return Table([[
+            Paragraph(f"<b>{label}</b>", ps(f"sc_{label}", fontName=_FB, fontSize=8, textColor=C["navy"])),
+            Paragraph(f"<font color='{hex_str(sc)}'><b>{v}%</b></font>",
+                ps(f"sv_{label}", fontName=_FB, fontSize=11, alignment=TA_RIGHT)),
+        ],[
+            Table([[""]], colWidths=[bar_w*mm if bar_w*mm < 40*mm else 40*mm],
+                style=[("BACKGROUND",(0,0),(-1,-1),sc),("ROWHEIGHTS",(0,0),(-1,-1),3)]),
+            "",
+        ]], colWidths=[35*mm, 18*mm], style=TableStyle([
+            ("BACKGROUND",(0,0),(-1,-1),bg),
+            ("PADDING",(0,0),(-1,-1),4),
+            ("SPAN",(0,1),(1,1)),
+            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+        ]))
+
+    # 3 columns × 4 rows
+    n = len(score_map)
+    cols3 = 3
+    rows3 = (n + cols3 - 1) // cols3
+    dash_rows = []
+    for ri in range(rows3):
+        row = []
+        for ci in range(cols3):
+            idx = ri * cols3 + ci
+            if idx < n:
+                lbl, val = score_map[idx]
+                row.append(score_card(lbl, val))
+            else:
+                row.append("")
+        dash_rows.append(row)
+
+    dash_tbl = Table(dash_rows, colWidths=[W/3-1*mm]*3)
+    dash_tbl.setStyle(TableStyle([
+        ("PADDING",(0,0),(-1,-1),1.5),
+        ("VALIGN",(0,0),(-1,-1),"TOP"),
+    ]))
+    story.append(dash_tbl)
+    story.append(Spacer(1,5*mm))
+
+    # ── PRIORITY ACTIONS ──────────────────────────────────────────────────────
+    _prio = result.get("priority_improvements",[])
+    _acts = result.get("actions",[])
+    if _prio or _acts:
+        story.append(Paragraph("▌ ПРИОРИТЕТНЫЕ ДЕЙСТВИЯ", ps("pah", fontName=_FB, fontSize=11,
+            textColor=C["navy"], spaceBefore=2, spaceAfter=3)))
+        _all = []
+        for item in _prio:
+            _all.append({"action": _clean(item), "impact":"HIGH","effort":"","details":""})
+        for a in _acts:
+            if isinstance(a,dict):
+                _all.append(a)
+        _all.sort(key=lambda x:{"HIGH":0,"MEDIUM":1,"LOW":2}.get(x.get("impact","MEDIUM"),1))
+
+        for a in _all[:8]:
+            _imp = a.get("impact","MEDIUM")
+            _ic = C["red"] if _imp=="HIGH" else (C["yellow"] if _imp=="MEDIUM" else C["green"])
+            _ibg= colors.HexColor("#fee2e2") if _imp=="HIGH" else (colors.HexColor("#fef9c3") if _imp=="MEDIUM" else colors.HexColor("#dcfce7"))
+            _act_row = Table([[
+                Paragraph(f"<b>{_imp}</b>", ps(f"imp_{_imp}", fontName=_FB, fontSize=7,
+                    textColor=_ic, alignment=TA_CENTER)),
+                Paragraph(_clean(a.get("action","")), ps("act_t", fontSize=9, textColor=C["navy"])),
+            ]], colWidths=[14*mm, W-14*mm])
+            _act_row.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(0,0),_ibg),
+                ("BACKGROUND",(1,0),(1,0),C["white"]),
+                ("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),
+                ("PADDING",(0,0),(-1,-1),5),
+                ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+            ]))
+            story.append(_act_row)
+            if a.get("details"):
+                story.append(Paragraph(f"  → {_clean(a['details'])[:180]}", S["small"]))
 
     story.append(PageBreak())
 
-    # Photos page
-    story.append(Paragraph("Анализ фотографий", S["h1"]))
-    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-    story.append(Spacer(1, 3*mm))
+    # ── PHOTO ANALYSIS ────────────────────────────────────────────────────────
+    story.append(Paragraph("▌ АНАЛИЗ ФОТОГРАФИЙ", ps("ph", fontName=_FB, fontSize=11,
+        textColor=C["navy"], spaceBefore=0, spaceAfter=4)))
 
-    _clean = lambda s: _re.sub(r"\*+", "", s).strip()
-
-    if vision_text and images:
-        _all_blocks = {}
+    _blocks = {}
+    if vision_text:
         for _m in _re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", vision_text, _re.DOTALL):
-            _all_blocks[int(_m.group(1))] = _m.group(2).strip()
-        for i, img_d in enumerate(images[:5]):
-            blk    = _all_blocks.get(i+1, "")
-            typ_m  = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
-            sc_m   = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", blk)
-            str_m  = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.+)", blk)
-            weak_m = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.+)", blk)
-            act_m  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.+)", blk)
-            conv_m = _re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.+)", blk)
-            emot_m = _re.search(r"(?:Эмоция|Emotion)\s*[:\-]\s*(.+)", blk)
-            sc_val  = int(sc_m.group(1)) if sc_m else 0
-            sc_col  = colors.HexColor("#15803d") if sc_val>=8 else (colors.HexColor("#d97706") if sc_val>=6 else colors.HexColor("#dc2626"))
-            sc_lbl  = "Отлично" if sc_val>=8 else ("Хорошо" if sc_val>=6 else "Слабо")
-            emot_txt = _clean(emot_m.group(1)) if emot_m else ""
-            _emot_key = emot_txt.split()[0].lower().rstrip("/:") if emot_txt else ""
-            _emot_col = {"доверие":"#15803d","trust":"#15803d","desire":"#15803d",
-                         "желание":"#d97706","сомнение":"#dc2626","doubt":"#dc2626",
-                         "любопытство":"#1d4ed8","curiosity":"#1d4ed8",
-                         "безразличие":"#64748b","indifference":"#64748b"}.get(_emot_key, "#7c3aed")
-            try:
-                _b64_data = img_d.get("b64","") if isinstance(img_d, dict) else img_d
-                img_bytes = base64.b64decode(_b64_data)
-                pil_img   = PILImage.open(io.BytesIO(img_bytes))
-                pil_img.thumbnail((200, 200))
-                thumb_buf = io.BytesIO()
-                pil_img.save(thumb_buf, format="JPEG", quality=70)
-                thumb_buf.seek(0)
-                rl_img = RLImage(thumb_buf, width=35*mm, height=35*mm)
-            except:
-                rl_img = Paragraph(f"(фото {i+1})", S["small"])
+            _blocks[int(_m.group(1))] = _m.group(2).strip()
 
-            info_content = [
-                Paragraph(f"<b>Фото #{i+1}</b> — {_clean(typ_m.group(1)) if typ_m else ''}", S["h2"]),
-                Paragraph(f"<font color='{hex_str(sc_col)}'><b>{sc_val}/10</b></font>  {sc_lbl}", S["body"]),
-            ]
-            if str_m:  info_content.append(Paragraph(f"✅ {_clean(str_m.group(1))}", S["green"]))
-            if weak_m: info_content.append(Paragraph(f"⚠️ {_clean(weak_m.group(1))}", S["orange"]))
-            if act_m:  info_content.append(Paragraph(f"🛠 {_clean(act_m.group(1))}", S["action"]))
-            if conv_m: info_content.append(Paragraph(f"💡 {_clean(conv_m.group(1))}", S["body"]))
-            if emot_txt:
-                _es = ParagraphStyle("emot", fontSize=8, fontName=_FB,
-                    textColor=colors.HexColor(_emot_col), spaceAfter=2)
-                info_content.append(Paragraph(f"😶 ЭМОЦИЯ: {emot_txt}", _es))
-            if not str_m and blk:
-                info_content.append(Paragraph(blk[:200], S["small"]))
+    for i, img_d in enumerate(images[:5]):
+        blk = _blocks.get(i+1,"")
+        sc_m  = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", blk)
+        typ_m = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
+        str_m = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})", blk)
+        wk_m  = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})", blk)
+        ac_m  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})", blk)
+        cv_m  = _re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.{3,})", blk)
+        em_m  = _re.search(r"(?:Эмоция|Emotion)\s*[:\-]\s*(.{3,})", blk)
+        sc_v  = int(sc_m.group(1)) if sc_m else 0
+        sc_c  = score_color(sc_v*10)
+        ptype = _clean(typ_m.group(1)) if typ_m else ""
+        stxt  = _clean(str_m.group(1)) if str_m else ""
+        wtxt  = _clean(wk_m.group(1))  if wk_m  else ""
+        atxt  = _clean(ac_m.group(1))  if ac_m  else ""
+        ctxt  = _clean(cv_m.group(1))  if cv_m  else ""
+        etxt  = _clean(em_m.group(1))  if em_m  else ""
 
-            from reportlab.platypus import KeepTogether
-            row_tbl = Table([[rl_img, info_content]], colWidths=[40*mm, W-40*mm])
-            row_tbl.setStyle(TableStyle([
-                ("VALIGN",     (0,0), (-1,-1), "TOP"),
-                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f8fafc")),
-                ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-                ("PADDING",    (0,0), (-1,-1), 6),
-            ]))
-            story.append(KeepTogether([row_tbl, Spacer(1, 3*mm)]))
+        # Score bar
+        bar_cells = []
+        for _b in range(10):
+            _bc = sc_c if _b < sc_v else C["border"]
+            bar_cells.append(Table([[""]], colWidths=[4.5*mm],
+                style=[("BACKGROUND",(0,0),(-1,-1),_bc),
+                       ("ROWHEIGHTS",(0,0),(-1,-1),5)]))
 
-    # ── A+ страница в PDF ─────────────────────────────────────────────────────
-    _pdf_aplus_vision = st.session_state.get("aplus_vision", "")
-    _pdf_aplus_urls   = st.session_state.get("aplus_img_urls", [])
-    if _pdf_aplus_vision or _pdf_aplus_urls:
+        try:
+            _b64 = img_d.get("b64","") if isinstance(img_d,dict) else img_d
+            _bytes = base64.b64decode(_b64)
+            _pil = PILImage.open(io.BytesIO(_bytes)).convert("RGB")
+            _pil.thumbnail((160,160))
+            _tb = io.BytesIO(); _pil.save(_tb,"JPEG",quality=75); _tb.seek(0)
+            _rl = RLImage(_tb, width=32*mm, height=32*mm)
+        except: _rl = Paragraph(f"#{i+1}", S["small"])
+
+        # Info content
+        info = []
+        hdr_txt = f"Фото #{i+1}" + (f" — {ptype}" if ptype else "")
+        info.append(Table([[
+            Paragraph(f"<b>{hdr_txt}</b>", ps("phdr", fontName=_FB, fontSize=9, textColor=C["navy"])),
+            Paragraph(f"<font color='{hex_str(sc_c)}'><b>{sc_v}/10</b></font>",
+                ps("psc", fontName=_FB, fontSize=14, alignment=TA_RIGHT, textColor=sc_c)),
+        ]], colWidths=[W*0.5, 20*mm], style=[
+            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),("PADDING",(0,0),(-1,-1),0)]))
+        # bar
+        info.append(Table([bar_cells], colWidths=[4.5*mm]*10,
+            style=[("PADDING",(0,0),(-1,-1),0.5)]))
+        info.append(Spacer(1,2*mm))
+        if stxt: info.append(Paragraph(f"✅ {stxt}", S["green"]))
+        if wtxt: info.append(Paragraph(f"⚠ {wtxt}", S["orange"]))
+        if atxt: info.append(Paragraph(f"→ {atxt}", S["action"]))
+        if ctxt: info.append(Paragraph(f"💡 {ctxt}", S["body"]))
+        if etxt: info.append(Paragraph(f"😶 {etxt}", ps("em", fontSize=8, textColor=C["accent"])))
+
+        photo_row = Table([[_rl, info]], colWidths=[35*mm, W-35*mm])
+        photo_row.setStyle(TableStyle([
+            ("VALIGN",(0,0),(-1,-1),"TOP"),
+            ("BACKGROUND",(0,0),(-1,-1),C["light"]),
+            ("LINEBELOW",(0,0),(-1,-1),0.5,C["border"]),
+            ("PADDING",(0,0),(0,0),4),
+            ("PADDING",(1,0),(1,0),6),
+        ]))
+        story.append(KeepTogether([photo_row, Spacer(1,2*mm)]))
+
+    # ── A+ ────────────────────────────────────────────────────────────────────
+    _av   = st.session_state.get("aplus_vision","")
+    _aurls= st.session_state.get("aplus_img_urls",[])
+    if _av or _aurls:
         story.append(PageBreak())
-        story.append(Paragraph("A+ Контент", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        story.append(Spacer(1, 3*mm))
-        _aplus_score_pdf = pct(result.get("aplus_score", 0))
-        if _aplus_score_pdf:
-            _asc = score_color(_aplus_score_pdf)
-            story.append(Paragraph(
-                f"A+ Score: <font color='{hex_str(_asc)}'><b>{_aplus_score_pdf}%</b></font>", S["h2"]))
-            story.append(Spacer(1, 2*mm))
+        story.append(Paragraph("▌ A+ КОНТЕНТ", ps("aph", fontName=_FB, fontSize=11,
+            textColor=C["navy"], spaceBefore=0, spaceAfter=4)))
+        _ap_s = pct(result.get("aplus_score",0))
+        story.append(Paragraph(
+            f"A+ Score: <font color='{hex_str(score_color(_ap_s))}'><b>{_ap_s}%</b></font>",
+            S["h2"]))
+        story.append(Spacer(1,2*mm))
 
-        _ap_blocks = {}
-        if _pdf_aplus_vision:
-            for _m in _re.finditer(r"APLUS_BLOCK_(\d+)\s*(.*?)(?=APLUS_BLOCK_\d+|$)",
-                                    _pdf_aplus_vision, _re.DOTALL):
-                _ap_blocks[int(_m.group(1))] = _m.group(2).strip()
+        _apblks = {}
+        if _av:
+            for _m in _re.finditer(r"APLUS_BLOCK_(\d+)\s*(.*?)(?=APLUS_BLOCK_\d+|$)",_av,_re.DOTALL):
+                _apblks[int(_m.group(1))] = _m.group(2).strip()
 
-        for _bi in range(max(len(_pdf_aplus_urls), len(_ap_blocks))):
-            _apblk  = _ap_blocks.get(_bi+1, "")
-            _ap_mod  = _re.search(r"(?:Модуль|Module)\s*[:\-]\s*(.+)", _apblk)
-            _ap_sum  = _re.search(r"(?:Содержание|Summary)\s*[:\-]\s*(.+)", _apblk)
-            _ap_sc   = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", _apblk)
-            _ap_str  = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.+)", _apblk)
-            _ap_weak = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.+)", _apblk)
-            _ap_act  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.+)", _apblk)
-            _ap_conv = _re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.+)", _apblk)
-            _ap_scv  = int(_ap_sc.group(1)) if _ap_sc else 0
-            _ap_scc  = colors.HexColor("#15803d") if _ap_scv>=8 else (colors.HexColor("#d97706") if _ap_scv>=6 else colors.HexColor("#dc2626"))
-            _ap_sclbl= "Отлично" if _ap_scv>=8 else ("Хорошо" if _ap_scv>=6 else "Слабо")
+        for _bi in range(max(len(_aurls),len(_apblks))):
+            _bblk = _apblks.get(_bi+1,"")
+            _bmod = _re.search(r"(?:Модуль|Module)\s*[:\-]\s*(.+)", _bblk)
+            _bsc  = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", _bblk)
+            _bstr = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})", _bblk)
+            _bwk  = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})", _bblk)
+            _bact = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})", _bblk)
+            _bcv  = _re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.{3,})", _bblk)
+            _bscv = int(_bsc.group(1)) if _bsc else 0
+            _bscc = score_color(_bscv*10)
 
-            # Try to load banner image
-            _ap_rl_img = Paragraph(f"(баннер {_bi+1})", S["small"])
-            if _bi < len(_pdf_aplus_urls):
+            _ap_info = [Paragraph(
+                f"<b>Баннер #{_bi+1}" + (f" — {_clean(_bmod.group(1))}" if _bmod else "") +
+                f"</b>  <font color='{hex_str(_bscc)}'>{_bscv}/10</font>",
+                ps("aphi", fontName=_FB, fontSize=9, textColor=C["navy"]))]
+            if _bstr: _ap_info.append(Paragraph(f"✅ {_clean(_bstr.group(1))}", S["green"]))
+            if _bwk:  _ap_info.append(Paragraph(f"⚠ {_clean(_bwk.group(1))}", S["orange"]))
+            if _bact: _ap_info.append(Paragraph(f"→ {_clean(_bact.group(1))}", S["action"]))
+            if _bcv:  _ap_info.append(Paragraph(f"💡 {_clean(_bcv.group(1))}", S["body"]))
+
+            _ap_img = ""
+            if _bi < len(_aurls):
                 try:
-                    _ap_r = requests.get(_pdf_aplus_urls[_bi], timeout=10,
-                                         headers={"User-Agent":"Mozilla/5.0"})
-                    if _ap_r.ok:
-                        _ap_pil = PILImage.open(io.BytesIO(_ap_r.content)).convert("RGB")
-                        _ap_pil.thumbnail((400, 200))
-                        _ap_buf = io.BytesIO()
-                        _ap_pil.save(_ap_buf, format="JPEG", quality=70)
-                        _ap_buf.seek(0)
-                        _ap_rl_img = RLImage(_ap_buf, width=W, height=40*mm)
+                    _apr = _req.get(_aurls[_bi], timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+                    if _apr.ok:
+                        _apil = PILImage.open(io.BytesIO(_apr.content)).convert("RGB")
+                        _apil.thumbnail((500,200))
+                        _ab = io.BytesIO(); _apil.save(_ab,"JPEG",quality=70); _ab.seek(0)
+                        _ap_img = RLImage(_ab, width=W, height=35*mm)
                 except: pass
 
-            _ap_info = []
-            _ap_head = f"Баннер #{_bi+1}" + (f" — {_clean(_ap_mod.group(1))}" if _ap_mod else "")
-            _ap_info.append(Paragraph(f"<b>{_ap_head}</b>", S["h2"]))
-            if _ap_sum: _ap_info.append(Paragraph(_clean(_ap_sum.group(1)), S["small"]))
-            if _ap_scv: _ap_info.append(Paragraph(
-                f"<font color='{hex_str(_ap_scc)}'><b>{_ap_scv}/10</b></font>  {_ap_sclbl}", S["body"]))
-            if _ap_str:  _ap_info.append(Paragraph(f"✅ {_clean(_ap_str.group(1))}", S["green"]))
-            if _ap_weak: _ap_info.append(Paragraph(f"⚠️ {_clean(_ap_weak.group(1))}", S["orange"]))
-            if _ap_act:  _ap_info.append(Paragraph(f"🛠 {_clean(_ap_act.group(1))}", S["action"]))
-            if _ap_conv: _ap_info.append(Paragraph(f"💡 {_clean(_ap_conv.group(1))}", S["body"]))
+            _ap_blk_parts = []
+            if _ap_img: _ap_blk_parts.append(_ap_img)
+            _ap_blk_parts += _ap_info + [Spacer(1,3*mm)]
+            story.append(KeepTogether(_ap_blk_parts))
 
-            from reportlab.platypus import KeepTogether
-            story.append(KeepTogether([_ap_rl_img, Spacer(1,2*mm)] + _ap_info + [Spacer(1,4*mm)]))
-
+    # ── CONTENT ANALYSIS ─────────────────────────────────────────────────────
     story.append(PageBreak())
-
-    # Content page
-    story.append(Paragraph("Анализ контента", S["h1"]))
-    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-    story.append(Spacer(1, 3*mm))
+    story.append(Paragraph("▌ АНАЛИЗ КОНТЕНТА", ps("cah", fontName=_FB, fontSize=11,
+        textColor=C["navy"], spaceBefore=0, spaceAfter=4)))
 
     for sec_key, sec_score_key, sec_name in [
-        ("title",       "title_score",       "Заголовок"),
-        ("bullets",     "bullets_score",     "Bullets"),
-        ("description", "description_score", "Description"),
-        ("aplus",       "aplus_score",       "A+ Контент"),
+        ("title","title_score","Title"),
+        ("bullets","bullets_score","Bullets"),
+        ("description","description_score","Description"),
+        ("aplus","aplus_score","A+ Контент"),
     ]:
-        sc_v = pct(result.get(sec_score_key, 0))
+        sc_v = pct(result.get(sec_score_key,0))
         sc_c = score_color(sc_v)
-        story.append(Paragraph(
-            f"{sec_name}  <font color='{hex_str(sc_c)}'><b>{sc_v}%</b></font>", S["h2"]))
-        sec = result.get(sec_key, {})
-        gaps = sec.get("gaps",[]) if isinstance(sec, dict) else result.get(f"{sec_key}_gaps",[])
-        rec  = sec.get("recommendation","") if isinstance(sec, dict) else result.get(f"{sec_key}_rec","")
-        for g in gaps[:3]:
-            story.append(Paragraph(f"! {g}", S["orange"]))
-        if rec:
-            story.append(Paragraph(f"> {rec}", S["action"]))
-        story.append(Spacer(1, 2*mm))
-
-    story.append(Spacer(1, 4*mm))
-
-    # ── COSMO / Rufus ─────────────────────────────────────────────────────────
-    story.append(PageBreak())
-    story.append(Paragraph("COSMO / Rufus — AI Видимость", S["h1"]))
-    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-    story.append(Spacer(1, 3*mm))
-    _ca_pdf = result.get("cosmo_analysis", {})
-    _ra_pdf = result.get("rufus_analysis", {})
-    _cosmo_sp = pct(_ca_pdf.get("score", 0))
-    _rufus_sp = pct(_ra_pdf.get("score", 0))
-    _cr_tbl = Table([["COSMO Score", f"{_cosmo_sp}%", "Rufus Score", f"{_rufus_sp}%"]],
-                    colWidths=[35*mm, 30*mm, 35*mm, 30*mm])
-    _cr_tbl.setStyle(TableStyle([
-        ("FONTNAME", (0,0), (-1,-1), _FB), ("FONTSIZE", (0,0), (-1,-1), 12),
-        ("TEXTCOLOR", (1,0), (1,0), score_color(_cosmo_sp)),
-        ("TEXTCOLOR", (3,0), (3,0), score_color(_rufus_sp)),
-        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f8fafc")),
-        ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("PADDING", (0,0), (-1,-1), 8),
-    ]))
-    story.append(_cr_tbl); story.append(Spacer(1, 4*mm))
-    if _ca_pdf.get("signals_present"):
-        story.append(Paragraph("✅ Присутствуют:", S["h2"]))
-        for s in _ca_pdf["signals_present"][:8]: story.append(Paragraph(f"• {s}", S["green"]))
-    if _ca_pdf.get("signals_missing"):
-        story.append(Paragraph("❌ Отсутствуют:", S["h2"]))
-        for s in _ca_pdf["signals_missing"][:8]: story.append(Paragraph(f"• {s}", S["orange"]))
-    if _ra_pdf.get("issues"):
-        story.append(Paragraph("⚠️ Rufus Issues:", S["h2"]))
-        for s in _ra_pdf["issues"][:5]: story.append(Paragraph(f"• {s}", S["orange"]))
-
-    # ── JTBD ──────────────────────────────────────────────────────────────────
-    _jtbd_pdf = result.get("jtbd_analysis", {})
-    if _jtbd_pdf:
-        story.append(Spacer(1, 6*mm))
-        story.append(Paragraph("JTBD — Jobs To Be Done", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        _js = pct(_jtbd_pdf.get("alignment_score", 0))
-        story.append(Paragraph(f"Alignment: <font color='{hex_str(score_color(_js))}'><b>{_js}%</b></font>", S["body"]))
-        if _jtbd_pdf.get("job_story"):
-            story.append(Paragraph(f"Job Story: {_jtbd_pdf['job_story']}", S["body"]))
-        for _jkey, _jlbl in [("functional_job","⚙️ Функциональная"),("emotional_job","❤️ Эмоциональная"),("social_job","👥 Социальная")]:
-            if _jtbd_pdf.get(_jkey): story.append(Paragraph(f"{_jlbl}: {_jtbd_pdf[_jkey]}", S["body"]))
-        if _jtbd_pdf.get("jtbd_gaps"):
-            story.append(Paragraph("Gaps:", S["h2"]))
-            for g in _jtbd_pdf["jtbd_gaps"][:5]: story.append(Paragraph(f"✗ {g}", S["orange"]))
-        if _jtbd_pdf.get("jtbd_recs"):
-            story.append(Paragraph("Рекомендации:", S["h2"]))
-            for rec in _jtbd_pdf["jtbd_recs"][:5]: story.append(Paragraph(f"→ {rec}", S["action"]))
-
-    # ── VPC ───────────────────────────────────────────────────────────────────
-    _vpc_pdf = result.get("vpc_analysis", {})
-    if _vpc_pdf:
-        story.append(Spacer(1, 6*mm))
-        story.append(Paragraph("Value Proposition Canvas", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        _vfit = pct(_vpc_pdf.get("fit_score", 0))
-        story.append(Paragraph(f"VPC Fit Score: <font color='{hex_str(score_color(_vfit))}'><b>{_vfit}%</b></font>", S["body"]))
-        if _vpc_pdf.get("vpc_verdict"):
-            story.append(Paragraph(f"AI CRO: {_vpc_pdf['vpc_verdict']}", S["body"]))
-        story.append(Spacer(1, 2*mm))
-        _jobs_str = "\n".join([f"• {j}" for j in _vpc_pdf.get("customer_jobs",[])[:3]])
-        _pains_str = "\n".join([f"• {p}" for p in _vpc_pdf.get("customer_pains",[])[:3]])
-        _pr_str = "\n".join([f"✅ {p}" for p in _vpc_pdf.get("pain_relievers_present",[])[:3]])
-        _pm_str = "\n".join([f"❌ {p}" for p in _vpc_pdf.get("pain_relievers_missing",[])[:3]])
-        _vpc_tbl = Table([
-            ["Профиль покупателя", "Карта ценности"],
-            [Paragraph(f"Jobs:\n{_jobs_str}\n\nPains:\n{_pains_str}", S["body"]),
-             Paragraph(f"Pain Relievers:\n{_pr_str}\n\nMissing:\n{_pm_str}", S["body"])]
-        ], colWidths=[W/2-2*mm, W/2-2*mm])
-        _vpc_tbl.setStyle(TableStyle([
-            ("FONTNAME", (0,0), (-1,0), _FB), ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1e293b")),
-            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-            ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#f8fafc")),
-            ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-            ("VALIGN", (0,0), (-1,-1), "TOP"), ("PADDING", (0,0), (-1,-1), 6),
+        gaps = result.get(f"{sec_key}_gaps",[])
+        rec  = result.get(f"{sec_key}_rec","")
+        hdr_row = Table([[
+            Paragraph(f"<b>{sec_name}</b>",
+                ps(f"ch_{sec_key}", fontName=_FB, fontSize=10, textColor=C["navy"])),
+            Paragraph(f"<font color='{hex_str(sc_c)}'><b>{sc_v}%</b></font>",
+                ps(f"cs_{sec_key}", fontName=_FB, fontSize=14, alignment=TA_RIGHT)),
+        ]], colWidths=[W-25*mm, 25*mm])
+        hdr_row.setStyle(TableStyle([
+            ("LINEBELOW",(0,0),(-1,-1),1.5,sc_c),
+            ("PADDING",(0,0),(-1,-1),4),
+            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
         ]))
-        story.append(_vpc_tbl)
+        story.append(hdr_row)
+        if gaps:
+            for g in gaps[:3]: story.append(Paragraph(f"⚠ {_clean(g)}", S["orange"]))
+        if rec: story.append(Paragraph(f"→ {_clean(rec)}", S["action"]))
+        story.append(Spacer(1,3*mm))
 
-    # ── Priority Actions full ──────────────────────────────────────────────────
-    _fa = result.get("actions", [])
-    _fp = result.get("priority_improvements", [])
-    if _fa or _fp:
-        story.append(PageBreak())
-        story.append(Paragraph("Полный план действий", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        story.append(Spacer(1, 3*mm))
-        for i, a in enumerate(_fp): story.append(Paragraph(f"{i+1}. {a}", S["action"]))
-        for a in _fa:
-            if isinstance(a, dict):
-                _imp = a.get("impact","MEDIUM")
-                _ic = colors.HexColor("#dc2626") if _imp=="HIGH" else (colors.HexColor("#d97706") if _imp=="MEDIUM" else colors.HexColor("#15803d"))
-                story.append(Paragraph(f"[{_imp}] {a.get('action','')}",
-                    ParagraphStyle("act2", fontSize=9, fontName=_FB, textColor=_ic, spaceAfter=2)))
-                if a.get("details"): story.append(Paragraph(a["details"], S["small"]))
-
-    # ── Missing Characteristics ────────────────────────────────────────────────
-    if result.get("missing_chars"):
-        story.append(Spacer(1, 4*mm))
-        story.append(Paragraph("Отсутствующие характеристики", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        for ch in result["missing_chars"][:10]:
+    # Raw content
+    _title_txt = our_data.get("title","")
+    _bullets = our_data.get("feature_bullets",[])
+    if _title_txt:
+        story.append(Paragraph("Title:", S["h2"]))
+        story.append(Paragraph(_clean(_title_txt)[:200], S["body"]))
+        story.append(Spacer(1,2*mm))
+    if _bullets:
+        story.append(Paragraph("Bullets:", S["h2"]))
+        for b in _bullets[:5]:
+            _bl = len(b.encode())
+            _bc = C["red"] if _bl>255 else C["slate"]
             story.append(Paragraph(
-                f"• {ch.get('name','')} [{ch.get('priority','')}] — {ch.get('how_competitors_use','')}",
+                f"<font color='{hex_str(_bc)}'>{'🔴' if _bl>255 else '✅'}</font> {_clean(b)[:200]} <font color='{hex_str(C['muted'])}'>[{_bl}b]</font>",
                 S["body"]))
 
-    # ── Stop Words ────────────────────────────────────────────────────────────
-    _sw_pdf = check_listing_stop_words(our_data)
-    if _sw_pdf:
-        story.append(Spacer(1, 4*mm))
-        story.append(Paragraph("Amazon Stop Words — Найдены нарушения", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        for field, found in _sw_pdf.items():
-            if found.get("do_not_use"):
-                story.append(Paragraph(f"{field} — 🚫 Запрещено: {', '.join(found['do_not_use'])}", S["orange"]))
-            if found.get("try_to_avoid"):
-                story.append(Paragraph(f"{field} — ⚠️ Нежелательно: {', '.join(found['try_to_avoid'])}", S["body"]))
+    # ── COSMO / RUFUS / JTBD / VPC ───────────────────────────────────────────
+    story.append(PageBreak())
+    story.append(Paragraph("▌ AI ВИДИМОСТЬ — COSMO / RUFUS", ps("aih", fontName=_FB, fontSize=11,
+        textColor=C["navy"], spaceBefore=0, spaceAfter=4)))
 
-    # ── Competitors ───────────────────────────────────────────────────────────
+    _ca = result.get("cosmo_analysis",{})
+    _ra = result.get("rufus_analysis",{})
+    _cs = pct(_ca.get("score",0))
+    _rs = pct(_ra.get("score",0))
+
+    ai_score_tbl = Table([[
+        Table([[
+            Paragraph(f"<b>{_cs}%</b>", ps("csp", fontName=_FB, fontSize=26,
+                textColor=score_color(_cs), alignment=TA_CENTER)),
+            Paragraph("COSMO Score", ps("csl", fontSize=8, alignment=TA_CENTER, textColor=C["muted"])),
+        ]], style=[("BACKGROUND",(0,0),(-1,-1),score_bg(_cs)),
+                   ("PADDING",(0,0),(-1,-1),8),("ROUNDEDCORNERS",(0,0),(-1,-1),3)]),
+        Table([[
+            Paragraph(f"<b>{_rs}%</b>", ps("rsp", fontName=_FB, fontSize=26,
+                textColor=score_color(_rs), alignment=TA_CENTER)),
+            Paragraph("Rufus Score", ps("rsl", fontSize=8, alignment=TA_CENTER, textColor=C["muted"])),
+        ]], style=[("BACKGROUND",(0,0),(-1,-1),score_bg(_rs)),
+                   ("PADDING",(0,0),(-1,-1),8),("ROUNDEDCORNERS",(0,0),(-1,-1),3)]),
+    ]], colWidths=[W/2-2*mm, W/2-2*mm])
+    ai_score_tbl.setStyle(TableStyle([("PADDING",(0,0),(-1,-1),2)]))
+    story.append(ai_score_tbl)
+    story.append(Spacer(1,4*mm))
+
+    _sig_p = _ca.get("signals_present",[])
+    _sig_m = _ca.get("signals_missing",[])
+    if _sig_p or _sig_m:
+        sig_tbl = Table([[
+            [Paragraph("<b>✅ Присутствуют</b>", S["h2"])] +
+            [Paragraph(f"• {_clean(s)}", S["green"]) for s in _sig_p[:6]],
+            [Paragraph("<b>❌ Отсутствуют</b>", S["h2"])] +
+            [Paragraph(f"• {_clean(s)}", S["orange"]) for s in _sig_m[:6]],
+        ]], colWidths=[W/2-2*mm, W/2-2*mm])
+        sig_tbl.setStyle(TableStyle([
+            ("VALIGN",(0,0),(-1,-1),"TOP"),
+            ("BACKGROUND",(0,0),(0,0),colors.HexColor("#f0fdf4")),
+            ("BACKGROUND",(1,0),(1,0),colors.HexColor("#fffbeb")),
+            ("GRID",(0,0),(-1,-1),0.3,C["border"]),
+            ("PADDING",(0,0),(-1,-1),6),
+        ]))
+        story.append(sig_tbl)
+
+    if _ra.get("issues"):
+        story.append(Spacer(1,3*mm))
+        story.append(Paragraph("<b>Rufus Issues:</b>", S["h2"]))
+        for iss in _ra["issues"][:4]:
+            story.append(Paragraph(f"⚠ {_clean(iss)}", S["orange"]))
+
+    # JTBD
+    _jtbd = result.get("jtbd_analysis",{})
+    if _jtbd:
+        story.append(Spacer(1,5*mm))
+        story.append(Paragraph("▌ JTBD — JOBS TO BE DONE", ps("jh", fontName=_FB, fontSize=11,
+            textColor=C["navy"], spaceAfter=3)))
+        _js = pct(_jtbd.get("alignment_score",0))
+        story.append(Paragraph(
+            f"Alignment Score: <font color='{hex_str(score_color(_js))}'><b>{_js}%</b></font>",
+            S["body"]))
+        if _jtbd.get("job_story"):
+            js_box = Table([[Paragraph(_clean(_jtbd["job_story"]),
+                ps("jbs", fontSize=9, textColor=C["navy"], fontName=_FB, leading=14))]],
+                colWidths=[W])
+            js_box.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f0f9ff")),
+                ("LINEBELOW",(0,0),(-1,-1),2,C["blue2"]),
+                ("PADDING",(0,0),(-1,-1),8),
+            ]))
+            story.append(Spacer(1,2*mm))
+            story.append(js_box)
+            story.append(Spacer(1,3*mm))
+
+        j_rows = []
+        for jkey, jlbl, jclr in [
+            ("functional_job","⚙️ Функциональная",C["blue"]),
+            ("emotional_job","❤️ Эмоциональная",C["red"]),
+            ("social_job","👥 Социальная",C["accent"]),
+        ]:
+            if _jtbd.get(jkey):
+                j_rows.append(Table([[
+                    Paragraph(f"<b>{jlbl}</b>", ps(f"jl_{jkey}", fontName=_FB, fontSize=8, textColor=jclr)),
+                    Paragraph(_clean(_jtbd[jkey]), ps(f"jv_{jkey}", fontSize=8, textColor=C["slate"])),
+                ]], colWidths=[30*mm, W-30*mm], style=[
+                    ("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),
+                    ("PADDING",(0,0),(-1,-1),4),
+                ]))
+        for jr in j_rows: story.append(jr)
+
+        if _jtbd.get("jtbd_gaps"):
+            story.append(Spacer(1,2*mm))
+            story.append(Paragraph("<b>Gaps:</b>", S["h2"]))
+            for g in _jtbd["jtbd_gaps"][:4]:
+                story.append(Paragraph(f"✗ {_clean(g)}", S["red"]))
+        if _jtbd.get("jtbd_recs"):
+            story.append(Paragraph("<b>Рекомендации:</b>", S["h2"]))
+            for rec in _jtbd["jtbd_recs"][:4]:
+                story.append(Paragraph(f"→ {_clean(rec)}", S["action"]))
+
+    # VPC
+    _vpc = result.get("vpc_analysis",{})
+    if _vpc:
+        story.append(PageBreak())
+        story.append(Paragraph("▌ VALUE PROPOSITION CANVAS", ps("vh", fontName=_FB, fontSize=11,
+            textColor=C["navy"], spaceAfter=3)))
+        _vfit = pct(_vpc.get("fit_score",0))
+        story.append(Paragraph(
+            f"VPC Fit Score: <font color='{hex_str(score_color(_vfit))}'><b>{_vfit}%</b></font>  |  "
+            f"Value Gap: <b>{100-_vfit}%</b>",
+            S["body"]))
+        if _vpc.get("vpc_verdict"):
+            verd_box = Table([[Paragraph(
+                f"<b>AI CRO Консультант:</b> {_clean(_vpc['vpc_verdict'])}",
+                ps("vb", fontSize=9, textColor=C["navy"], leading=13))]],
+                colWidths=[W])
+            verd_box.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#faf5ff")),
+                ("LINEBEFORE",(0,0),(0,-1),3,C["accent"]),
+                ("PADDING",(0,0),(-1,-1),8),
+            ]))
+            story.append(Spacer(1,2*mm))
+            story.append(verd_box)
+            story.append(Spacer(1,3*mm))
+
+        def _bullets_list(items, icon, clr):
+            return [Paragraph(f"<font color='{hex_str(clr)}'>{icon}</font> {_clean(it)}",
+                ps(f"vp_{icon}", fontSize=8, textColor=C["slate"])) for it in (items or [])[:4]]
+
+        vpc_tbl = Table([[
+            [Paragraph("<b>👤 Профиль покупателя</b>", ps("vclh", fontName=_FB, fontSize=9, textColor=C["navy"])),
+             Paragraph("<b>Jobs</b>", ps("vjh", fontName=_FB, fontSize=8, textColor=C["blue"]))] +
+             _bullets_list(_vpc.get("customer_jobs",[]),"◆",C["blue"]) +
+            [Paragraph("<b>Pains</b>", ps("vph2", fontName=_FB, fontSize=8, textColor=C["red"]))] +
+             _bullets_list(_vpc.get("customer_pains",[]),"◆",C["red"]),
+            [Paragraph("<b>📦 Карта ценности</b>", ps("vvlh", fontName=_FB, fontSize=9, textColor=C["navy"])),
+             Paragraph("<b>✅ Закрывает</b>", ps("vprh", fontName=_FB, fontSize=8, textColor=C["green"]))] +
+             _bullets_list(_vpc.get("pain_relievers_present",[]),"✓",C["green"]) +
+            [Paragraph("<b>❌ Не закрывает</b>", ps("vmh", fontName=_FB, fontSize=8, textColor=C["red"]))] +
+             _bullets_list(_vpc.get("pain_relievers_missing",[]),"✗",C["red"]),
+        ]], colWidths=[W/2-2*mm, W/2-2*mm])
+        vpc_tbl.setStyle(TableStyle([
+            ("VALIGN",(0,0),(-1,-1),"TOP"),
+            ("BACKGROUND",(0,0),(0,0),colors.HexColor("#f0f9ff")),
+            ("BACKGROUND",(1,0),(1,0),colors.HexColor("#f0fdf4")),
+            ("GRID",(0,0),(-1,-1),0.3,C["border"]),
+            ("PADDING",(0,0),(-1,-1),7),
+        ]))
+        story.append(vpc_tbl)
+
+    # ── FULL ACTIONS + MISSING CHARS + STOP WORDS ─────────────────────────────
+    _fa = result.get("actions",[])
+    _mc = result.get("missing_chars",[])
+    _sw = check_listing_stop_words(our_data)
+
+    if _fa or _mc or _sw:
+        story.append(PageBreak())
+
+    if _fa:
+        story.append(Paragraph("▌ ПОЛНЫЙ ПЛАН ДЕЙСТВИЙ", ps("fah", fontName=_FB, fontSize=11,
+            textColor=C["navy"], spaceAfter=3)))
+        _fa_sorted = sorted(_fa, key=lambda x: {"HIGH":0,"MEDIUM":1,"LOW":2}.get(x.get("impact","MEDIUM"),1))
+        for a in _fa_sorted:
+            if not isinstance(a,dict): continue
+            _imp = a.get("impact","MEDIUM")
+            _ic = C["red"] if _imp=="HIGH" else (C["yellow"] if _imp=="MEDIUM" else C["green"])
+            _ibg= colors.HexColor("#fee2e2") if _imp=="HIGH" else (colors.HexColor("#fef9c3") if _imp=="MEDIUM" else colors.HexColor("#dcfce7"))
+            story.append(Table([[
+                Paragraph(f"<b>{_imp}</b>", ps(f"fa_{_imp}", fontName=_FB, fontSize=7,
+                    textColor=_ic, alignment=TA_CENTER)),
+                [Paragraph(_clean(a.get("action","")),
+                    ps("fat", fontName=_FB, fontSize=9, textColor=C["navy"]))] +
+                ([Paragraph(_clean(a["details"])[:200], S["small"])] if a.get("details") else []),
+            ]], colWidths=[14*mm, W-14*mm], style=[
+                ("BACKGROUND",(0,0),(0,0),_ibg),
+                ("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),
+                ("PADDING",(0,0),(-1,-1),5),
+                ("VALIGN",(0,0),(-1,-1),"TOP"),
+            ]))
+
+    if _mc:
+        story.append(Spacer(1,5*mm))
+        story.append(Paragraph("▌ ОТСУТСТВУЮЩИЕ ХАРАКТЕРИСТИКИ", ps("mch", fontName=_FB,
+            fontSize=11, textColor=C["navy"], spaceAfter=3)))
+        _mc_h = [c for c in _mc if c.get("priority")=="HIGH"]
+        _mc_m = [c for c in _mc if c.get("priority")!="HIGH"]
+        for ch in (_mc_h+_mc_m)[:10]:
+            _cp = ch.get("priority","")
+            _cc = C["red"] if _cp=="HIGH" else C["yellow"]
+            story.append(Table([[
+                Paragraph(f"<b>[{_cp}]</b>", ps(f"mc_{_cp}", fontName=_FB, fontSize=7,
+                    textColor=_cc, alignment=TA_CENTER)),
+                [Paragraph(f"<b>{_clean(ch.get('name',''))}</b>",
+                    ps("mcn", fontName=_FB, fontSize=9, textColor=C["navy"])),
+                 Paragraph(_clean(ch.get("how_competitors_use",""))[:150], S["small"])],
+            ]], colWidths=[14*mm, W-14*mm], style=[
+                ("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),
+                ("PADDING",(0,0),(-1,-1),4),
+                ("VALIGN",(0,0),(-1,-1),"TOP"),
+            ]))
+
+    if _sw:
+        story.append(Spacer(1,4*mm))
+        story.append(Paragraph("▌ AMAZON STOP WORDS", ps("swh", fontName=_FB, fontSize=11,
+            textColor=C["navy"], spaceAfter=3)))
+        for field, found in _sw.items():
+            if found.get("do_not_use"):
+                story.append(Paragraph(f"<b>{field}</b> — 🚫 Запрещено: " +
+                    ", ".join(found["do_not_use"]), S["red"]))
+            if found.get("try_to_avoid"):
+                story.append(Paragraph(f"<b>{field}</b> — ⚠ Нежелательно: " +
+                    ", ".join(found["try_to_avoid"]), S["orange"]))
+
+    # ── COMPETITORS ───────────────────────────────────────────────────────────
     if comp_data:
         story.append(PageBreak())
-        story.append(Paragraph("Конкуренты", S["h1"]))
-        story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#e2e8f0")))
-        story.append(Spacer(1, 3*mm))
-        _comp_rows = [["ASIN", "Title", "Цена", "★", "Overall"]]
+        story.append(Paragraph("▌ АНАЛИЗ КОНКУРЕНТОВ", ps("comph", fontName=_FB, fontSize=11,
+            textColor=C["navy"], spaceAfter=4)))
+
+        comp_hdr = [[
+            Paragraph("<b>ASIN</b>", S["small"]),
+            Paragraph("<b>Title</b>", S["small"]),
+            Paragraph("<b>Цена</b>", S["small"]),
+            Paragraph("<b>★</b>", S["small"]),
+            Paragraph("<b>Overall</b>", S["small"]),
+        ]]
         for i, comp in enumerate(comp_data[:5]):
-            _cai2 = st.session_state.get(f"comp_ai_{i}", {})
-            _cover2 = pct(_cai2.get("overall_score", 0)) if _cai2 else 0
-            _comp_rows.append([
-                get_asin_from_data(comp),
-                comp.get("title","")[:45],
-                comp.get("price",""),
-                str(comp.get("average_rating","")),
-                Paragraph(f"<font color='{hex_str(score_color(_cover2))}'><b>{_cover2}%</b></font>", S["center"])
+            _cai = st.session_state.get(f"comp_ai_{i}",{})
+            _cov = pct(_cai.get("overall_score",0)) if _cai else 0
+            _coc = score_color(_cov)
+            comp_hdr.append([
+                Paragraph(get_asin_from_data(comp), S["small"]),
+                Paragraph(_clean(comp.get("title",""))[:45], S["small"]),
+                Paragraph(str(comp.get("price","")), S["small"]),
+                Paragraph(str(comp.get("average_rating","")), S["small"]),
+                Paragraph(f"<font color='{hex_str(_coc)}'><b>{_cov}%</b></font>",
+                    ps("cov", fontName=_FB, fontSize=9, alignment=TA_CENTER)),
             ])
-        _comp_tbl2 = Table(_comp_rows, colWidths=[25*mm, 75*mm, 18*mm, 12*mm, 20*mm])
-        _comp_tbl2.setStyle(TableStyle([
-            ("FONTNAME", (0,0), (-1,0), _FB), ("FONTSIZE", (0,0), (-1,-1), 8),
-            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1e293b")),
-            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#f8fafc"), colors.white]),
-            ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-            ("PADDING", (0,0), (-1,-1), 5),
+
+        comp_tbl = Table(comp_hdr, colWidths=[26*mm, 80*mm, 18*mm, 12*mm, 18*mm])
+        comp_tbl.setStyle(TableStyle([
+            ("FONTNAME",(0,0),(-1,0),_FB), ("FONTSIZE",(0,0),(-1,-1),8),
+            ("BACKGROUND",(0,0),(-1,0),C["navy"]),
+            ("TEXTCOLOR",(0,0),(-1,0),C["white"]),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[C["light"], C["white"]]),
+            ("GRID",(0,0),(-1,-1),0.3,C["border"]),
+            ("PADDING",(0,0),(-1,-1),5),
         ]))
-        story.append(_comp_tbl2)
+        story.append(comp_tbl)
 
-        # Competitor bullets comparison
         for i, comp in enumerate(comp_data[:3]):
-            _cb = comp.get("feature_bullets", [])
+            _cb = comp.get("feature_bullets",[])
             if not _cb: continue
-            story.append(Spacer(1, 4*mm))
-            story.append(Paragraph(f"Конкурент {i+1} — {get_asin_from_data(comp)}: Bullets", S["h2"]))
-            for b in _cb[:5]: story.append(Paragraph(f"• {b[:200]}", S["small"]))
+            story.append(Spacer(1,4*mm))
+            story.append(Paragraph(
+                f"<b>Конкурент {i+1}</b> — {get_asin_from_data(comp)}",
+                ps(f"cbh_{i}", fontName=_FB, fontSize=9, textColor=C["slate"])))
+            for b in _cb[:5]:
+                story.append(Paragraph(f"• {_clean(b)[:200]}", S["small"]))
 
-    story.append(Spacer(1, 6*mm))
-    story.append(HRFlowable(width=W, thickness=0.5, color=colors.HexColor("#cbd5e1")))
-    story.append(Paragraph(f"Сгенерировано: {date_str} | ASIN: {asin} | Amazon Listing Analyzer", S["small"]))
+    # ── FOOTER ────────────────────────────────────────────────────────────────
+    story.append(Spacer(1,6*mm))
+    footer_tbl = Table([[
+        Paragraph(f"Amazon Listing Analyzer  |  ASIN: {asin}  |  {date_str}", S["footer"]),
+    ]], colWidths=[W])
+    footer_tbl.setStyle(TableStyle([
+        ("LINEABOVE",(0,0),(-1,-1),0.5,C["border"]),
+        ("PADDING",(0,0),(-1,-1),4),
+    ]))
+    story.append(footer_tbl)
 
     doc.build(story)
     buf.seek(0)
