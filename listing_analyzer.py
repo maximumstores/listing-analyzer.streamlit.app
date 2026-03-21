@@ -2379,17 +2379,32 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     ]
 
     # Build 2-column score cards
+    _has_aplus_pdf = bool(our_data.get("aplus") or our_data.get("aplus_content"))
+
     def score_card(label, raw):
         v = pct(raw)
+        # Description 0% + A+ present → show as grey "A+"
+        if label == "Описание" and v == 0 and _has_aplus_pdf:
+            return Table([[
+                Paragraph(f"<b>{label}</b>", ps(f"sc_{label}", fontName=_FB, fontSize=8, textColor=C["navy"])),
+                Paragraph("<b>A+</b>", ps(f"sv_{label}", fontName=_FB, fontSize=11,
+                    alignment=TA_RIGHT, textColor=C["muted"])),
+            ],[
+                Paragraph("скрыто A+", ps(f"sb_{label}", fontSize=7, textColor=C["muted"])), "",
+            ]], colWidths=[35*mm, 18*mm], style=TableStyle([
+                ("BACKGROUND",(0,0),(-1,-1),C["light"]),
+                ("PADDING",(0,0),(-1,-1),4),
+                ("SPAN",(0,1),(1,1)),
+                ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+            ]))
         sc = score_color(v)
         bg = score_bg(v)
-        bar_w = max(2, int(v * 0.5))  # 0-50 units
         return Table([[
             Paragraph(f"<b>{label}</b>", ps(f"sc_{label}", fontName=_FB, fontSize=8, textColor=C["navy"])),
             Paragraph(f"<font color='{hex_str(sc)}'><b>{v}%</b></font>",
                 ps(f"sv_{label}", fontName=_FB, fontSize=11, alignment=TA_RIGHT)),
         ],[
-            Table([[""]], colWidths=[bar_w*mm if bar_w*mm < 40*mm else 40*mm],
+            Table([[""]], colWidths=[max(2, int(v * 0.5))*mm if max(2, int(v * 0.5))*mm < 40*mm else 40*mm],
                 style=[("BACKGROUND",(0,0),(-1,-1),sc),("ROWHEIGHTS",(0,0),(-1,-1),3)]),
             "",
         ]], colWidths=[35*mm, 18*mm], style=TableStyle([
