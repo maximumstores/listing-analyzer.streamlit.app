@@ -1,5 +1,7 @@
 # Amazon Listing Analyzer v2 — MR.EQUIPP
 import json, re, base64, requests, streamlit as st
+from PIL import Image# Amazon Listing Analyzer v2 — MR.EQUIPP
+import json, re, base64, requests, streamlit as st
 from PIL import Image
 import io
 from datetime import datetime
@@ -43,6 +45,7 @@ def db_init():
                 vision_text TEXT,
                 our_title TEXT,
                 competitors_json TEXT,
+                our_data_json TEXT,
                 workflow_status TEXT DEFAULT 'new_audit',
                 workflow_note TEXT,
                 workflow_updated_at TIMESTAMP
@@ -54,6 +57,7 @@ def db_init():
             ("workflow_status", "TEXT DEFAULT 'new_audit'"),
             ("workflow_note", "TEXT"),
             ("workflow_updated_at", "TIMESTAMP"),
+            ("our_data_json", "TEXT"),
         ]:
             try:
                 cur.execute(f"ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS {_col} {_def}")
@@ -91,8 +95,8 @@ def db_save(asin, result, vision_text, our_title):
         cur.execute("""
             INSERT INTO listing_analysis
               (asin, overall_score, title_score, bullets_score, images_score,
-               aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title, competitors_json)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title, competitors_json, our_data_json)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (asin,
               pct(result.get("overall_score",0)),
               pct(result.get("title_score",0)),
@@ -103,7 +107,8 @@ def db_save(asin, result, vision_text, our_title):
               json.dumps(result, ensure_ascii=False),
               vision_text or "",
               our_title or "",
-              json.dumps(comp_snap, ensure_ascii=False)))
+              json.dumps(comp_snap, ensure_ascii=False),
+              json.dumps(st.session_state.get("our_data",{}), ensure_ascii=False)))
         conn.commit()
         conn.close()
         return True
@@ -1902,7 +1907,7 @@ def page_history():
                     conn_h.commit()
                 except Exception: pass
                 cur_h.execute("""
-                    SELECT result_json, vision_text, competitors_json
+                    SELECT result_json, vision_text, competitors_json, our_data_json
                     FROM listing_analysis
                     WHERE asin = %s
                     ORDER BY analyzed_at DESC
@@ -1918,6 +1923,12 @@ def page_history():
                     comps_h = json.loads(row_h[2])
                     for _ci, _ch in enumerate(comps_h):
                         st.session_state[f"comp_ai_{_ci}"] = {"overall_score": f"{_ch.get('overall',0)}%"}
+                # Restore our_data if saved
+                if row_h[3]:
+                    try:
+                        _od_hist = json.loads(row_h[3])
+                        st.session_state["our_data"] = _od_hist
+                    except: pass
                 st.session_state["_hist_loaded"] = sel_hist
                 st.session_state["page"] = "🏠 Обзор"
                 st.success(f"✅ Загружен анализ от {sel_hist}")
