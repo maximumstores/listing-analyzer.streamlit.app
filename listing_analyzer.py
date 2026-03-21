@@ -2470,7 +2470,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
 
     for i, img_d in enumerate(images[:5]):
         blk = _blocks.get(i+1,"")
-        sc_m  = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", blk)
+        sc_m  = _re.search(r"(\d+)/10", blk)
         typ_m = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
         str_m = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})", blk)
         wk_m  = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})", blk)
@@ -2485,49 +2485,92 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         atxt  = _clean(ac_m.group(1))  if ac_m  else ""
         ctxt  = _clean(cv_m.group(1))  if cv_m  else ""
         etxt  = _clean(em_m.group(1))  if em_m  else ""
-
-        # Score bar
-        bar_cells = []
-        for _b in range(10):
-            _bc = sc_c if _b < sc_v else C["border"]
-            bar_cells.append(Table([[""]], colWidths=[4.5*mm],
-                style=[("BACKGROUND",(0,0),(-1,-1),_bc),
-                       ("ROWHEIGHTS",(0,0),(-1,-1),5)]))
+        sc_lbl = "Отлично" if sc_v>=8 else ("Хорошо" if sc_v>=6 else "Слабо")
 
         try:
             _b64 = img_d.get("b64","") if isinstance(img_d,dict) else img_d
             _bytes = base64.b64decode(_b64)
             _pil = PILImage.open(io.BytesIO(_bytes)).convert("RGB")
-            _pil.thumbnail((160,160))
-            _tb = io.BytesIO(); _pil.save(_tb,"JPEG",quality=75); _tb.seek(0)
-            _rl = RLImage(_tb, width=32*mm, height=32*mm)
+            _pil.thumbnail((200,200))
+            _tb = io.BytesIO(); _pil.save(_tb,"JPEG",quality=80); _tb.seek(0)
+            _rl = RLImage(_tb, width=40*mm, height=40*mm)
         except: _rl = Paragraph(f"#{i+1}", S["small"])
 
         # Info content
         info = []
         hdr_txt = f"Фото #{i+1}" + (f" — {ptype}" if ptype else "")
-        info.append(Table([[
-            Paragraph(f"<b>{hdr_txt}</b>", ps("phdr", fontName=_FB, fontSize=9, textColor=C["navy"])),
-            Paragraph(f"<font color='{hex_str(sc_c)}'><b>{sc_v}/10</b></font>",
-                ps("psc", fontName=_FB, fontSize=14, alignment=TA_RIGHT, textColor=sc_c)),
-        ]], colWidths=[W*0.5, 20*mm], style=[
-            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),("PADDING",(0,0),(-1,-1),0)]))
-        # bar
-        info.append(Table([bar_cells], colWidths=[4.5*mm]*10,
-            style=[("PADDING",(0,0),(-1,-1),0.5)]))
-        info.append(Spacer(1,2*mm))
-        if stxt: info.append(Paragraph(f"✅ {stxt}", S["green"]))
-        if wtxt: info.append(Paragraph(f"⚠ {wtxt}", S["orange"]))
-        if atxt: info.append(Paragraph(f"→ {atxt}", S["action"]))
-        if ctxt: info.append(Paragraph(f"💡 {ctxt}", S["body"]))
-        if etxt: info.append(Paragraph(f"😶 {etxt}", ps("em", fontSize=8, textColor=C["accent"])))
 
-        photo_row = Table([[_rl, info]], colWidths=[35*mm, W-35*mm])
+        # Header row with score
+        info.append(Table([[
+            Paragraph(f"<b>{hdr_txt}</b>",
+                ps("phdr", fontName=_FB, fontSize=10, textColor=C["navy"])),
+            Paragraph(
+                f"<font color='{hex_str(sc_c)}'><b>{sc_v}/10</b></font>  "
+                f"<font color='{hex_str(sc_c)}'>{sc_lbl}</font>",
+                ps("psc", fontName=_FB, fontSize=11, alignment=TA_RIGHT)),
+        ]], colWidths=[W*0.45, 28*mm], style=[
+            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+            ("PADDING",(0,0),(-1,-1),0),
+            ("LINEBELOW",(0,0),(-1,-1),1.5,sc_c),
+        ]))
+        info.append(Spacer(1,1.5*mm))
+
+        # Score bar — colored segments
+        bar_cells = []
+        for _b in range(10):
+            _bc = sc_c if _b < sc_v else C["border"]
+            bar_cells.append(Table([[""]], colWidths=[4.8*mm],
+                style=[("BACKGROUND",(0,0),(-1,-1),_bc),
+                       ("ROWHEIGHTS",(0,0),(-1,-1),6)]))
+        info.append(Table([bar_cells], colWidths=[4.8*mm]*10,
+            style=[("PADDING",(0,0),(-1,-1),0.5)]))
+        info.append(Spacer(1,2.5*mm))
+
+        if stxt:
+            st_box = Table([[Paragraph(f"✅  {stxt}", ps("pst", fontSize=9, textColor=C["green"]))]],
+                colWidths=[W-40*mm-4*mm])
+            st_box.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f0fdf4")),
+                ("LINEBEFORE",(0,0),(0,-1),2,C["green2"]),
+                ("PADDING",(0,0),(-1,-1),5),
+            ]))
+            info.append(st_box)
+            info.append(Spacer(1,1.5*mm))
+        if wtxt:
+            wt_box = Table([[Paragraph(f"⚠  {wtxt}", ps("pwt", fontSize=9, textColor=C["yellow"]))]],
+                colWidths=[W-40*mm-4*mm])
+            wt_box.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#fffbeb")),
+                ("LINEBEFORE",(0,0),(0,-1),2,C["yellow2"]),
+                ("PADDING",(0,0),(-1,-1),5),
+            ]))
+            info.append(wt_box)
+            info.append(Spacer(1,1.5*mm))
+        if atxt:
+            info.append(Paragraph(f"<b>→</b> {atxt}",
+                ps("pat", fontSize=9, textColor=C["blue"], fontName=_FB)))
+        if ctxt:
+            info.append(Paragraph(f"💡 {ctxt}", ps("pct", fontSize=8, textColor=C["muted"])))
+        if etxt:
+            em_box = Table([[Paragraph(
+                f"<font color='{hex_str(C['accent'])}'><b>😶 ЭМОЦИЯ:</b></font>  {etxt}",
+                ps("pet", fontSize=8, textColor=C["slate"]))]],
+                colWidths=[W-40*mm-4*mm])
+            em_box.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#faf5ff")),
+                ("LINEBEFORE",(0,0),(0,-1),2,C["accent"]),
+                ("PADDING",(0,0),(-1,-1),5),
+            ]))
+            info.append(Spacer(1,1.5*mm))
+            info.append(em_box)
+
+        photo_row = Table([[_rl, info]], colWidths=[43*mm, W-43*mm])
         photo_row.setStyle(TableStyle([
             ("VALIGN",(0,0),(-1,-1),"TOP"),
-            ("BACKGROUND",(0,0),(-1,-1),C["light"]),
+            ("BACKGROUND",(0,0),(-1,-1),C["white"]),
             ("LINEBELOW",(0,0),(-1,-1),0.5,C["border"]),
-            ("PADDING",(0,0),(0,0),4),
+            ("LINEBEFORE",(0,0),(0,-1),3,sc_c),
+            ("PADDING",(0,0),(0,0),5),
             ("PADDING",(1,0),(1,0),6),
         ]))
         story.append(KeepTogether([photo_row, Spacer(1,2*mm)]))
@@ -2553,7 +2596,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
         for _bi in range(max(len(_aurls),len(_apblks))):
             _bblk = _apblks.get(_bi+1,"")
             _bmod = _re.search(r"(?:Модуль|Module)\s*[:\-]\s*(.+)", _bblk)
-            _bsc  = _re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", _bblk)
+            _bsc  = _re.search(r"(\d+)/10", _bblk)
             _bstr = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})", _bblk)
             _bwk  = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})", _bblk)
             _bact = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})", _bblk)
