@@ -1823,6 +1823,25 @@ def page_history():
         st.info("История пуста — запусти первый анализ")
         return
 
+    # ── Общая сводка по всем ASIN ─────────────────────────────────────────────
+    st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
+    import pandas as pd
+    _summary_rows = []
+    for _a in all_asins:
+        _sc = _a.get("score") or 0
+        _sc_icon = "🟢" if _sc>=75 else ("🟡" if _sc>=50 else ("🔴" if _sc>0 else "⚪"))
+        _summary_rows.append({
+            "": _sc_icon,
+            "ASIN": _a["asin"],
+            "Title": (_a.get("title") or "")[:50],
+            "Overall": f"{_sc}%" if _sc else "—",
+            "Дата": _a["date"].strftime("%d.%m.%Y") if _a.get("date") else "—",
+        })
+    _summary_df = pd.DataFrame(_summary_rows)
+    st.dataframe(_summary_df, use_container_width=True, hide_index=True,
+        column_config={"": st.column_config.TextColumn(width="small")})
+    st.divider()
+
     asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
     sel = st.selectbox("ASIN", asin_opts)
     sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
