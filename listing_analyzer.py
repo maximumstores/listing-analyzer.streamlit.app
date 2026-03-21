@@ -1867,16 +1867,32 @@ def page_history():
 
     if len(history) > 1:
         st.divider()
-        st.subheader("📊 Динамика Overall Score")
-        import pandas as pd
-        _hist_rev = list(reversed(history))
-        dates  = [h["date"].strftime("%d.%m %H:%M") for h in _hist_rev]
-        scores = [h["overall"] or 0 for h in _hist_rev]
-        df_chart = pd.DataFrame({"Overall %": scores}, index=dates)
-        if len(scores) <= 3:
-            st.bar_chart(df_chart, color="#3b82f6")
-        else:
-            st.line_chart(df_chart)
+        _hist_valid = [h for h in history if (h.get("overall") or 0) > 0]
+        if len(_hist_valid) >= 2:
+            st.subheader("📊 Динамика Overall Score")
+            import pandas as pd
+            _hist_rev = list(reversed(_hist_valid))
+            dates  = [h["date"].strftime("%d.%m %H:%M") for h in _hist_rev]
+            scores = [h["overall"] or 0 for h in _hist_rev]
+            df_chart = pd.DataFrame({"Overall %": scores}, index=dates)
+            st.area_chart(df_chart, color="#3b82f6")
+
+        # Cleanup button
+        _zero_count = len([h for h in history if (h.get("overall") or 0) == 0])
+        if _zero_count > 0:
+            _cl1, _cl2 = st.columns([3,1])
+            _cl1.caption(f"⚠️ В истории {_zero_count} записей с Overall 0% (упавшие анализы)")
+            if _cl2.button("🗑️ Очистить 0%", key="btn_clean_history", use_container_width=True):
+                _cconn = get_db()
+                if _cconn:
+                    try:
+                        _ccur = _cconn.cursor()
+                        _ccur.execute("DELETE FROM listing_analysis WHERE asin=%s AND overall_score=0", (sel_asin,))
+                        _cconn.commit(); _cconn.close()
+                        st.success(f"✅ Удалено {_zero_count} записей")
+                        st.rerun()
+                    except Exception as _ce:
+                        st.error(f"Ошибка: {_ce}")
 
     st.divider()
     amz_url = f"https://www.amazon.com/dp/{sel_asin}"
@@ -1888,10 +1904,18 @@ def page_history():
     if not history_show:
         st.info("Нет успешных анализов — все записи с Overall 0% скрыты. Запусти новый анализ.")
     else:
+        def _fmt(v):
+            if not v: return "—"
+            return f"{v}%"
         df = pd.DataFrame([{
             "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
-            "Overall": h["overall"], "Title": h["title"], "Bullets": h["bullets"],
-            "Images": h["images"], "A+": h["aplus"], "COSMO": h["cosmo"], "Rufus": h["rufus"],
+            "Overall": _fmt(h["overall"]),
+            "Title":   _fmt(h["title"]),
+            "Bullets": _fmt(h["bullets"]),
+            "Images":  _fmt(h["images"]),
+            "A+":      _fmt(h["aplus"]),
+            "COSMO":   _fmt(h["cosmo"]),
+            "Rufus":   _fmt(h["rufus"]),
         } for h in history_show])
         st.dataframe(df, use_container_width=True, hide_index=True)
 
