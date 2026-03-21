@@ -56,6 +56,7 @@ def db_init():
             ("workflow_note", "TEXT"),
             ("workflow_updated_at", "TIMESTAMP"),
             ("our_data_json", "TEXT"),
+            ("marketplace", "TEXT DEFAULT 'com'"),
         ]:
             try:
                 cur.execute(f"ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS {_col} {_def}")
@@ -93,8 +94,9 @@ def db_save(asin, result, vision_text, our_title):
         cur.execute("""
             INSERT INTO listing_analysis
               (asin, overall_score, title_score, bullets_score, images_score,
-               aplus_score, cosmo_score, rufus_score, result_json, vision_text, our_title, competitors_json, our_data_json)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               aplus_score, cosmo_score, rufus_score, result_json, vision_text,
+               our_title, competitors_json, our_data_json, marketplace)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (asin,
               pct(result.get("overall_score",0)),
               pct(result.get("title_score",0)),
@@ -106,7 +108,8 @@ def db_save(asin, result, vision_text, our_title):
               vision_text or "",
               our_title or "",
               json.dumps(comp_snap, ensure_ascii=False),
-              json.dumps(st.session_state.get("our_data",{}), ensure_ascii=False)))
+              json.dumps(st.session_state.get("our_data",{}), ensure_ascii=False),
+              st.session_state.get("_marketplace","com")))
         conn.commit()
         conn.close()
         return True
@@ -190,13 +193,15 @@ def db_all_asins():
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at, listing_type
+            SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at, listing_type,
+                   COALESCE(marketplace,'com') as marketplace
             FROM listing_analysis
             ORDER BY asin, analyzed_at DESC
         """)
         rows = cur.fetchall()
         conn.close()
-        return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3], "type": r[4]} for r in rows]
+        return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3],
+                 "type": r[4], "marketplace": r[5]} for r in rows]
     except Exception:
         return []
 
@@ -1826,6 +1831,24 @@ def page_history():
     # ── Общая сводка по всем ASIN ─────────────────────────────────────────────
     st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
     import pandas as pd
+
+    _DOMAIN_MAP = {
+        "amazon.com": "🇺🇸 .com",
+        "amazon.de":  "🇩🇪 .de",
+        "amazon.co.uk": "🇬🇧 .uk",
+        "amazon.ca":  "🇨🇦 .ca",
+        "amazon.fr":  "🇫🇷 .fr",
+        "amazon.it":  "🇮🇹 .it",
+        "amazon.es":  "🇪🇸 .es",
+    }
+
+    _saved_url = st.session_state.get("our_url_saved","")
+    def _get_domain_flag(asin_str, title_str=""):
+        for _dm, _flag in _DOMAIN_MAP.items():
+            if _dm in _saved_url:
+                return _flag
+        return "🇺🇸 .com"
+
     _summary_rows = []
     for _a in all_asins:
         _sc = _a.get("score") or 0
@@ -1835,15 +1858,35 @@ def page_history():
             "ASIN": _a["asin"],
             "Title": (_a.get("title") or "")[:50],
             "Overall": f"{_sc}%" if _sc else "—",
+            "Домен": _get_domain_flag(_a["asin"]),
             "Дата": _a["date"].strftime("%d.%m.%Y") if _a.get("date") else "—",
         })
     _summary_df = pd.DataFrame(_summary_rows)
-    st.dataframe(_summary_df, use_container_width=True, hide_index=True,
-        column_config={"": st.column_config.TextColumn(width="small")})
+
+    # Clickable selection via dataframe
+    _sel_event = st.dataframe(
+        _summary_df, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row",
+        column_config={"": st.column_config.TextColumn(width="small")},
+        key="history_table_sel"
+    )
+
+    # Get selected ASIN from table click OR fallback to selectbox
+    _clicked_asin = None
+    if _sel_event and _sel_event.selection and _sel_event.selection.get("rows"):
+        _row_idx = _sel_event.selection["rows"][0]
+        if _row_idx < len(all_asins):
+            _clicked_asin = all_asins[_row_idx]["asin"]
+
     st.divider()
 
     asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
-    sel = st.selectbox("ASIN", asin_opts)
+    # Pre-select from table click
+    _default_idx = 0
+    if _clicked_asin:
+        _match = next((i for i,a in enumerate(all_asins) if a["asin"]==_clicked_asin), 0)
+        _default_idx = _match
+    sel = st.selectbox("ASIN", asin_opts, index=_default_idx)
     sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
 
     # Full title + Amazon link
