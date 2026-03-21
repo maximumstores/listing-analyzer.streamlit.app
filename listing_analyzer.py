@@ -1316,6 +1316,12 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
 
     asin = get_asin(our_url) or "unknown"
     _lang = st.session_state.get("analysis_lang","ru")
+    # Detect marketplace from URL
+    _mp = "com"
+    for _d in ["co.uk","de","ca","fr","it","es","com"]:
+        if f"amazon.{_d}" in our_url:
+            _mp = _d; break
+    st.session_state["_marketplace"] = _mp
 
     # Read vision toggles
     _do_vision      = st.session_state.get("do_vision", True)
@@ -1832,6 +1838,8 @@ def page_history():
     st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
     import pandas as pd
 
+    _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
+
     _DOMAIN_MAP = {
         "amazon.com": "🇺🇸 .com",
         "amazon.de":  "🇩🇪 .de",
@@ -1853,17 +1861,30 @@ def page_history():
     for _a in all_asins:
         _sc = _a.get("score") or 0
         _sc_icon = "🟢" if _sc>=75 else ("🟡" if _sc>=50 else ("🔴" if _sc>0 else "⚪"))
+        _mp = _a.get("marketplace","com")
+        _mp_flag = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸"}.get(_mp,"🇺🇸")
         _summary_rows.append({
             "": _sc_icon,
             "ASIN": _a["asin"],
             "Title": (_a.get("title") or "")[:50],
             "Overall": f"{_sc}%" if _sc else "—",
-            "Домен": _get_domain_flag(_a["asin"]),
+            "Маркет": f"{_mp_flag} .{_mp}",
             "Дата": _a["date"].strftime("%d.%m.%Y") if _a.get("date") else "—",
         })
     _summary_df = pd.DataFrame(_summary_rows)
 
-    # Clickable selection via dataframe
+    # Filter by search
+    if _search:
+        _q = _search.lower()
+        _summary_df = _summary_df[
+            _summary_df["ASIN"].str.lower().str.contains(_q, na=False) |
+            _summary_df["Title"].str.lower().str.contains(_q, na=False)
+        ]
+        # Sync all_asins list to match filtered df
+        _filtered_asins = [a for a in all_asins if
+            _q in a["asin"].lower() or _q in (a.get("title") or "").lower()]
+    else:
+        _filtered_asins = all_asins
     _sel_event = st.dataframe(
         _summary_df, use_container_width=True, hide_index=True,
         on_select="rerun", selection_mode="single-row",
@@ -1875,8 +1896,8 @@ def page_history():
     _clicked_asin = None
     if _sel_event and _sel_event.selection and _sel_event.selection.get("rows"):
         _row_idx = _sel_event.selection["rows"][0]
-        if _row_idx < len(all_asins):
-            _clicked_asin = all_asins[_row_idx]["asin"]
+        if _row_idx < len(_filtered_asins):
+            _clicked_asin = _filtered_asins[_row_idx]["asin"]
 
     st.divider()
 
