@@ -1841,7 +1841,7 @@ def page_history():
     _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
 
     def _amz_thumb(asin):
-        return f"https://images-na.ssl-images-amazon.com/images/P/{asin}.01._SCLZZZZZZZ_.jpg"
+        return f"https://ws-na.amazon-adsystem.com/widgets/q?_encoding=UTF8&ASIN={asin}&ServiceVersion=20070822&ID=AsinImage&WS=1&Format=SL110"
 
     _filtered_asins = [a for a in all_asins if not _search or
         _search.lower() in a["asin"].lower() or
