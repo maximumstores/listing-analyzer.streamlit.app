@@ -1840,69 +1840,58 @@ def page_history():
 
     _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
 
-    _DOMAIN_MAP = {
-        "amazon.com": "🇺🇸 .com",
-        "amazon.de":  "🇩🇪 .de",
-        "amazon.co.uk": "🇬🇧 .uk",
-        "amazon.ca":  "🇨🇦 .ca",
-        "amazon.fr":  "🇫🇷 .fr",
-        "amazon.it":  "🇮🇹 .it",
-        "amazon.es":  "🇪🇸 .es",
-    }
+    def _amz_thumb(asin):
+        return f"https://images-na.ssl-images-amazon.com/images/P/{asin}.01._SCLZZZZZZZ_.jpg"
 
-    _saved_url = st.session_state.get("our_url_saved","")
-    def _get_domain_flag(asin_str, title_str=""):
-        for _dm, _flag in _DOMAIN_MAP.items():
-            if _dm in _saved_url:
-                return _flag
-        return "🇺🇸 .com"
+    _filtered_asins = [a for a in all_asins if not _search or
+        _search.lower() in a["asin"].lower() or
+        _search.lower() in (a.get("title") or "").lower()]
 
-    _summary_rows = []
-    for _a in all_asins:
+    _clicked_asin = None
+    for _idx, _a in enumerate(_filtered_asins):
         _sc = _a.get("score") or 0
-        _sc_icon = "🟢" if _sc>=75 else ("🟡" if _sc>=50 else ("🔴" if _sc>0 else "⚪"))
+        _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else ("#ef4444" if _sc>0 else "#94a3b8"))
+        _sc_lbl = "Strong" if _sc>=75 else ("Needs Work" if _sc>=50 else ("Critical" if _sc>0 else "—"))
+        _title = (_a.get("title") or "")[:60]
+        _asin = _a["asin"]
+        _date = _a["date"].strftime("%d.%m.%Y %H:%M") if _a.get("date") else "—"
         _mp = _a.get("marketplace","com")
         _mp_flag = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸"}.get(_mp,"🇺🇸")
-        _summary_rows.append({
-            "": _sc_icon,
-            "ASIN": _a["asin"],
-            "Title": (_a.get("title") or "")[:50],
-            "Overall": f"{_sc}%" if _sc else "—",
-            "Маркет": f"{_mp_flag} .{_mp}",
-            "Дата": _a["date"].strftime("%d.%m.%Y") if _a.get("date") else "—",
-        })
-    _summary_df = pd.DataFrame(_summary_rows)
 
-    # Filter by search
-    if _search:
-        _q = _search.lower()
-        _summary_df = _summary_df[
-            _summary_df["ASIN"].str.lower().str.contains(_q, na=False) |
-            _summary_df["Title"].str.lower().str.contains(_q, na=False)
-        ]
-        # Sync all_asins list to match filtered df
-        _filtered_asins = [a for a in all_asins if
-            _q in a["asin"].lower() or _q in (a.get("title") or "").lower()]
-    else:
-        _filtered_asins = all_asins
-    _sel_event = st.dataframe(
-        _summary_df, use_container_width=True, hide_index=True,
-        on_select="rerun", selection_mode="single-row",
-        column_config={"": st.column_config.TextColumn(width="small")},
-        key="history_table_sel"
-    )
+        _ci1, _ci2, _ci3, _ci4 = st.columns([1, 6, 2, 1.5])
+        with _ci1:
+            try:
+                st.image(_amz_thumb(_asin), width=56)
+            except:
+                st.markdown(f'<div style="width:56px;height:56px;background:#f1f5f9;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:#94a3b8">{_asin[:4]}</div>', unsafe_allow_html=True)
+        with _ci2:
+            st.markdown(
+                f'<div style="padding:6px 0">'
+                f'<div style="font-size:0.9rem;font-weight:600;color:#0f172a;line-height:1.3">{_title}</div>'
+                f'<div style="font-size:0.78rem;color:#64748b;margin-top:3px">'
+                f'{_mp_flag} &nbsp;·&nbsp; '
+                f'<a href="https://www.amazon.com/dp/{_asin}" target="_blank" style="color:#3b82f6;text-decoration:none">{_asin} ↗</a>'
+                f' &nbsp;·&nbsp; {_date}</div>'
+                f'</div>', unsafe_allow_html=True)
+        with _ci3:
+            if _sc > 0:
+                st.markdown(
+                    f'<div style="text-align:center;padding:8px 0">'
+                    f'<div style="font-size:1.5rem;font-weight:800;color:{_sc_c}">{_sc}%</div>'
+                    f'<div style="font-size:0.7rem;color:{_sc_c};font-weight:600">{_sc_lbl}</div>'
+                    f'</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div style="text-align:center;padding:10px 0;color:#94a3b8">—</div>', unsafe_allow_html=True)
+        with _ci4:
+            if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True):
+                _clicked_asin = _asin
 
-    # Get selected ASIN from table click OR fallback to selectbox
-    _clicked_asin = None
-    if _sel_event and _sel_event.selection and _sel_event.selection.get("rows"):
-        _row_idx = _sel_event.selection["rows"][0]
-        if _row_idx < len(_filtered_asins):
-            _clicked_asin = _filtered_asins[_row_idx]["asin"]
+        st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
 
     st.divider()
 
     asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
-    # Pre-select from table click
+    # Pre-select from Open button click
     _default_idx = 0
     if _clicked_asin:
         _match = next((i for i,a in enumerate(all_asins) if a["asin"]==_clicked_asin), 0)
