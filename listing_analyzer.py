@@ -4503,4 +4503,4 @@ elif page == "📋 Workflow":
                         st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}")
                         st.rerun()
                     else:
-                        st.error("Ошибка сохранения")
+                        st.error("Ошибка сохранения") 
