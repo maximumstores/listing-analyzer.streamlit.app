@@ -1875,9 +1875,10 @@ def page_history():
                 f'font-size:1.4rem;font-weight:800;color:{_ph_tc};border:1px solid {_ph_c}">'
                 f'{_ph_letter}</div>', unsafe_allow_html=True)
         with _ci2:
+            _display_title = _title if _title else f"ASIN: {_asin}"
             st.markdown(
                 f'<div style="padding:6px 0">'
-                f'<div style="font-size:0.9rem;font-weight:600;color:#0f172a;line-height:1.3">{_title}</div>'
+                f'<div style="font-size:0.9rem;font-weight:600;color:#0f172a;line-height:1.3">{_display_title}</div>'
                 f'<div style="font-size:0.78rem;color:#64748b;margin-top:3px">'
                 f'{_mp_flag} &nbsp;·&nbsp; '
                 f'<a href="https://www.amazon.com/dp/{_asin}" target="_blank" style="color:#3b82f6;text-decoration:none">{_asin} ↗</a>'
