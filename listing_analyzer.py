@@ -194,14 +194,25 @@ def db_all_asins():
         cur = conn.cursor()
         cur.execute("""
             SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at, listing_type,
-                   COALESCE(marketplace,'com') as marketplace
+                   COALESCE(marketplace,'com') as marketplace, our_data_json
             FROM listing_analysis
             ORDER BY asin, analyzed_at DESC
         """)
         rows = cur.fetchall()
         conn.close()
-        return [{"asin": r[0], "title": r[1], "score": r[2], "date": r[3],
-                 "type": r[4], "marketplace": r[5]} for r in rows]
+        result = []
+        for r in rows:
+            _img = ""
+            if r[6]:
+                try:
+                    _od = json.loads(r[6])
+                    _imgs = _od.get("images_of_specified_asin", _od.get("images", []))
+                    if _imgs and isinstance(_imgs, list):
+                        _img = next((u for u in _imgs if isinstance(u,str) and u.startswith("http") and "_SR" not in u and "_SS4" not in u), "")
+                except: pass
+            result.append({"asin": r[0], "title": r[1], "score": r[2], "date": r[3],
+                           "type": r[4], "marketplace": r[5], "img": _img})
+        return result
     except Exception:
         return []
 
@@ -1862,18 +1873,25 @@ def page_history():
         _date = _a["date"].strftime("%d.%m.%Y %H:%M") if _a.get("date") else "—"
         _mp = _a.get("marketplace","com")
         _mp_flag = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸"}.get(_mp,"🇺🇸")
+        _ph_c = "#dcfce7" if _sc>=75 else ("#fef9c3" if _sc>=50 else ("#fee2e2" if _sc>0 else "#f1f5f9"))
+        _ph_tc = "#15803d" if _sc>=75 else ("#d97706" if _sc>=50 else ("#dc2626" if _sc>0 else "#94a3b8"))
+        _ph_letter = (_title[0] if len(_title)>0 else (_asin[0] if len(_asin)>0 else "?")).upper()
 
         _ci1, _ci2, _ci3, _ci4 = st.columns([1, 6, 2, 1.5])
         with _ci1:
-            # Placeholder with color based on score
-            _ph_c = "#dcfce7" if _sc>=75 else ("#fef9c3" if _sc>=50 else ("#fee2e2" if _sc>0 else "#f1f5f9"))
-            _ph_tc = "#15803d" if _sc>=75 else ("#d97706" if _sc>=50 else ("#dc2626" if _sc>0 else "#94a3b8"))
-            _ph_letter = (_title[0] if len(_title)>0 else (_asin[0] if len(_asin)>0 else "?")).upper()
-            st.markdown(
-                f'<div style="width:56px;height:56px;background:{_ph_c};border-radius:8px;'
-                f'display:flex;align-items:center;justify-content:center;'
-                f'font-size:1.4rem;font-weight:800;color:{_ph_tc};border:1px solid {_ph_c}">'
-                f'{_ph_letter}</div>', unsafe_allow_html=True)
+            _img_url = _a.get("img","")
+            if _img_url:
+                st.markdown(
+                    f'<img src="{_img_url}" width="56" height="56" '
+                    f'style="object-fit:cover;border-radius:8px;border:1px solid #e2e8f0" '
+                    f'onerror="this.parentNode.innerHTML=\'<div style=&quot;width:56px;height:56px;background:{_ph_c};border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:800;color:{_ph_tc}&quot;>{_ph_letter}</div>\'">', 
+                    unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    f'<div style="width:56px;height:56px;background:{_ph_c};border-radius:8px;'
+                    f'display:flex;align-items:center;justify-content:center;'
+                    f'font-size:1.4rem;font-weight:800;color:{_ph_tc}">'
+                    f'{_ph_letter}</div>', unsafe_allow_html=True)
         with _ci2:
             _display_title = _title if _title else f"ASIN: {_asin}"
             st.markdown(
@@ -1923,6 +1941,18 @@ def page_history():
                             st.rerun()
                     except Exception as _oe:
                         st.error(f"Ошибка: {_oe}")
+
+        with _ci5:
+            if st.button("🗑️", key=f"hist_del_{_idx}", use_container_width=True, help="Удалить все записи этого ASIN"):
+                _conn_d = get_db()
+                if _conn_d:
+                    try:
+                        _cur_d = _conn_d.cursor()
+                        _cur_d.execute("DELETE FROM listing_analysis WHERE asin=%s", (_asin,))
+                        _conn_d.commit(); _conn_d.close()
+                        st.rerun()
+                    except Exception as _de:
+                        st.error(f"{_de}")
 
         st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
 
