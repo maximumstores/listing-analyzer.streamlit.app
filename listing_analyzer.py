@@ -1865,7 +1865,10 @@ def page_history():
 
         _ci1, _ci2, _ci3, _ci4 = st.columns([1, 6, 2, 1.5])
         with _ci1:
-            st.image(_amz_thumb(_asin), width=56)
+            st.markdown(
+                f'<img src="{_amz_thumb(_asin)}" width="56" height="56" '
+                f'style="object-fit:cover;border-radius:6px;border:1px solid #e2e8f0" '
+                f'onerror="this.style.display=\'none\'">', unsafe_allow_html=True)
         with _ci2:
             st.markdown(
                 f'<div style="padding:6px 0">'
@@ -1892,6 +1895,11 @@ def page_history():
         st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
 
     st.divider()
+
+    # Scroll anchor when ASIN selected via Open button
+    if _pre_asin:
+        st.markdown('<div id="asin-details"></div>', unsafe_allow_html=True)
+        st.components.v1.html('<script>document.getElementById("asin-details")?.scrollIntoView({behavior:"smooth"})</script>', height=0)
 
     asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
     # Pre-select from Open button click
