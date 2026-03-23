@@ -1865,10 +1865,15 @@ def page_history():
 
         _ci1, _ci2, _ci3, _ci4 = st.columns([1, 6, 2, 1.5])
         with _ci1:
+            # Placeholder with color based on score
+            _ph_c = "#dcfce7" if _sc>=75 else ("#fef9c3" if _sc>=50 else ("#fee2e2" if _sc>0 else "#f1f5f9"))
+            _ph_tc = "#15803d" if _sc>=75 else ("#d97706" if _sc>=50 else ("#dc2626" if _sc>0 else "#94a3b8"))
+            _ph_letter = (_title[0] if _title else _asin[0]).upper()
             st.markdown(
-                f'<img src="{_amz_thumb(_asin)}" width="56" height="56" '
-                f'style="object-fit:cover;border-radius:6px;border:1px solid #e2e8f0" '
-                f'onerror="this.style.display=\'none\'">', unsafe_allow_html=True)
+                f'<div style="width:56px;height:56px;background:{_ph_c};border-radius:8px;'
+                f'display:flex;align-items:center;justify-content:center;'
+                f'font-size:1.4rem;font-weight:800;color:{_ph_tc};border:1px solid {_ph_c}">'
+                f'{_ph_letter}</div>', unsafe_allow_html=True)
         with _ci2:
             st.markdown(
                 f'<div style="padding:6px 0">'
@@ -1888,9 +1893,35 @@ def page_history():
             else:
                 st.markdown('<div style="text-align:center;padding:10px 0;color:#94a3b8">—</div>', unsafe_allow_html=True)
         with _ci4:
-            if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True):
-                st.session_state["_hist_select_asin"] = _asin
-                st.rerun()
+            if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True, type="primary"):
+                # Auto-load best analysis for this ASIN
+                _conn_o = get_db()
+                if _conn_o:
+                    try:
+                        _cur_o = _conn_o.cursor()
+                        _cur_o.execute("""
+                            SELECT result_json, vision_text, competitors_json, our_data_json
+                            FROM listing_analysis WHERE asin=%s AND overall_score>0
+                            ORDER BY overall_score DESC, analyzed_at DESC LIMIT 1
+                        """, (_asin,))
+                        _row_o = _cur_o.fetchone()
+                        _conn_o.close()
+                        if _row_o:
+                            st.session_state["result"] = json.loads(_row_o[0]) if _row_o[0] else {}
+                            st.session_state["vision"] = _row_o[1] or ""
+                            st.session_state["images"] = []
+                            if _row_o[2]:
+                                _comps_o = json.loads(_row_o[2])
+                                for _ci2o, _ch2 in enumerate(_comps_o):
+                                    st.session_state[f"comp_ai_{_ci2o}"] = {"overall_score": f"{_ch2.get('overall',0)}%"}
+                            if _row_o[3]:
+                                try: st.session_state["our_data"] = json.loads(_row_o[3])
+                                except: pass
+                            st.session_state["_hist_loaded"] = _asin
+                            st.session_state["page"] = "🏠 Обзор"
+                            st.rerun()
+                    except Exception as _oe:
+                        st.error(f"Ошибка: {_oe}")
 
         st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
 
