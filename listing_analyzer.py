@@ -1868,7 +1868,7 @@ def page_history():
             # Placeholder with color based on score
             _ph_c = "#dcfce7" if _sc>=75 else ("#fef9c3" if _sc>=50 else ("#fee2e2" if _sc>0 else "#f1f5f9"))
             _ph_tc = "#15803d" if _sc>=75 else ("#d97706" if _sc>=50 else ("#dc2626" if _sc>0 else "#94a3b8"))
-            _ph_letter = (_title[0] if _title else _asin[0]).upper()
+            _ph_letter = (_title[0] if len(_title)>0 else (_asin[0] if len(_asin)>0 else "?")).upper()
             st.markdown(
                 f'<div style="width:56px;height:56px;background:{_ph_c};border-radius:8px;'
                 f'display:flex;align-items:center;justify-content:center;'
