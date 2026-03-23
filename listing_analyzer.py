@@ -871,7 +871,7 @@ MAIN IMAGE AMAZON REQUIREMENTS (apply strictly for photo #1):
 ✅ ONLY the sold product — FORBIDDEN: other clothing on model, accessories, props not included
 ✅ For apparel: the sold item must be the primary focus
 IMPORTANT: Look carefully — are there any items in the photo that are NOT the sold product? If yes — deduct 2 pts and name exactly what violates the rule."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 7 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength — what exactly drives conversion]\nWeakness: [1 specific problem — ONLY what you see, with number if possible]\nAction: [CONCRETE solution: WHAT to shoot/add/remove + HOW exactly + expected conversion impact in %]\nConversion: [1 insight — what fear or desire this photo triggers and how to amplify/resolve it]\nEmotion: [primary emotion: Trust / Desire / Doubt / Curiosity / Indifference — explain why in 1 sentence]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nSTRICTLY 7 lines:\nType: [one of the types above]\nScore: X/10 [apply rubric]\nStrength: [1 specific strength — what exactly drives conversion]\nWeakness: [1 specific problem — ONLY what you see, with number if possible]\nAction: [CONCRETE solution: WHAT to shoot/add/remove + HOW exactly + expected conversion impact in %]\nConversion: [1 insight — what fear or desire this photo triggers and how to amplify/resolve it]\nEmotion: REQUIRED — choose ONE: Trust / Desire / Doubt / Curiosity / Indifference — explain in 1 sentence WHY this emotion, what visual element triggers it"
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
 
@@ -910,7 +910,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
 ✅ Реальная фотография (не иллюстрация)
 ✅ ТОЛЬКО продаваемый товар — ЗАПРЕЩЕНЫ: другая одежда на модели, аксессуары не из комплекта
 ВАЖНО: Посмотри внимательно — есть ли на фото предметы которые НЕ являются продаваемым товаром? Если да — это нарушение, снять 2 балла и написать конкретно что нарушает правило."""
-        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 7 строк:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона — что именно работает на конверсию]\nСлабость: [1 конкретная проблема — ТОЛЬКО то что видишь, с цифрой если возможно]\nДействие: [КОНКРЕТНОЕ решение: ЧТО снять/добавить/убрать + КАК именно + ожидаемый эффект на конверсию в %]\nКонверсия: [1 инсайт — какой страх или желание покупателя это фото вызывает и как его усилить/снять]\nЭмоция: [основная эмоция: Доверие / Желание / Сомнение / Любопытство / Безразличие — объясни почему в 1 предложении]"
+        block_fmt = "\nPHOTO_BLOCK_{i}\nОТРОГО 7 строк:\nТип: [один из типов выше]\nОценка: X/10 [применяй рубрик]\nСильная сторона: [1 конкретная сильная сторона — что именно работает на конверсию]\nСлабость: [1 конкретная проблема — ТОЛЬКО то что видишь, с цифрой если возможно]\nДействие: [КОНКРЕТНОЕ решение: ЧТО снять/добавить/убрать + КАК именно + ожидаемый эффект на конверсию в %]\nКонверсия: [1 инсайт — какой страх или желание покупателя это фото вызывает и как его усилить/снять]\nЭмоция: ОБЯЗАТЕЛЬНО — выбери ОДНО: Доверие / Желание / Сомнение / Любопытство / Безразличие — объясни в 1 предложении ПОЧЕМУ эта эмоция и какой визуальный элемент её вызывает"
 
     results = []
     if st.session_state.get("use_gemini"):
@@ -1841,13 +1841,18 @@ def page_history():
     _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
 
     def _amz_thumb(asin):
-        return f"https://ws-na.amazon-adsystem.com/widgets/q?_encoding=UTF8&ASIN={asin}&ServiceVersion=20070822&ID=AsinImage&WS=1&Format=SL110"
+        return f"https://images-na.ssl-images-amazon.com/images/P/{asin}.01.LZZZZZZZ.jpg"
 
     _filtered_asins = [a for a in all_asins if not _search or
         _search.lower() in a["asin"].lower() or
         _search.lower() in (a.get("title") or "").lower()]
 
-    _clicked_asin = None
+    # Handle Open button via session_state (survives rerun)
+    if st.session_state.get("_hist_select_asin"):
+        _pre_asin = st.session_state.pop("_hist_select_asin")
+    else:
+        _pre_asin = None
+
     for _idx, _a in enumerate(_filtered_asins):
         _sc = _a.get("score") or 0
         _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else ("#ef4444" if _sc>0 else "#94a3b8"))
@@ -1860,10 +1865,7 @@ def page_history():
 
         _ci1, _ci2, _ci3, _ci4 = st.columns([1, 6, 2, 1.5])
         with _ci1:
-            try:
-                st.image(_amz_thumb(_asin), width=56)
-            except:
-                st.markdown(f'<div style="width:56px;height:56px;background:#f1f5f9;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:#94a3b8">{_asin[:4]}</div>', unsafe_allow_html=True)
+            st.image(_amz_thumb(_asin), width=56)
         with _ci2:
             st.markdown(
                 f'<div style="padding:6px 0">'
@@ -1884,7 +1886,8 @@ def page_history():
                 st.markdown('<div style="text-align:center;padding:10px 0;color:#94a3b8">—</div>', unsafe_allow_html=True)
         with _ci4:
             if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True):
-                _clicked_asin = _asin
+                st.session_state["_hist_select_asin"] = _asin
+                st.rerun()
 
         st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
 
@@ -1893,8 +1896,8 @@ def page_history():
     asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
     # Pre-select from Open button click
     _default_idx = 0
-    if _clicked_asin:
-        _match = next((i for i,a in enumerate(all_asins) if a["asin"]==_clicked_asin), 0)
+    if _pre_asin:
+        _match = next((i for i,a in enumerate(all_asins) if a["asin"]==_pre_asin), 0)
         _default_idx = _match
     sel = st.selectbox("ASIN", asin_opts, index=_default_idx)
     sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
@@ -4503,4 +4506,4 @@ elif page == "📋 Workflow":
                         st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}")
                         st.rerun()
                     else:
-                        st.error("Ошибка сохранения") 
+                        st.error("Ошибка сохранения")
