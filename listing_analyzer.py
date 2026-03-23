@@ -1877,7 +1877,7 @@ def page_history():
         _ph_tc = "#15803d" if _sc>=75 else ("#d97706" if _sc>=50 else ("#dc2626" if _sc>0 else "#94a3b8"))
         _ph_letter = (_title[0] if len(_title)>0 else (_asin[0] if len(_asin)>0 else "?")).upper()
 
-        _ci1, _ci2, _ci3, _ci4 = st.columns([1, 6, 2, 1.5])
+        _ci1, _ci2, _ci3, _ci4, _ci5 = st.columns([1, 6, 2, 1.5, 0.8])
         with _ci1:
             _img_url = _a.get("img","")
             if _img_url:
