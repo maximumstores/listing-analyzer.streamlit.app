@@ -2516,7 +2516,10 @@ def health_card():
   <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:14px"><div style="background:{hc};width:{health}%;height:10px;border-radius:8px"></div></div>
 </div>""", unsafe_allow_html=True)
     else:
-        _rat_val = float(rating_h or 0)
+        try:
+            _rat_val = float(str(rating_h or 0).split()[0].replace(",","."))
+        except:
+            _rat_val = 0.0
         _rat_c = "#22c55e" if _rat_val >= 4.4 else ("#f59e0b" if _rat_val >= 4.3 else "#ef4444")
         _title_c = "#fca5a5" if tlen > 125 else "#86efac"
         st.markdown(f"""<div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
