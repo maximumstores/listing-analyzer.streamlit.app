@@ -715,7 +715,7 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
         raise Exception(f"Gemini Vision {_last_err}")
     raise Exception(f"Gemini Vision исчерпан: {_last_err}")
 
-def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=400, system=None):
+def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=600, system=None):
     if st.session_state.get("use_gemini"):
         full = f"{system}\n\n{prompt}" if system else prompt
         if image_url:
@@ -924,7 +924,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
             else:
                 _pp = f"Ты эксперт Amazon фотографий. Оцени это фото #{_i+1} по рубрику: +2 видимость товара, +2 фон, +2 инфоценность, +2 Amazon соответствие, +1 appeal, +1 уникальность. Штрафы: -3 товар не виден, -2 лишняя одежда на главном, -2 фон не белый. Товар: {title}"
             _pp += f"\n\nОтветь СТРОГО в формате:\nPHOTO_BLOCK_{_i+1}\n{_fmt}"
-            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=600)
+            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=700)
             _m = re.search(r"PHOTO_BLOCK_\d+\s*(.*)", _br, re.DOTALL)
             _blk = _m.group(1).strip() if _m else _br.strip()
             results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
@@ -940,7 +940,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
                     photo_intro = f"Ты эксперт Amazon фотографий. Оцени фото #{i+1}: +2 чёткость, +2 фон, +2 инфоценность, +2 Amazon, +1 appeal, +1 уникальность. Товар: {title}"
             _full_prompt = photo_intro + "\n" + block_fmt.format(i=i+1)
             res = ai_vision_call(prompt=_full_prompt, image_b64=img["b64"],
-                image_url=img.get("url"), media_type=img.get("media_type","image/jpeg"), max_tokens=400)
+                image_url=img.get("url"), media_type=img.get("media_type","image/jpeg"), max_tokens=700)
             results.append("PHOTO_BLOCK_" + str(i+1) + "\n" + res)
 
     result = "\n\n".join(results)
