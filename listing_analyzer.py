@@ -59,6 +59,7 @@ def db_init():
             ("images_json", "TEXT"),
             ("aplus_img_urls_json", "TEXT"),
             ("marketplace", "TEXT DEFAULT 'com'"),
+            ("aplus_vision_text", "TEXT"),   # ← NEW: сохраняем A+ Vision
         ]:
             try:
                 cur.execute(f"ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS {_col} {_def}")
@@ -73,7 +74,6 @@ def db_save(asin, result, vision_text, our_title):
     conn = get_db()
     if not conn: return False
     if not result or not isinstance(result, dict): return False
-    # Не сохраняем если анализ упал (overall = 0)
     if pct(result.get("overall_score", 0)) == 0:
         return False
     try:
@@ -92,9 +92,9 @@ def db_save(asin, result, vision_text, our_title):
                 "rating": _cd.get("average_rating",""),
                 "reviews": _cd.get("reviews_count",""),
             })
-        # Compress images for DB (thumbnails ~30KB, max 3 фото)
+        # ── Сохраняем до 5 фото (thumbnails ~30KB) ──────────────────────────
         _imgs_to_save = []
-        for _img_d in st.session_state.get("images", [])[:3]:
+        for _img_d in st.session_state.get("images", [])[:5]:   # ← было [:3]
             try:
                 _ib = base64.b64decode(_img_d["b64"])
                 _pil = Image.open(io.BytesIO(_ib)).convert("RGB")
@@ -103,6 +103,7 @@ def db_save(asin, result, vision_text, our_title):
                 _imgs_to_save.append({"b64": base64.b64encode(_tb.read()).decode(), "media_type": "image/jpeg"})
             except: pass
         _aplus_urls_save = st.session_state.get("aplus_img_urls", [])
+        _aplus_vision_save = st.session_state.get("aplus_vision", "")   # ← NEW
 
         cur = conn.cursor()
         cur.execute("""
@@ -110,8 +111,8 @@ def db_save(asin, result, vision_text, our_title):
               (asin, overall_score, title_score, bullets_score, images_score,
                aplus_score, cosmo_score, rufus_score, result_json, vision_text,
                our_title, competitors_json, our_data_json, marketplace,
-               images_json, aplus_img_urls_json)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               images_json, aplus_img_urls_json, aplus_vision_text)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (asin,
               pct(result.get("overall_score",0)),
               pct(result.get("title_score",0)),
@@ -126,7 +127,8 @@ def db_save(asin, result, vision_text, our_title):
               json.dumps(st.session_state.get("our_data",{}), ensure_ascii=False),
               st.session_state.get("_marketplace","com"),
               json.dumps(_imgs_to_save, ensure_ascii=False),
-              json.dumps(_aplus_urls_save, ensure_ascii=False)))
+              json.dumps(_aplus_urls_save, ensure_ascii=False),
+              _aplus_vision_save))       # ← NEW
         conn.commit()
         conn.close()
         return True
@@ -249,7 +251,6 @@ def badge(p): return {"HIGH":"🔴 HIGH","MEDIUM":"🟡 MEDIUM","LOW":"🟢 LOW"
 
 # ── Apify Reviews + Return Analysis ──────────────────────────────────────────
 def fetch_sp_returns(asin, days=30, log=None):
-    """Fetch return reasons from SP-API for our ASINs."""
     import hashlib, hmac, urllib.parse
     from datetime import datetime, timedelta, timezone
 
@@ -266,7 +267,6 @@ def fetch_sp_returns(asin, days=30, log=None):
         _log("⚠️ SP-API credentials не заданы в Secrets")
         return []
 
-    # Step 1: Get LWA access token
     try:
         _log("🔑 SP-API: получаю access token...")
         tok_r = requests.post("https://api.amazon.com/auth/o2/token", data={
@@ -282,7 +282,6 @@ def fetch_sp_returns(asin, days=30, log=None):
     except Exception as e:
         _log(f"⚠️ LWA: {e}"); return []
 
-    # Step 2: Request Returns report
     try:
         _log("📋 SP-API: запрашиваю отчёт возвратов...")
         end_dt   = datetime.now(timezone.utc)
@@ -297,7 +296,6 @@ def fetch_sp_returns(asin, days=30, log=None):
             "dataEndTime":       end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
         })
 
-        # AWS SigV4
         import hmac as _hmac, hashlib as _hs
         now      = datetime.now(timezone.utc)
         amzdate  = now.strftime("%Y%m%dT%H%M%SZ")
@@ -341,7 +339,6 @@ def fetch_sp_returns(asin, days=30, log=None):
         report_id = rep_r.json().get("reportId","")
         _log(f"✅ Report requested: {report_id}")
 
-        # Step 3: Poll for completion
         import time
         for attempt in range(20):
             time.sleep(10)
@@ -360,7 +357,6 @@ def fetch_sp_returns(asin, days=30, log=None):
         else:
             _log("⚠️ Report timeout"); return []
 
-        # Step 4: Download report
         doc_r = requests.get(
             f"{endpoint}/reports/2021-06-30/documents/{doc_id}",
             headers=headers, timeout=30)
@@ -369,7 +365,6 @@ def fetch_sp_returns(asin, days=30, log=None):
         csv_r   = requests.get(doc_url, timeout=60)
         if not csv_r.ok: return []
 
-        # Step 5: Parse CSV → filter by ASIN
         import csv, io
         rows = []
         reader = csv.DictReader(io.StringIO(csv_r.text), delimiter="\t")
@@ -390,11 +385,9 @@ def fetch_sp_returns(asin, days=30, log=None):
         return []
 
 def analyze_sp_returns(returns, product_title, asin, lang="ru"):
-    """AI analysis of SP-API return data."""
     if not returns: return "Нет данных о возвратах"
     lang_name = "Russian" if lang == "ru" else "English"
 
-    # Aggregate reasons
     reasons = {}
     for r in returns:
         reason = r.get("reason","Unknown")
@@ -424,16 +417,14 @@ Be specific. Use actual data from the returns. Respond in {lang_name}."""
     return ai_call("Amazon returns expert. Actionable analysis only.", prompt, max_tokens=2000)
 
 def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
-    """Fetch 1, 2, 3-star reviews via Apify — 10 each = 30 total."""
     api_token = st.secrets.get("APIFY_API_TOKEN","")
     if not api_token:
         if log: log("⚠️ APIFY_API_TOKEN не задан в Secrets")
         return []
     endpoint = f"https://api.apify.com/v2/acts/webdatalabs~amazon-reviews-scraper/run-sync-get-dataset-items?token={api_token}"
     all_reviews = []
-    # Один запрос без фильтров — получаем все отзывы и фильтруем локально
     payload = {
-        "productUrls": [{"url": f"https://www.amazon.com/dp/{asin}"}],
+        "productUrls": [{"url": f"https://www.amazon.{domain}/dp/{asin}"}],
     }
     try:
         if log: log(f"📥 Apify: загружаю отзывы {asin}...")
@@ -457,7 +448,6 @@ def fetch_1star_reviews(asin, domain="com", max_pages=1, log=None):
     return all_reviews
 
 def analyze_return_reasons(reviews, product_title, asin, lang="ru"):
-    """AI analysis of return reasons from 1-star reviews."""
     if not reviews:
         return "Нет отзывов для анализа"
     lang_name = "Russian" if lang == "ru" else "English"
@@ -486,13 +476,11 @@ Respond in {lang_name}. Be specific and actionable. Format as clear sections."""
 # ── Amazon Stop Words ─────────────────────────────────────────────────────────
 AMAZON_STOP_WORDS = {
     "do_not_use": [
-        # Medical/Treatment
         "ailment","cure","cured","cures","treat","treatment","treats","heal","healing","heals",
         "prevent","prevents","diagnose","remedy","remedies","medication","pharmaceutical",
         "detox","detoxify","detoxification","detoxifying","reparative","fast relief","relief",
         "clinically proven","doctor recommended","no side effects","pain free","proven to work",
         "performance enhancement","disease","diseases","illness","maladies","malady",
-        # Diseases
         "aids","add","adhd","als","alzheimer","autism","autistic","cancer","cancroid",
         "cataract","chlamydia","cmv","cytomegalovirus","concussion","coronavirus","covid",
         "crabs","cystic fibrosis","dementia","depression","diabetes","diabetic",
@@ -502,7 +490,6 @@ AMAZON_STOP_WORDS = {
         "muscular dystrophy","obesity","parkinson","pid","pelvic inflammatory",
         "scabies","seizure","seizures","stroke","syphilis","trichomoniasis","tumor",
         "ringworm","insomnia","anxiety","inflammation","infection",
-        # Pesticide triggers
         "antibacterial","anti-bacterial","antimicrobial","anti-microbial","antifungal",
         "anti-fungal","antiviral","antiseptic","bacteria","bacterial","contaminants",
         "contamination","disinfect","disinfectant","disinfects","fungal","fungus",
@@ -511,20 +498,16 @@ AMAZON_STOP_WORDS = {
         "pathogen","pest","pesticide","pesticides","pesticide-free","protozoa",
         "repel","repellent","repelling","sanitize","sanitizes","viral","virus","viruses",
         "mites","yeast","biological contaminants",
-        # Drugs/Substances
         "cbd","cannabinoid","thc","cannabidiol","cannabis","marijuana","kratom","hemp",
         "kanna","weed","dab","shatter","ketamine","psilocybin","ephedrine",
         "minoxidil","ketoconazole","hordenine","ayahuasca","picamilon","dmt",
-        # Other prohibited
         "knockoff","fake","weapon","weapons","stun guns","self defense","pepper spray",
         "swastika","poppy","iv therapy","intravenous therapy","fetal doppler",
         "heartbeat monitor","batons","drugged",
-        # Competitor/Amazon endorsement
         "amazon approved","amazon certified","amazon recommended","amazon endorsed",
         "amazon authorized","amazon licensed","amazon verified",
     ],
     "try_to_avoid": [
-        # Superlatives
         "best","best seller","best selling","best buy","best deal","best price",
         "best value","bestseller","#1","number one","top","top notch","top rated",
         "top selling","amazing","award winning","champion","elite","finest","flawless",
@@ -535,29 +518,24 @@ AMAZON_STOP_WORDS = {
         "pristine","professional quality","record-breaking","sought-after","superb",
         "supreme","ultimate","unbeatable","unblemished","unmatched","unparalleled",
         "unrivaled","magic solution","instant fix","the world's best","the world's strongest",
-        # Environmental (banned Oct 2024)
         "eco-friendly","eco friendly","ecofriendly","environmentally friendly",
         "earth-friendly","sustainable","biodegradable","compostable","home compostable",
         "marine degradable","decomposable","degradable","carbon-reducing",
         "all natural","all-natural","natural","recyclable","vegan","non-toxic",
         "bpa free","bisphenol a","hypoallergenic","organic","green",
-        # Health claims (avoid)
         "allergy free","allergy safe","anti aging","healthy","healthier","proven",
         "recommended by","tested","validated","treatment","weight loss","hypoallergenic",
         "nano silver","safe","harmless","non-poisonous","non-injurious","non-toxic",
         "reduce anxiety","boost immunity","lower blood pressure","increase metabolism",
         "suppress appetite","slimming","fat burning","keto approved","appetite suppressant",
-        # Pricing/Promo
         "free","bonus","guarantee","money back","refund","warranty","price",
         "on sale","best deal","limited time","buy now","add to cart","get yours now",
         "shop now","don't miss","last chance","supplies won't last","available now",
         "save","discount","bargain","cheap","cheapest","clearance","closeout","overstock",
         "special offer","buy 1 get 1","wholesale","% off","affordable",
-        # Made in USA (requires FTC compliance)
         "made in the usa","made in usa",
     ],
     "a_plus_restricted": [
-        # Strictly prohibited in A+ Content
         "approved","certified","drug","drugs","pearl","platinum","noncorrosive",
         "satisfaction guaranteed","100% satisfaction","buy now","add to cart",
         "get yours now","shop with us","free shipping","free gift","now","new","latest",
@@ -608,15 +586,10 @@ def sc_pct(val):
     v = pct(val)
     return "🟢" if v>=75 else ("🟡" if v>=50 else "🔴")
 
-# ── Vision cost/time estimator ────────────────────────────────────────────────
 def estimate_run(do_vision, do_aplus, do_comp_vision, n_competitors, use_gemini):
-    """Returns (time_str, cost_str) estimate based on selected options"""
-    # Base: scraping + text AI
     secs = 30
     cost = 0.008
-
-    model_mult = 0.3 if use_gemini else 1.0  # Gemini much cheaper
-
+    model_mult = 0.3 if use_gemini else 1.0
     if do_vision:
         secs += 45
         cost += 0.015 * model_mult
@@ -627,10 +600,8 @@ def estimate_run(do_vision, do_aplus, do_comp_vision, n_competitors, use_gemini)
         secs += 40 * n_competitors
         cost += 0.02 * n_competitors * model_mult
     elif n_competitors > 0:
-        # Still scrape + text AI for competitors
         secs += 20 * n_competitors
         cost += 0.008 * n_competitors * model_mult
-
     mins = secs // 60
     secs_rem = secs % 60
     time_str = f"~{mins}м {secs_rem}с" if mins > 0 else f"~{secs}с"
@@ -767,18 +738,19 @@ def ai_call(system, user, max_tokens=3000):
     return anthropic_call(system, user, max_tokens)
 
 # ── ScrapingDog ───────────────────────────────────────────────────────────────
-def scrapingdog_product(asin, log):
+def scrapingdog_product(asin, log, domain="com"):
     sd_key = st.secrets.get("SCRAPINGDOG_API_KEY","")
     if not sd_key: log("⚠️ SCRAPINGDOG_API_KEY не задан"); return {}, []
-    log(f"🌐 ScrapingDog: {asin}...")
+    _sd_map = {"com":"com","co.uk":"co.uk","de":"de","fr":"fr","it":"it","es":"es","ca":"ca","nl":"nl","se":"se","pl":"pl","com.be":"com.be","com.mx":"com.mx","com.au":"com.au"}
+    _sd_dom = _sd_map.get(domain, "com")
+    log(f"🌐 ScrapingDog: {asin} [{_sd_dom}]...")
     try:
         r = requests.get("https://api.scrapingdog.com/amazon/product",
-            params={"api_key": sd_key, "asin": asin, "domain": "com"}, timeout=60)
+            params={"api_key": sd_key, "asin": asin, "domain": _sd_dom}, timeout=60)
         if not r.ok: log(f"⚠️ {r.status_code}: {r.text[:100]}"); return {}, []
         data = r.json()
         if data.get("aplus"):
             _api_aplus = data.get("aplus_images", [])
-            # brand_images contains "From the brand" A+ banners — filter only aplus-media-library URLs
             _brand_imgs = [u for u in data.get("brand_images", [])
                           if isinstance(u, str) and "aplus-media-library-service-media" in u]
             if not _api_aplus and _brand_imgs:
@@ -1044,7 +1016,6 @@ APLUS_BLOCK_{{i}}
 def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang="ru", is_competitor=False):
     log("🧠 Финальный анализ...")
 
-    # Лёгкая схема для конкурентов — без VPC/JTBD/COSMO/Rufus
     COMP_SCHEMA = '{"overall_score":"XX%","title_score":"XX%","bullets_score":"XX%","description_score":"XX%","images_score":"XX%","aplus_score":"XX%","reviews_score":"XX%","bsr_score":"XX%","price_score":"XX%","customization_score":"XX%","prime_score":"XX%","title_gaps":["issue"],"bullets_gaps":["issue"],"images_gaps":["issue"],"priority_improvements":["1. action","2. action","3. action"],"actions":[{"action":"action","impact":"HIGH","effort":"LOW","details":"details"}]}'
 
     def fmt(data):
@@ -1109,9 +1080,7 @@ FACTUAL STATS (do NOT contradict these):
     _ctx = st.session_state.get("ai_context_saved", st.session_state.get("ai_context","")).strip()
     context_section = f"\n\n## BRAND CONTEXT (provided by seller):\n{_ctx}" if _ctx else ""
 
-    # ── Упрощённый промпт для конкурентов ────────────────────────────────────
     if is_competitor:
-        # Урезанные данные для конкурента — только нужное
         _d = our_data
         _pi = _d.get("product_information", {})
         _buls = _d.get("feature_bullets", [])
@@ -1142,18 +1111,15 @@ FACTUAL STATS (do NOT contradict these):
         start, end = s.find("{"), s.rfind("}")
         if start == -1: raise ValueError(f"JSON не найден: {s[:200]}")
         s = s[start:end+1]
-        # Aggressive JSON repair
         s = re.sub(r",\s*([}\]])", r"\1", s)
-        s = re.sub(r'[\x00-\x1f\x7f]', ' ', s)  # remove control chars
+        s = re.sub(r'[\x00-\x1f\x7f]', ' ', s)
         try:
             return json.loads(s)
         except:
-            # Fix unescaped quotes inside strings
             s2 = re.sub(r'"([^"]*)"', lambda m: '"'+m.group(1).replace("\n"," ").replace("\r"," ").replace('"','\\"')+'"', s)
             try:
                 return json.loads(s2)
             except:
-                # Last resort: truncate and close brackets
                 for cut in range(len(s2)-1, max(len(s2)-500, 0), -1):
                     if s2[cut] in ('"', '}', ']', '0123456789'):
                         candidate = s2[:cut+1]
@@ -1161,7 +1127,6 @@ FACTUAL STATS (do NOT contradict these):
                         candidate += "}" * max(0, candidate.count("{") - candidate.count("}"))
                         try: return json.loads(candidate)
                         except: continue
-                # Return minimal fallback
                 return {"overall_score": "50%", "title_score": "50%", "bullets_score": "50%",
                         "description_score": "50%", "images_score": "50%", "aplus_score": "0%",
                         "reviews_score": "50%", "bsr_score": "50%", "price_score": "50%",
@@ -1344,19 +1309,16 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
 
     asin = get_asin(our_url) or "unknown"
     _lang = st.session_state.get("analysis_lang","ru")
-    # Detect marketplace from URL
     _mp = "com"
-    for _d in ["co.uk","de","ca","fr","it","es","com"]:
+    for _d in ["co.uk","de","fr","it","es","nl","se","pl","com.be","com.mx","com.au","ca","com"]:
         if f"amazon.{_d}" in our_url:
             _mp = _d; break
     st.session_state["_marketplace"] = _mp
 
-    # Read vision toggles
     _do_vision      = st.session_state.get("do_vision", True)
     _do_aplus       = st.session_state.get("do_aplus_vision", True)
     _do_comp_vision = st.session_state.get("do_comp_vision", True)
 
-    # ── Если нашего URL нет — пропускаем наш листинг ────────────────────────
     if not our_url.strip() or asin == "unknown":
         log("ℹ️ НАШ листинг не указан — анализируем только конкурентов")
         our_data = {}
@@ -1368,7 +1330,7 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         st.session_state["our_data"] = {}
     else:
         _prog(5,  f"🌐 Загружаю данные листинга {asin}...")
-        our_data, img_urls = scrapingdog_product(asin, log)
+        our_data, img_urls = scrapingdog_product(asin, log, domain=_mp)
         _prog(12, f"✅ Данные получены — {len(our_data.get('feature_bullets',[]))} буллетов, {len(img_urls)} фото")
 
         _prog(15, f"⬇️ Скачиваю фото ({len(img_urls)} шт.)...")
@@ -1376,7 +1338,6 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         st.session_state["images"] = images
         _prog(22, f"✅ Фото скачаны: {len(images)} шт. готовы к анализу")
 
-        # ── Vision фото (основной листинг) ───────────────────────────────────────
         if images and _do_vision:
             _prog(25, f"👁️ Vision AI: анализирую фото 1/{len(images)}...")
             vision_result = analyze_vision(images, our_data, asin, log, lang=_lang)
@@ -1388,7 +1349,6 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
             else:
                 log("⏭️ Vision фото пропущен (отключён)")
 
-        # ── A+ Vision ─────────────────────────────────────────────────────────────
         _aplus_urls = our_data.get("aplus_image_urls", our_data.get("aplus_images", []))
         _aplus_urls = [re.sub(r'\.__CR[^.]+_PT0_SX\d+_V\d+___', '', u) if isinstance(u,str) else u for u in _aplus_urls if isinstance(u,str) and u.startswith("http")]
         if _aplus_urls and _do_aplus:
@@ -1404,7 +1364,6 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
                 log("ℹ️ A+ баннеры не найдены")
         st.session_state["aplus_img_urls"] = _aplus_urls
 
-    # ── Конкуренты ────────────────────────────────────────────────────────────
     active = [u.strip() for u in competitor_urls if u.strip()]
     comp_data_list = []
     n_active = max(len(active), 1)
@@ -1415,7 +1374,11 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         base_pct = 45 + i * 10
 
         _prog(base_pct,     f"🌐 Конкурент {i+1}/{len(active)}: загружаю {casin}...")
-        cdata, cimg_urls = scrapingdog_product(casin, log)
+        _comp_mp = "com"
+        for _cd2 in ["co.uk","de","fr","it","es","nl","se","pl","com.be","ca","com"]:
+            if f"amazon.{_cd2}" in url:
+                _comp_mp = _cd2; break
+        cdata, cimg_urls = scrapingdog_product(casin, log, domain=_comp_mp)
         cdata["_input_asin"] = casin
         comp_data_list.append(cdata)
         _prog(base_pct + 2, f"✅ Конкурент {i+1}: данные получены — {cdata.get('title','')[:30]}...")
@@ -1423,7 +1386,6 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         _prog(base_pct + 3, f"⬇️ Конкурент {i+1}: скачиваю фото...")
         cimgs_dl = download_images(cimg_urls[:5], log) if cimg_urls else []
 
-        # ── Vision конкурента ─────────────────────────────────────────────
         if cimgs_dl and _do_comp_vision:
             _prog(base_pct + 5, f"👁️ Конкурент {i+1}: Vision {len(cimgs_dl)} фото...")
             cvision = analyze_vision(cimgs_dl, cdata, casin, log, lang=_lang)
@@ -1433,7 +1395,6 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
             if cimgs_dl:
                 log(f"⏭️ Vision конкурент {i+1} пропущен (отключён)")
 
-        # ── A+ Vision конкурента ───────────────────────────────────────────
         _cap_urls = cdata.get("aplus_image_urls", [])
         if _cap_urls and _do_comp_vision:
             _prog(base_pct + 7, f"🎨 Конкурент {i+1}: A+ Vision ({len(_cap_urls)} баннеров)...")
@@ -1468,7 +1429,6 @@ with st.sidebar:
     st.markdown("## <span style='color:#c0392b'>Listing Analyzer</span>", unsafe_allow_html=True)
     st.divider()
 
-    # ── API balance warning ───────────────────────────────────────────────────
     if st.session_state.get("_api_balance_error"):
         st.markdown("""
 <div style="background:#fef2f2;border:1.5px solid #ef4444;border-radius:8px;padding:10px 12px;margin-bottom:8px">
@@ -1677,7 +1637,6 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
     lang = st.radio("🌐 Язык анализа", ["🇷🇺 Русский", "🇺🇸 English"], horizontal=True, key="lang_sel")
     st.session_state["analysis_lang"] = "ru" if "Русский" in lang else "en"
 
-    # ── Оптимизация токенов — чекбоксы Vision ────────────────────────────────
     with st.expander("⚡ Оптимизация токенов", expanded=False):
         _n_comps = len([u for u in competitor_urls if u.strip()])
         _use_gem = st.session_state.get("use_gemini", False)
@@ -1691,7 +1650,6 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
         st.session_state["do_aplus_vision"] = _do_aplus
         st.session_state["do_comp_vision"]  = _do_comp_vision
 
-        # Cost/time estimate
         _t_str, _c_str = estimate_run(_do_vision, _do_aplus, _do_comp_vision, _n_comps, _use_gem)
 
         _what_on = []
@@ -1700,7 +1658,6 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
         if _do_comp_vision and _n_comps: _what_on.append(f"Vision {_n_comps} конк.")
         _mode = " + ".join(_what_on) if _what_on else "только текст"
 
-        # Determine scenario label and hint
         _off = []
         if not _do_vision:      _off.append("Vision фото")
         if not _do_aplus:       _off.append("Vision A+")
@@ -1787,7 +1744,6 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                 st.session_state["c3_saved"] = comp4
                 st.session_state["c4_saved"] = comp5
                 st.session_state["ai_context_saved"] = st.session_state.get("ai_context","")
-                # Save to DB
                 try:
                     _od = st.session_state.get("our_data", {})
                     _saved = db_save(get_asin_from_data(_od), result,
@@ -1862,20 +1818,15 @@ def page_history():
         st.info("История пуста — запусти первый анализ")
         return
 
-    # ── Общая сводка по всем ASIN ─────────────────────────────────────────────
     st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
     import pandas as pd
 
     _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
 
-    def _amz_thumb(asin):
-        return f"https://images-na.ssl-images-amazon.com/images/P/{asin}.01.LZZZZZZZ.jpg"
-
     _filtered_asins = [a for a in all_asins if not _search or
         _search.lower() in a["asin"].lower() or
         _search.lower() in (a.get("title") or "").lower()]
 
-    # Handle Open button via session_state (survives rerun)
     if st.session_state.get("_hist_select_asin"):
         _pre_asin = st.session_state.pop("_hist_select_asin")
     else:
@@ -1889,7 +1840,7 @@ def page_history():
         _asin = _a["asin"]
         _date = _a["date"].strftime("%d.%m.%Y %H:%M") if _a.get("date") else "—"
         _mp = _a.get("marketplace","com")
-        _mp_flag = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸"}.get(_mp,"🇺🇸")
+        _mp_flag = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱","com.be":"🇧🇪","com.mx":"🇲🇽","com.au":"🇦🇺"}.get(_mp,"🌍")
         _ph_c = "#dcfce7" if _sc>=75 else ("#fef9c3" if _sc>=50 else ("#fee2e2" if _sc>0 else "#f1f5f9"))
         _ph_tc = "#15803d" if _sc>=75 else ("#d97706" if _sc>=50 else ("#dc2626" if _sc>0 else "#94a3b8"))
         _ph_letter = (_title[0] if len(_title)>0 else (_asin[0] if len(_asin)>0 else "?")).upper()
@@ -1930,14 +1881,14 @@ def page_history():
                 st.markdown('<div style="text-align:center;padding:10px 0;color:#94a3b8">—</div>', unsafe_allow_html=True)
         with _ci4:
             if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True, type="primary"):
-                # Auto-load best analysis for this ASIN
                 _conn_o = get_db()
                 if _conn_o:
                     try:
                         _cur_o = _conn_o.cursor()
+                        # ── ФИКС: загружаем aplus_vision_text ────────────────
                         _cur_o.execute("""
                             SELECT result_json, vision_text, competitors_json, our_data_json,
-                                   images_json, aplus_img_urls_json
+                                   images_json, aplus_img_urls_json, aplus_vision_text
                             FROM listing_analysis WHERE asin=%s AND overall_score>0
                             ORDER BY overall_score DESC, analyzed_at DESC LIMIT 1
                         """, (_asin,))
@@ -1960,6 +1911,8 @@ def page_history():
                             if _row_o[5]:
                                 try: st.session_state["aplus_img_urls"] = json.loads(_row_o[5])
                                 except: pass
+                            # ── NEW: восстанавливаем A+ Vision ───────────────
+                            st.session_state["aplus_vision"] = _row_o[6] or "" if len(_row_o) > 6 else ""
                             st.session_state["_hist_loaded"] = _asin
                             st.session_state["page"] = "🏠 Обзор"
                             st.rerun()
@@ -1982,13 +1935,11 @@ def page_history():
 
     st.divider()
 
-    # Scroll anchor when ASIN selected via Open button
     if _pre_asin:
         st.markdown('<div id="asin-details"></div>', unsafe_allow_html=True)
         st.components.v1.html('<script>document.getElementById("asin-details")?.scrollIntoView({behavior:"smooth"})</script>', height=0)
 
     asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
-    # Pre-select from Open button click
     _default_idx = 0
     if _pre_asin:
         _match = next((i for i,a in enumerate(all_asins) if a["asin"]==_pre_asin), 0)
@@ -1996,7 +1947,6 @@ def page_history():
     sel = st.selectbox("ASIN", asin_opts, index=_default_idx)
     sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
 
-    # Full title + Amazon link
     _sel_data = next((a for a in all_asins if a["asin"] == sel_asin), {})
     _full_title = _sel_data.get("title","")
     if _full_title:
@@ -2009,7 +1959,6 @@ def page_history():
         return
 
     latest = history[0]
-    # Фильтруем 0% записи из отображения таблицы
     history_valid = [h for h in history if (h.get("overall") or 0) > 0]
     if not history_valid:
         st.info("Все записи в истории имеют Overall: 0% — это старые упавшие анализы. Запусти новый анализ.")
@@ -2046,7 +1995,6 @@ def page_history():
             df_chart = pd.DataFrame({"Overall %": scores}, index=dates)
             st.area_chart(df_chart, color="#3b82f6")
 
-        # Cleanup button
         _zero_count = len([h for h in history if (h.get("overall") or 0) == 0])
         if _zero_count > 0:
             _cl1, _cl2 = st.columns([3,1])
@@ -2090,7 +2038,6 @@ def page_history():
 
     st.divider()
     st.subheader("🔍 Загрузить полный анализ из истории")
-    # Показываем все записи — но 0% помечаем серым и перемещаем вниз
     history_ok   = [h for h in history if (h.get("overall") or 0) > 0]
     history_zero = [h for h in history if (h.get("overall") or 0) == 0]
     history_sorted = history_ok + history_zero
@@ -2106,7 +2053,6 @@ def page_history():
 
     sel_hist = st.selectbox("Выбери запуск", hist_opts, key="hist_sel")
     sel_hist_idx_sorted = hist_opts.index(sel_hist)
-    # Map back to original history index for DB query
     sel_hist_date = history_sorted[sel_hist_idx_sorted]["date"]
     sel_hist_idx = next((i for i, h in enumerate(history) if h["date"] == sel_hist_date), 0)
 
@@ -2119,9 +2065,10 @@ def page_history():
                     cur_h.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS competitors_json TEXT")
                     conn_h.commit()
                 except Exception: pass
+                # ── ФИКС: загружаем aplus_vision_text ────────────────────────
                 cur_h.execute("""
                     SELECT result_json, vision_text, competitors_json, our_data_json,
-                           images_json, aplus_img_urls_json
+                           images_json, aplus_img_urls_json, aplus_vision_text
                     FROM listing_analysis
                     WHERE asin = %s
                     ORDER BY analyzed_at DESC
@@ -2146,6 +2093,8 @@ def page_history():
                 if row_h[5]:
                     try: st.session_state["aplus_img_urls"] = json.loads(row_h[5])
                     except: pass
+                # ── NEW: восстанавливаем A+ Vision ───────────────────────────
+                st.session_state["aplus_vision"] = row_h[6] or "" if len(row_h) > 6 else ""
                 st.session_state["_hist_loaded"] = sel_hist
                 st.session_state["page"] = "🏠 Обзор"
                 st.success(f"✅ Загружен анализ от {sel_hist}")
@@ -2216,9 +2165,7 @@ if "result" not in st.session_state:
 <div style="max-width:720px;margin:40px auto 0">
 <h1 style="font-size:2rem;font-weight:800;margin-bottom:4px">🔍 Amazon Listing Analyzer</h1>
 <p style="color:#64748b;font-size:1rem;margin-bottom:32px">Listing 3.0 — AI-анализ на основе COSMO + Rufus + Vision</p>
-
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px">
-
 <div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #3b82f6">
 <div style="font-weight:700;margin-bottom:8px">⚡ Что делает инструмент</div>
 <div style="font-size:0.88rem;color:#475569;line-height:1.6">
@@ -2227,9 +2174,7 @@ if "result" not in st.session_state:
 • Vision AI оценивает каждое фото по 6 критериям<br>
 • Проверяет как Cosmo и Rufus понимают товар<br>
 • Сравнивает до 5 конкурентов
-</div>
-</div>
-
+</div></div>
 <div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #10b981">
 <div style="font-weight:700;margin-bottom:8px">🚀 Как запустить</div>
 <div style="font-size:0.88rem;color:#475569;line-height:1.6">
@@ -2237,10 +2182,8 @@ if "result" not in st.session_state:
 2. Добавь ссылки на <b>конкурентов</b> (до 5 штук)<br>
 3. Выбери язык и фокус анализа<br>
 4. Нажми <b>🚀 Запустить анализ</b><br>
-5. Подожди ~2-3 мин — анализ всех листингов
-</div>
-</div>
-
+5. Подожди ~2-3 мин
+</div></div>
 <div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #f59e0b">
 <div style="font-weight:700;margin-bottom:8px">📊 Что получишь</div>
 <div style="font-size:0.88rem;color:#475569;line-height:1.6">
@@ -2249,20 +2192,15 @@ if "result" not in st.session_state:
 • <b>Benchmark</b> — подиум vs конкуренты<br>
 • <b>COSMO / Rufus</b> — AI-видимость товара<br>
 • <b>Приоритетные действия</b> — что улучшить
-</div>
-</div>
-
+</div></div>
 <div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #8b5cf6">
 <div style="font-weight:700;margin-bottom:8px">💡 Советы</div>
 <div style="font-size:0.88rem;color:#475569;line-height:1.6">
 • Используй <b>⚡ Оптимизацию токенов</b> для быстрых ретестов<br>
 • Отключи Vision — анализ ускорится в 3-4х<br>
 • <b>English</b> — для листингов на .com рынке<br>
-• Заполни <b>Фокус анализа</b> для точных рек.<br>
 • Кнопка <b>🗑️ Сброс</b> — полная очистка данных
-</div>
-</div>
-
+</div></div>
 </div>
 <p style="text-align:center;color:#94a3b8;font-size:0.8rem">👈 Введи ссылку на листинг в форме выше и нажми «Запустить анализ»</p>
 </div>
@@ -2276,7 +2214,269 @@ pi = od.get("product_information", {})
 cd = st.session_state.get("comp_data_list", [])
 imgs = st.session_state.get("images", [])
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# PDF REPORT GENERATOR
+# ══════════════════════════════════════════════════════════════════════════════
+def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=None):
+    import io, base64, re as _re
+    from datetime import datetime
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+        Table, TableStyle, PageBreak, Image as RLImage, KeepTogether)
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    from PIL import Image as PILImage
+    import requests as _req, os
+
+    C = {
+        "navy": colors.HexColor("#0f172a"), "blue": colors.HexColor("#1d4ed8"),
+        "blue2": colors.HexColor("#3b82f6"), "slate": colors.HexColor("#334155"),
+        "muted": colors.HexColor("#64748b"), "light": colors.HexColor("#f1f5f9"),
+        "border": colors.HexColor("#e2e8f0"), "green": colors.HexColor("#15803d"),
+        "green2": colors.HexColor("#22c55e"), "yellow": colors.HexColor("#d97706"),
+        "yellow2": colors.HexColor("#fbbf24"), "red": colors.HexColor("#dc2626"),
+        "red2": colors.HexColor("#ef4444"), "white": colors.white,
+        "accent": colors.HexColor("#7c3aed"),
+    }
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=16*mm, bottomMargin=16*mm)
+    W = A4[0] - 36*mm
+
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    _sys_r = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    _sys_b = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    if os.path.exists(_sys_r) and os.path.exists(_sys_b):
+        try:
+            pdfmetrics.registerFont(TTFont("F", _sys_r))
+            pdfmetrics.registerFont(TTFont("FB", _sys_b))
+            _F, _FB = "F", "FB"
+        except: _F, _FB = "Helvetica", "Helvetica-Bold"
+    else: _F, _FB = "Helvetica", "Helvetica-Bold"
+
+    def ps(name, **kw):
+        d = dict(fontName=_F, fontSize=9, textColor=C["slate"], spaceAfter=2, leading=13)
+        d.update(kw); return ParagraphStyle(name, **d)
+
+    S = {
+        "h1": ps("h1", fontName=_FB, fontSize=13, textColor=C["navy"], spaceBefore=8, spaceAfter=3),
+        "h2": ps("h2", fontName=_FB, fontSize=10, textColor=C["slate"], spaceBefore=5, spaceAfter=2),
+        "body": ps("bd", fontSize=9, textColor=C["slate"], spaceAfter=2, leading=13),
+        "small": ps("sm", fontSize=8, textColor=C["muted"], spaceAfter=1, leading=11),
+        "green": ps("gr", fontSize=9, textColor=C["green"], fontName=_FB, spaceAfter=2),
+        "orange": ps("or", fontSize=9, textColor=C["yellow"], spaceAfter=2),
+        "red": ps("rd", fontSize=9, textColor=C["red"], fontName=_FB, spaceAfter=2),
+        "action": ps("ac", fontSize=9, textColor=C["blue"], fontName=_FB, spaceAfter=2),
+        "footer": ps("ft", fontSize=7, textColor=C["muted"], alignment=TA_CENTER),
+    }
+
+    story = []
+    date_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+    ov_pct = pct(result.get("overall_score", 0))
+
+    def score_color(v):
+        return C["green"] if v >= 75 else (C["yellow"] if v >= 50 else C["red"])
+    def score_bg(v):
+        return colors.HexColor("#dcfce7") if v >= 75 else (colors.HexColor("#fef9c3") if v >= 50 else colors.HexColor("#fee2e2"))
+    def hx(c):
+        return '#{:02x}{:02x}{:02x}'.format(int(c.red*255),int(c.green*255),int(c.blue*255))
+    def score_label(v):
+        return "STRONG" if v >= 75 else ("NEEDS WORK" if v >= 50 else "CRITICAL")
+    def _clean(s):
+        return _re.sub(r"\*+","",str(s or "")).strip()
+
+    title_val = our_data.get("title", asin)
+    price = our_data.get("price",""); rating = our_data.get("average_rating",""); brand = our_data.get("brand","")
+
+    # Cover
+    cover_tbl = Table([[
+        Paragraph("Amazon Listing Audit", ps("ct", fontName=_FB, fontSize=22, textColor=C["white"], leading=26)),
+        Paragraph(f"<b>{ov_pct}%</b>", ps("ov", fontName=_FB, fontSize=44, textColor=colors.HexColor("#22c55e" if ov_pct>=75 else ("#fbbf24" if ov_pct>=50 else "#ef4444")), alignment=TA_RIGHT, leading=50)),
+    ]], colWidths=[W*0.65, W*0.35])
+    cover_tbl.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("BACKGROUND",(0,0),(-1,-1),C["navy"]),("PADDING",(0,0),(-1,-1),14)]))
+    story.append(cover_tbl); story.append(Spacer(1,3*mm))
+
+    meta = [
+        [Paragraph("<b>ASIN</b>",S["small"]), Paragraph(f"<b>{asin}</b>",S["body"]), Paragraph("<b>Дата</b>",S["small"]), Paragraph(date_str,S["body"]), Paragraph("<b>Рейтинг</b>",S["small"]), Paragraph(f"{rating}",S["body"])],
+        [Paragraph("<b>Бренд</b>",S["small"]), Paragraph(brand[:30],S["body"]), Paragraph("<b>Цена</b>",S["small"]), Paragraph(price,S["body"]), Paragraph("<b>Overall</b>",S["small"]), Paragraph(f"<font color='{hx(score_color(ov_pct))}'><b>{ov_pct}% — {score_label(ov_pct)}</b></font>",S["body"])],
+        [Paragraph("<b>Листинг</b>",S["small"]), Paragraph(_clean(title_val)[:80], ps("tt",fontSize=8,textColor=C["slate"])), "","","",""],
+    ]
+    mt = Table(meta, colWidths=[18*mm,W*0.27,14*mm,W*0.2,16*mm,W*0.2])
+    mt.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),_F),("FONTSIZE",(0,0),(-1,-1),8),("BACKGROUND",(0,0),(-1,-1),C["light"]),("GRID",(0,0),(-1,-1),0.3,C["border"]),("PADDING",(0,0),(-1,-1),5),("SPAN",(1,2),(5,2)),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story.append(mt); story.append(Spacer(1,5*mm))
+
+    # Score dashboard
+    story.append(Paragraph("▌ SCORE DASHBOARD", ps("sdh",fontName=_FB,fontSize=11,textColor=C["navy"],spaceBefore=4,spaceAfter=3)))
+    score_map = [
+        ("Title",result.get("title_score",0)),("Bullets",result.get("bullets_score",0)),
+        ("Описание",result.get("description_score",0)),("Фото",result.get("images_score",0)),
+        ("A+",result.get("aplus_score",0)),("Отзывы",result.get("reviews_score",0)),
+        ("BSR",result.get("bsr_score",0)),("Цена",result.get("price_score",0)),
+        ("Варианты",result.get("customization_score",0)),("Prime",result.get("prime_score",0)),
+        ("COSMO",result.get("cosmo_analysis",{}).get("score",0) if isinstance(result.get("cosmo_analysis"),dict) else 0),
+        ("Rufus",result.get("rufus_analysis",{}).get("score",0) if isinstance(result.get("rufus_analysis"),dict) else 0),
+    ]
+    _has_aplus_pdf = bool(our_data.get("aplus") or our_data.get("aplus_content"))
+    def score_card(label, raw):
+        v = pct(raw); sc = score_color(v); bg = score_bg(v)
+        if label == "Описание" and v == 0 and _has_aplus_pdf:
+            return Table([[Paragraph(f"<b>{label}</b>",ps(f"sc_{label}",fontName=_FB,fontSize=8,textColor=C["navy"])),Paragraph("<b>A+</b>",ps(f"sv_{label}",fontName=_FB,fontSize=11,alignment=TA_RIGHT,textColor=C["muted"]))],[Paragraph("скрыто A+",ps(f"sb_{label}",fontSize=7,textColor=C["muted"])),""]],colWidths=[35*mm,18*mm],style=TableStyle([("BACKGROUND",(0,0),(-1,-1),C["light"]),("PADDING",(0,0),(-1,-1),4),("SPAN",(0,1),(1,1))]))
+        return Table([[Paragraph(f"<b>{label}</b>",ps(f"sc_{label}",fontName=_FB,fontSize=8,textColor=C["navy"])),Paragraph(f"<font color='{hx(sc)}'><b>{v}%</b></font>",ps(f"sv_{label}",fontName=_FB,fontSize=11,alignment=TA_RIGHT))],[Table([[""]], colWidths=[max(2,int(v*0.5))*mm if max(2,int(v*0.5))*mm<40*mm else 40*mm],style=[("BACKGROUND",(0,0),(-1,-1),sc),("ROWHEIGHTS",(0,0),(-1,-1),3)]),""]],colWidths=[35*mm,18*mm],style=TableStyle([("BACKGROUND",(0,0),(-1,-1),bg),("PADDING",(0,0),(-1,-1),4),("SPAN",(0,1),(1,1)),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    n=len(score_map); cols3=3; rows3=(n+cols3-1)//cols3; dash_rows=[]
+    for ri in range(rows3):
+        row=[]
+        for ci in range(cols3):
+            idx=ri*cols3+ci
+            if idx<n: row.append(score_card(*score_map[idx]))
+            else: row.append("")
+        dash_rows.append(row)
+    dash_tbl=Table(dash_rows,colWidths=[W/3-1*mm]*3)
+    dash_tbl.setStyle(TableStyle([("PADDING",(0,0),(-1,-1),1.5),("VALIGN",(0,0),(-1,-1),"TOP")]))
+    story.append(dash_tbl); story.append(Spacer(1,5*mm))
+
+    # Priority actions
+    _prio=result.get("priority_improvements",[]); _acts=result.get("actions",[])
+    if _prio or _acts:
+        story.append(Paragraph("▌ ПРИОРИТЕТНЫЕ ДЕЙСТВИЯ",ps("pah",fontName=_FB,fontSize=11,textColor=C["navy"],spaceBefore=2,spaceAfter=3)))
+        _all=[{"action":_clean(item),"impact":"HIGH","effort":"","details":""} for item in _prio]
+        _all+=[a for a in _acts if isinstance(a,dict)]
+        _all.sort(key=lambda x:{"HIGH":0,"MEDIUM":1,"LOW":2}.get(x.get("impact","MEDIUM"),1))
+        for a in _all[:8]:
+            _imp=a.get("impact","MEDIUM"); _ic=C["red"] if _imp=="HIGH" else (C["yellow"] if _imp=="MEDIUM" else C["green"])
+            _ibg=colors.HexColor("#fee2e2") if _imp=="HIGH" else (colors.HexColor("#fef9c3") if _imp=="MEDIUM" else colors.HexColor("#dcfce7"))
+            _ar=Table([[Paragraph(f"<b>{_imp}</b>",ps(f"imp_{_imp}",fontName=_FB,fontSize=7,textColor=_ic,alignment=TA_CENTER)),Paragraph(_clean(a.get("action","")),ps("act_t",fontSize=9,textColor=C["navy"]))]],colWidths=[14*mm,W-14*mm])
+            _ar.setStyle(TableStyle([("BACKGROUND",(0,0),(0,0),_ibg),("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),("PADDING",(0,0),(-1,-1),5),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+            story.append(_ar)
+
+    story.append(PageBreak())
+
+    # Photos
+    story.append(Paragraph("▌ АНАЛИЗ ФОТОГРАФИЙ",ps("ph",fontName=_FB,fontSize=11,textColor=C["navy"],spaceBefore=0,spaceAfter=4)))
+    _blocks={}
+    if vision_text:
+        for _m in _re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)",vision_text,_re.DOTALL):
+            _blocks[int(_m.group(1))]=_m.group(2).strip()
+    for i,img_d in enumerate(images[:5]):
+        blk=_blocks.get(i+1,"")
+        sc_m=_re.search(r"(\d+)/10",blk); sc_v=int(sc_m.group(1)) if sc_m else 0
+        sc_c=score_color(sc_v*10); sc_lbl="Отлично" if sc_v>=8 else ("Хорошо" if sc_v>=6 else "Слабо")
+        typ_m=_re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)",blk)
+        str_m=_re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})",blk)
+        wk_m=_re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})",blk)
+        ac_m=_re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})",blk)
+        em_m=_re.search(r"(?:Эмоция|Emotion)\s*[:\-]\s*(.{3,})",blk)
+        ptype=_clean(typ_m.group(1)) if typ_m else ""; stxt=_clean(str_m.group(1)) if str_m else ""
+        wtxt=_clean(wk_m.group(1)) if wk_m else ""; atxt=_clean(ac_m.group(1)) if ac_m else ""; etxt=_clean(em_m.group(1)) if em_m else ""
+        try:
+            _b64=img_d.get("b64","") if isinstance(img_d,dict) else img_d
+            _bytes=base64.b64decode(_b64); _pil=PILImage.open(io.BytesIO(_bytes)).convert("RGB")
+            _pil.thumbnail((200,200)); _tb=io.BytesIO(); _pil.save(_tb,"JPEG",quality=80); _tb.seek(0)
+            _rl=RLImage(_tb,width=40*mm,height=40*mm)
+        except: _rl=Paragraph(f"#{i+1}",S["small"])
+        info=[Paragraph(f"<b>Фото #{i+1}" + (f" — {ptype}" if ptype else "") + f"</b>  <font color='{hx(sc_c)}'><b>{sc_v}/10 {sc_lbl}</b></font>",ps("phdr",fontName=_FB,fontSize=10,textColor=C["navy"]))]
+        if stxt: info.append(Paragraph(f"✅ {stxt}",S["green"]))
+        if wtxt: info.append(Paragraph(f"⚠ {wtxt}",S["orange"]))
+        if atxt: info.append(Paragraph(f"→ {atxt}",S["action"]))
+        if etxt: info.append(Paragraph(f"😶 {etxt}",S["small"]))
+        photo_row=Table([[_rl,info]],colWidths=[43*mm,W-43*mm])
+        photo_row.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),("LINEBELOW",(0,0),(-1,-1),0.5,C["border"]),("LINEBEFORE",(0,0),(0,-1),3,sc_c),("PADDING",(0,0),(0,0),5),("PADDING",(1,0),(1,0),6)]))
+        story.append(KeepTogether([photo_row,Spacer(1,2*mm)]))
+
+    # A+ Vision
+    _av=st.session_state.get("aplus_vision",""); _aurls=st.session_state.get("aplus_img_urls",[])
+    if _av or _aurls:
+        story.append(PageBreak())
+        story.append(Paragraph("▌ A+ КОНТЕНТ",ps("aph",fontName=_FB,fontSize=11,textColor=C["navy"],spaceBefore=0,spaceAfter=4)))
+        _apblks={}
+        if _av:
+            for _m in _re.finditer(r"APLUS_BLOCK_(\d+)\s*(.*?)(?=APLUS_BLOCK_\d+|$)",_av,_re.DOTALL):
+                _apblks[int(_m.group(1))]=_m.group(2).strip()
+        for _bi in range(max(len(_aurls),len(_apblks))):
+            _bblk=_apblks.get(_bi+1,""); _bmod=_re.search(r"(?:Модуль|Module)\s*[:\-]\s*(.+)",_bblk)
+            _bsc=_re.search(r"(\d+)/10",_bblk); _bstr=_re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})",_bblk)
+            _bwk=_re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})",_bblk); _bact=_re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})",_bblk)
+            _bscv=int(_bsc.group(1)) if _bsc else 0; _bscc=score_color(_bscv*10)
+            _ap_info=[Paragraph(f"<b>Баннер #{_bi+1}" + (f" — {_clean(_bmod.group(1))}" if _bmod else "") + f"</b>  <font color='{hx(_bscc)}'>{_bscv}/10</font>",ps("aphi",fontName=_FB,fontSize=9,textColor=C["navy"]))]
+            if _bstr: _ap_info.append(Paragraph(f"✅ {_clean(_bstr.group(1))}",S["green"]))
+            if _bwk: _ap_info.append(Paragraph(f"⚠ {_clean(_bwk.group(1))}",S["orange"]))
+            if _bact: _ap_info.append(Paragraph(f"→ {_clean(_bact.group(1))}",S["action"]))
+            _ap_img=""
+            if _bi<len(_aurls):
+                try:
+                    _apr=_req.get(_aurls[_bi],timeout=10,headers={"User-Agent":"Mozilla/5.0"})
+                    if _apr.ok:
+                        _apil=PILImage.open(io.BytesIO(_apr.content)).convert("RGB"); _apil.thumbnail((500,200))
+                        _ab=io.BytesIO(); _apil.save(_ab,"JPEG",quality=70); _ab.seek(0)
+                        _ap_img=RLImage(_ab,width=W,height=35*mm)
+                except: pass
+            _parts=([_ap_img] if _ap_img else [])+_ap_info+[Spacer(1,3*mm)]
+            story.append(KeepTogether(_parts))
+
+    story.append(PageBreak())
+    story.append(Paragraph("▌ АНАЛИЗ КОНТЕНТА",ps("cah",fontName=_FB,fontSize=11,textColor=C["navy"],spaceBefore=0,spaceAfter=4)))
+    for sec_key,sec_score_key,sec_name in [("title","title_score","Title"),("bullets","bullets_score","Bullets"),("description","description_score","Description"),("aplus","aplus_score","A+")]:
+        sc_v=pct(result.get(sec_score_key,0)); sc_c=score_color(sc_v)
+        gaps=result.get(f"{sec_key}_gaps",[]); rec=result.get(f"{sec_key}_rec","")
+        hdr_row=Table([[Paragraph(f"<b>{sec_name}</b>",ps(f"ch_{sec_key}",fontName=_FB,fontSize=10,textColor=C["navy"])),Paragraph(f"<font color='{hx(sc_c)}'><b>{sc_v}%</b></font>",ps(f"cs_{sec_key}",fontName=_FB,fontSize=14,alignment=TA_RIGHT))]],colWidths=[W-25*mm,25*mm])
+        hdr_row.setStyle(TableStyle([("LINEBELOW",(0,0),(-1,-1),1.5,sc_c),("PADDING",(0,0),(-1,-1),4),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+        story.append(hdr_row)
+        if gaps:
+            for g in gaps[:3]: story.append(Paragraph(f"⚠ {_clean(g)}",S["orange"]))
+        if rec: story.append(Paragraph(f"→ {_clean(rec)}",S["action"]))
+        story.append(Spacer(1,3*mm))
+    _title_txt=our_data.get("title",""); _bullets=our_data.get("feature_bullets",[])
+    if _title_txt: story.append(Paragraph("Title:",S["h2"])); story.append(Paragraph(_clean(_title_txt)[:200],S["body"]))
+    if _bullets:
+        story.append(Paragraph("Bullets:",S["h2"]))
+        for b in _bullets[:5]:
+            _bl=len(b.encode()); _bc=C["red"] if _bl>255 else C["slate"]
+            story.append(Paragraph(f"<font color='{hx(_bc)}'>{"🔴" if _bl>255 else "✅"}</font> {_clean(b)[:200]} [{_bl}b]",S["body"]))
+
+    # COSMO/RUFUS/JTBD/VPC
+    story.append(PageBreak())
+    story.append(Paragraph("▌ COSMO / RUFUS / JTBD",ps("aih",fontName=_FB,fontSize=11,textColor=C["navy"],spaceBefore=0,spaceAfter=4)))
+    _ca=result.get("cosmo_analysis",{}); _ra=result.get("rufus_analysis",{})
+    _cs=pct(_ca.get("score",0)); _rs=pct(_ra.get("score",0))
+    ai_tbl=Table([[Table([[Paragraph(f"<b>{_cs}%</b>",ps("csp",fontName=_FB,fontSize=22,textColor=score_color(_cs),alignment=TA_CENTER)),Paragraph("COSMO",ps("csl",fontSize=8,alignment=TA_CENTER,textColor=C["muted"]))]],style=[("BACKGROUND",(0,0),(-1,-1),score_bg(_cs)),("PADDING",(0,0),(-1,-1),8)]),Table([[Paragraph(f"<b>{_rs}%</b>",ps("rsp",fontName=_FB,fontSize=22,textColor=score_color(_rs),alignment=TA_CENTER)),Paragraph("Rufus",ps("rsl",fontSize=8,alignment=TA_CENTER,textColor=C["muted"]))]],style=[("BACKGROUND",(0,0),(-1,-1),score_bg(_rs)),("PADDING",(0,0),(-1,-1),8)])]],colWidths=[W/2-2*mm,W/2-2*mm])
+    ai_tbl.setStyle(TableStyle([("PADDING",(0,0),(-1,-1),2)])); story.append(ai_tbl); story.append(Spacer(1,4*mm))
+    _sig_p=_ca.get("signals_present",[]); _sig_m=_ca.get("signals_missing",[])
+    if _sig_p or _sig_m:
+        sig_tbl=Table([[[Paragraph("<b>✅ Присутствуют</b>",S["h2"])]+[Paragraph(f"• {_clean(s)}",S["green"]) for s in _sig_p[:5]],[Paragraph("<b>❌ Отсутствуют</b>",S["h2"])]+[Paragraph(f"• {_clean(s)}",S["orange"]) for s in _sig_m[:5]]]],colWidths=[W/2-2*mm,W/2-2*mm])
+        sig_tbl.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),("BACKGROUND",(0,0),(0,0),colors.HexColor("#f0fdf4")),("BACKGROUND",(1,0),(1,0),colors.HexColor("#fffbeb")),("GRID",(0,0),(-1,-1),0.3,C["border"]),("PADDING",(0,0),(-1,-1),6)]))
+        story.append(sig_tbl)
+    _jtbd=result.get("jtbd_analysis",{})
+    if _jtbd and _jtbd.get("job_story"):
+        story.append(Spacer(1,4*mm)); story.append(Paragraph("▌ JTBD Job Story",ps("jh",fontName=_FB,fontSize=10,textColor=C["navy"],spaceAfter=2)))
+        js_box=Table([[Paragraph(_clean(_jtbd["job_story"]),ps("jbs",fontSize=9,textColor=C["navy"],fontName=_FB,leading=14))]],colWidths=[W])
+        js_box.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f0f9ff")),("PADDING",(0,0),(-1,-1),8)])); story.append(js_box)
+    _vpc=result.get("vpc_analysis",{})
+    if _vpc and _vpc.get("vpc_verdict"):
+        story.append(Spacer(1,4*mm)); story.append(Paragraph("▌ VPC Verdict",ps("vh",fontName=_FB,fontSize=10,textColor=C["navy"],spaceAfter=2)))
+        verd_box=Table([[Paragraph(_clean(_vpc["vpc_verdict"]),ps("vb",fontSize=9,textColor=C["navy"],leading=13))]],colWidths=[W])
+        verd_box.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#faf5ff")),("LINEBEFORE",(0,0),(0,-1),3,C["accent"]),("PADDING",(0,0),(-1,-1),8)])); story.append(verd_box)
+
+    # Competitors
+    if comp_data:
+        story.append(PageBreak())
+        story.append(Paragraph("▌ КОНКУРЕНТЫ",ps("comph",fontName=_FB,fontSize=11,textColor=C["navy"],spaceAfter=4)))
+        comp_hdr=[[Paragraph("<b>ASIN</b>",S["small"]),Paragraph("<b>Title</b>",S["small"]),Paragraph("<b>Цена</b>",S["small"]),Paragraph("<b>★</b>",S["small"]),Paragraph("<b>Overall</b>",S["small"])]]
+        for i,comp in enumerate(comp_data[:5]):
+            _cai=st.session_state.get(f"comp_ai_{i}",{}); _cov=pct(_cai.get("overall_score",0)) if _cai else 0; _coc=score_color(_cov)
+            comp_hdr.append([Paragraph(get_asin_from_data(comp),S["small"]),Paragraph(_clean(comp.get("title",""))[:45],S["small"]),Paragraph(str(comp.get("price","")),S["small"]),Paragraph(str(comp.get("average_rating","")),S["small"]),Paragraph(f"<font color='{hx(_coc)}'><b>{_cov}%</b></font>",ps("cov",fontName=_FB,fontSize=9,alignment=TA_CENTER))])
+        comp_tbl=Table(comp_hdr,colWidths=[26*mm,80*mm,18*mm,12*mm,18*mm])
+        comp_tbl.setStyle(TableStyle([("FONTNAME",(0,0),(-1,0),_FB),("FONTSIZE",(0,0),(-1,-1),8),("BACKGROUND",(0,0),(-1,0),C["navy"]),("TEXTCOLOR",(0,0),(-1,0),C["white"]),("ROWBACKGROUNDS",(0,1),(-1,-1),[C["light"],C["white"]]),("GRID",(0,0),(-1,-1),0.3,C["border"]),("PADDING",(0,0),(-1,-1),5)]))
+        story.append(comp_tbl)
+
+    # Footer
+    story.append(Spacer(1,6*mm))
+    ft=Table([[Paragraph(f"Amazon Listing Analyzer  |  ASIN: {asin}  |  {date_str}",S["footer"])]],colWidths=[W])
+    ft.setStyle(TableStyle([("LINEABOVE",(0,0),(-1,-1),0.5,C["border"]),("PADDING",(0,0),(-1,-1),4)])); story.append(ft)
+    doc.build(story); buf.seek(0)
+    return buf.read()
+
+
 def health_card():
     health = pct(r.get("overall_score", r.get("health_score", 0)))
     hc     = "#22c55e" if health>=75 else ("#f59e0b" if health>=50 else "#ef4444")
@@ -2294,902 +2494,74 @@ def health_card():
     promo     = od.get("promo_text","")
     is_prime  = od.get("is_prime_exclusive") or od.get("is_prime")
     bought    = od.get("number_of_people_bought","")
-
-    # If loaded from history — show notice instead of empty fields
     _is_history = st.session_state.get("_hist_loaded") and not title_h
-
-    # Build price line
+    _mp_hc = st.session_state.get("_marketplace","com")
     price_parts = []
     if price_h:
         price_str = f"💰 <b>{price_h}</b>"
         if prev_price and prev_price != price_h:
             price_str += f" <span style='text-decoration:line-through;opacity:0.5'>{prev_price}</span>"
         price_parts.append(price_str)
-    if coupon:
-        price_parts.append(f"<span style='background:#16a34a;color:white;border-radius:4px;padding:1px 6px;font-size:0.78rem'>🎟️ {coupon}</span>")
-    if promo:
-        _promo_clean = promo.replace("Save","Save ").replace("Savings","").strip()[:40]
-        price_parts.append(f"<span style='background:#1d4ed8;color:white;border-radius:4px;padding:1px 6px;font-size:0.78rem'>📦 {_promo_clean}</span>")
-    if is_prime:
-        price_parts.append(f"<span style='background:#f59e0b;color:#1c1917;border-radius:4px;padding:1px 6px;font-size:0.78rem'>👑 Prime</span>")
-    if bought:
-        price_parts.append(f"<span style='opacity:0.7;font-size:0.78rem'>🛒 {bought}</span>")
+    if coupon: price_parts.append(f"<span style='background:#16a34a;color:white;border-radius:4px;padding:1px 6px;font-size:0.78rem'>🎟️ {coupon}</span>")
+    if promo: price_parts.append(f"<span style='background:#1d4ed8;color:white;border-radius:4px;padding:1px 6px;font-size:0.78rem'>📦 {promo[:40]}</span>")
+    if is_prime: price_parts.append(f"<span style='background:#f59e0b;color:#1c1917;border-radius:4px;padding:1px 6px;font-size:0.78rem'>👑 Prime</span>")
+    if bought: price_parts.append(f"<span style='opacity:0.7;font-size:0.78rem'>🛒 {bought}</span>")
     price_line = "  ".join(price_parts)
-
     if _is_history:
-        st.markdown(f"""
-<div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
+        st.markdown(f"""<div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
-    <div>
-      <div style="font-size:0.8rem;opacity:0.6;color:#93c5fd">📅 Загружено из истории</div>
-      <div style="font-size:0.85rem;color:#94a3b8;margin-top:4px">Данные листинга недоступны — только оценки AI</div>
-    </div>
-    <div style="text-align:center">
-      <div style="font-size:3.5rem;font-weight:800;color:{hc};line-height:1">{health}%</div>
-      <div style="font-size:0.85rem;color:{hc};margin-top:2px">{hl}</div>
-    </div>
+    <div><div style="font-size:0.8rem;opacity:0.6;color:#93c5fd">📅 Загружено из истории</div><div style="font-size:0.85rem;color:#94a3b8;margin-top:4px">Данные листинга недоступны — только оценки AI</div></div>
+    <div style="text-align:center"><div style="font-size:3.5rem;font-weight:800;color:{hc};line-height:1">{health}%</div><div style="font-size:0.85rem;color:{hc};margin-top:2px">{hl}</div></div>
   </div>
-  <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:14px">
-    <div style="background:{hc};width:{health}%;height:10px;border-radius:8px"></div>
-  </div>
+  <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:14px"><div style="background:{hc};width:{health}%;height:10px;border-radius:8px"></div></div>
 </div>""", unsafe_allow_html=True)
     else:
         _rat_val = float(rating_h or 0)
         _rat_c = "#22c55e" if _rat_val >= 4.4 else ("#f59e0b" if _rat_val >= 4.3 else "#ef4444")
         _title_c = "#fca5a5" if tlen > 125 else "#86efac"
-        st.markdown(f"""
-<div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
+        st.markdown(f"""<div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
     <div>
-      <a href="https://www.amazon.com/dp/{asin_h}" target="_blank" style="font-size:0.8rem;opacity:0.6;color:#93c5fd;text-decoration:none">{brand_h} · {asin_h} ↗</a>
+      <a href="https://www.amazon.{_mp_hc}/dp/{asin_h}" target="_blank" style="font-size:0.8rem;opacity:0.6;color:#93c5fd;text-decoration:none">{brand_h} · {asin_h} ({_mp_hc}) ↗</a>
       <div style="font-size:1rem;font-weight:600;max-width:520px;line-height:1.4;margin-top:4px">{title_h[:80]}{"..." if tlen>80 else ""}</div>
-      <div style="display:flex;gap:10px;margin-top:8px;font-size:0.82rem;flex-wrap:wrap;align-items:center">
-        {price_line}
-      </div>
+      <div style="display:flex;gap:10px;margin-top:8px;font-size:0.82rem;flex-wrap:wrap;align-items:center">{price_line}</div>
       <div style="display:flex;gap:14px;margin-top:6px;font-size:0.82rem;flex-wrap:wrap">
-        <span style="color:{_rat_c};font-weight:600">&#11088; {rating_h} ({reviews_h} отз.)</span>
-        <span style="opacity:0.8">&#128202; {bsr_h}</span>
-        <span style="color:{_title_c}">&#128221; Title: {tlen} симв.</span>
+        <span style="color:{_rat_c};font-weight:600">⭐ {rating_h} ({reviews_h} отз.)</span>
+        <span style="opacity:0.8">📊 {bsr_h}</span>
+        <span style="color:{_title_c}">📝 Title: {tlen} симв.</span>
       </div>
     </div>
-    <div style="text-align:center">
-      <div style="font-size:3.5rem;font-weight:800;color:{hc};line-height:1">{health}%</div>
-      <div style="font-size:0.85rem;color:{hc};margin-top:2px">{hl}</div>
-    </div>
+    <div style="text-align:center"><div style="font-size:3.5rem;font-weight:800;color:{hc};line-height:1">{health}%</div><div style="font-size:0.85rem;color:{hc};margin-top:2px">{hl}</div></div>
   </div>
-  <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:14px">
-    <div style="background:{hc};width:{health}%;height:10px;border-radius:8px"></div>
-  </div>
+  <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:14px"><div style="background:{hc};width:{health}%;height:10px;border-radius:8px"></div></div>
 </div>""", unsafe_allow_html=True)
 
     items = [
-        ("Title",   r.get("title_score",0)),
-        ("Bullets", r.get("bullets_score",0)),
-        ("Описание",r.get("description_score",0)),
-        ("Фото",    r.get("images_score",0)),
-        ("A+",      r.get("aplus_score",0)),
-        ("Отзывы",  r.get("reviews_score",0)),
-        ("BSR",     r.get("bsr_score",0)),
-        ("Цена",    r.get("price_score",0)),
-        ("Варианты",r.get("customization_score",0)),
-        ("Prime",   r.get("prime_score",0)),
+        ("Title",r.get("title_score",0)),("Bullets",r.get("bullets_score",0)),
+        ("Описание",r.get("description_score",0)),("Фото",r.get("images_score",0)),
+        ("A+",r.get("aplus_score",0)),("Отзывы",r.get("reviews_score",0)),
+        ("BSR",r.get("bsr_score",0)),("Цена",r.get("price_score",0)),
+        ("Варианты",r.get("customization_score",0)),("Prime",r.get("prime_score",0)),
     ]
     _has_aplus_od = bool(od.get("aplus") or od.get("aplus_content"))
     cols = st.columns(len(items))
     for col,(lbl,val) in zip(cols,items):
         p2 = pct(val)
         if lbl == "Описание" and p2 == 0 and _has_aplus_od:
-            col.markdown(
-                '<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid #64748b">'
-                '<div style="font-size:1rem;font-weight:700;color:#64748b">A+</div>'
-                '<div style="font-size:0.68rem;color:#64748b">Описание</div></div>',
-                unsafe_allow_html=True)
+            col.markdown('<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid #64748b"><div style="font-size:1rem;font-weight:700;color:#64748b">A+</div><div style="font-size:0.68rem;color:#64748b">Описание</div></div>', unsafe_allow_html=True)
         else:
             cc = "#22c55e" if p2>=75 else ("#f59e0b" if p2>=50 else "#ef4444")
             col.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid {cc}"><div style="font-size:1.2rem;font-weight:700;color:{cc}">{p2}%</div><div style="font-size:0.68rem;color:#64748b">{lbl}</div></div>', unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PDF REPORT GENERATOR
-# ══════════════════════════════════════════════════════════════════════════════
-def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=None):
-    import io, base64, re as _re
-    from datetime import datetime
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib import colors
-    from reportlab.lib.units import mm
-    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-        Table, TableStyle, HRFlowable, PageBreak, Image as RLImage, KeepTogether)
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    from reportlab.graphics.shapes import Drawing, Rect, String, Line
-    from PIL import Image as PILImage
-
-    # ── Palette ───────────────────────────────────────────────────────────────
-    C = {
-        "navy":    colors.HexColor("#0f172a"),
-        "blue":    colors.HexColor("#1d4ed8"),
-        "blue2":   colors.HexColor("#3b82f6"),
-        "slate":   colors.HexColor("#334155"),
-        "muted":   colors.HexColor("#64748b"),
-        "light":   colors.HexColor("#f1f5f9"),
-        "border":  colors.HexColor("#e2e8f0"),
-        "green":   colors.HexColor("#15803d"),
-        "green2":  colors.HexColor("#22c55e"),
-        "yellow":  colors.HexColor("#d97706"),
-        "yellow2": colors.HexColor("#fbbf24"),
-        "red":     colors.HexColor("#dc2626"),
-        "red2":    colors.HexColor("#ef4444"),
-        "white":   colors.white,
-        "accent":  colors.HexColor("#7c3aed"),
-    }
-
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-        leftMargin=18*mm, rightMargin=18*mm,
-        topMargin=16*mm, bottomMargin=16*mm)
-    W = A4[0] - 36*mm
-
-    # ── Fonts ─────────────────────────────────────────────────────────────────
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    import os, tempfile, requests as _req
-
-    def _try_font(name, url):
-        cache = os.path.join(tempfile.gettempdir(), name)
-        if not os.path.exists(cache):
-            try:
-                r = _req.get(url, timeout=20)
-                if r.ok: open(cache,"wb").write(r.content)
-            except: return None
-        return cache if os.path.exists(cache) else None
-
-    _sys_r = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-    _sys_b = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-    if os.path.exists(_sys_r) and os.path.exists(_sys_b):
-        try:
-            pdfmetrics.registerFont(TTFont("F", _sys_r))
-            pdfmetrics.registerFont(TTFont("FB", _sys_b))
-            _F, _FB = "F", "FB"
-        except: _F, _FB = "Helvetica", "Helvetica-Bold"
-    else:
-        _F, _FB = "Helvetica", "Helvetica-Bold"
-
-    # ── Styles ────────────────────────────────────────────────────────────────
-    def ps(name, **kw):
-        defaults = dict(fontName=_F, fontSize=9, textColor=C["slate"],
-                       spaceAfter=2, leading=13)
-        defaults.update(kw)
-        return ParagraphStyle(name, **defaults)
-
-    S = {
-        "cover_title": ps("ct", fontName=_FB, fontSize=28, textColor=C["white"], spaceAfter=4, leading=34),
-        "cover_sub":   ps("cs", fontName=_F,  fontSize=11, textColor=colors.HexColor("#93c5fd"), spaceAfter=3),
-        "cover_meta":  ps("cm", fontName=_F,  fontSize=9,  textColor=colors.HexColor("#cbd5e1"), spaceAfter=2),
-        "h1":    ps("h1", fontName=_FB, fontSize=13, textColor=C["navy"],  spaceBefore=8, spaceAfter=3, leading=16),
-        "h2":    ps("h2", fontName=_FB, fontSize=10, textColor=C["slate"], spaceBefore=5, spaceAfter=2),
-        "body":  ps("bd", fontSize=9,  textColor=C["slate"], spaceAfter=2, leading=13),
-        "small": ps("sm", fontSize=8,  textColor=C["muted"], spaceAfter=1, leading=11),
-        "green": ps("gr", fontSize=9,  textColor=C["green"], fontName=_FB, spaceAfter=2),
-        "orange":ps("or", fontSize=9,  textColor=C["yellow"],spaceAfter=2),
-        "red":   ps("rd", fontSize=9,  textColor=C["red"],   fontName=_FB, spaceAfter=2),
-        "center":ps("cn", fontSize=9,  textColor=C["slate"], alignment=TA_CENTER),
-        "action":ps("ac", fontSize=9,  textColor=C["blue"],  fontName=_FB, spaceAfter=2),
-        "footer":ps("ft", fontSize=7,  textColor=C["muted"], alignment=TA_CENTER),
-    }
-
-    story = []
-    date_str = datetime.now().strftime("%d.%m.%Y %H:%M")
-    ov_pct = pct(result.get("overall_score", 0))
-
-    def score_color(v):
-        if v >= 75: return C["green"]
-        if v >= 50: return C["yellow"]
-        return C["red"]
-
-    def score_bg(v):
-        if v >= 75: return colors.HexColor("#dcfce7")
-        if v >= 50: return colors.HexColor("#fef9c3")
-        return colors.HexColor("#fee2e2")
-
-    def hex_str(c):
-        return '#{:02x}{:02x}{:02x}'.format(int(c.red*255),int(c.green*255),int(c.blue*255))
-
-    def score_label(v):
-        if v >= 75: return "STRONG"
-        if v >= 50: return "NEEDS WORK"
-        return "CRITICAL"
-
-    def _clean(s):
-        return _re.sub(r"\*+","",str(s or "")).strip()
-
-    # ── COVER PAGE ────────────────────────────────────────────────────────────
-    title_val = our_data.get("title", asin)
-    price = our_data.get("price","")
-    rating = our_data.get("average_rating","")
-    brand = our_data.get("brand","")
-
-    # Dark cover block
-    cover_tbl = Table([[
-        Paragraph(f"Amazon Listing Audit", S["cover_title"]),
-        Paragraph(f"<b>{ov_pct}%</b>", ps("ov", fontName=_FB, fontSize=52,
-            textColor=score_color(ov_pct) if False else colors.HexColor(
-                "#22c55e" if ov_pct>=75 else ("#fbbf24" if ov_pct>=50 else "#ef4444")),
-            alignment=TA_RIGHT, leading=56)),
-    ]], colWidths=[W*0.65, W*0.35])
-    cover_tbl.setStyle(TableStyle([
-        ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-        ("BACKGROUND",(0,0),(-1,-1),C["navy"]),
-        ("PADDING",(0,0),(-1,-1),14),
-        ("ROUNDEDCORNERS",(0,0),(-1,-1),4),
-    ]))
-    story.append(cover_tbl)
-    story.append(Spacer(1,3*mm))
-
-    # Meta strip
-    meta_data = [
-        [Paragraph(f"<b>ASIN</b>", S["small"]),
-         Paragraph(f'<link href="https://www.amazon.com/dp/{asin}" color="#1d4ed8"><b>{asin}</b></link>', S["body"]),
-         Paragraph(f"<b>Дата</b>", S["small"]),
-         Paragraph(date_str, S["body"]),
-         Paragraph(f"<b>Рейтинг</b>", S["small"]),
-         Paragraph(f"{rating}", S["body"])],
-        [Paragraph(f"<b>Бренд</b>", S["small"]),
-         Paragraph(brand[:30], S["body"]),
-         Paragraph(f"<b>Цена</b>", S["small"]),
-         Paragraph(price, S["body"]),
-         Paragraph(f"<b>Overall</b>", S["small"]),
-         Paragraph(f"<font color='{hex_str(score_color(ov_pct))}'><b>{ov_pct}% — {score_label(ov_pct)}</b></font>", S["body"])],
-        [Paragraph(f"<b>Листинг</b>", S["small"]),
-         Paragraph(_clean(title_val)[:80], ps("tt", fontSize=8, textColor=C["slate"])),
-         "", "", "", ""],
-    ]
-    mt = Table(meta_data, colWidths=[18*mm, W*0.27, 14*mm, W*0.2, 16*mm, W*0.2])
-    mt.setStyle(TableStyle([
-        ("FONTNAME",(0,0),(-1,-1),_F), ("FONTSIZE",(0,0),(-1,-1),8),
-        ("BACKGROUND",(0,0),(-1,-1),C["light"]),
-        ("GRID",(0,0),(-1,-1),0.3,C["border"]),
-        ("PADDING",(0,0),(-1,-1),5),
-        ("SPAN",(1,2),(5,2)),
-        ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-    ]))
-    story.append(mt)
-    story.append(Spacer(1,5*mm))
-
-    # ── SCORE DASHBOARD ───────────────────────────────────────────────────────
-    story.append(Paragraph("▌ SCORE DASHBOARD", ps("sdh", fontName=_FB, fontSize=11,
-        textColor=C["navy"], spaceBefore=4, spaceAfter=3)))
-
-    score_map = [
-        ("Title",    result.get("title_score",0)),
-        ("Bullets",  result.get("bullets_score",0)),
-        ("Описание", result.get("description_score",0)),
-        ("Фото",     result.get("images_score",0)),
-        ("A+",       result.get("aplus_score",0)),
-        ("Отзывы",   result.get("reviews_score",0)),
-        ("BSR",      result.get("bsr_score",0)),
-        ("Цена",     result.get("price_score",0)),
-        ("Варианты", result.get("customization_score",0)),
-        ("Prime",    result.get("prime_score",0)),
-        ("COSMO",    result.get("cosmo_analysis",{}).get("score",0) if isinstance(result.get("cosmo_analysis"),dict) else 0),
-        ("Rufus",    result.get("rufus_analysis",{}).get("score",0) if isinstance(result.get("rufus_analysis"),dict) else 0),
-    ]
-
-    # Build 2-column score cards
-    _has_aplus_pdf = bool(our_data.get("aplus") or our_data.get("aplus_content"))
-
-    def score_card(label, raw):
-        v = pct(raw)
-        # Description 0% + A+ present → show as grey "A+"
-        if label == "Описание" and v == 0 and _has_aplus_pdf:
-            return Table([[
-                Paragraph(f"<b>{label}</b>", ps(f"sc_{label}", fontName=_FB, fontSize=8, textColor=C["navy"])),
-                Paragraph("<b>A+</b>", ps(f"sv_{label}", fontName=_FB, fontSize=11,
-                    alignment=TA_RIGHT, textColor=C["muted"])),
-            ],[
-                Paragraph("скрыто A+", ps(f"sb_{label}", fontSize=7, textColor=C["muted"])), "",
-            ]], colWidths=[35*mm, 18*mm], style=TableStyle([
-                ("BACKGROUND",(0,0),(-1,-1),C["light"]),
-                ("PADDING",(0,0),(-1,-1),4),
-                ("SPAN",(0,1),(1,1)),
-                ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-            ]))
-        sc = score_color(v)
-        bg = score_bg(v)
-        return Table([[
-            Paragraph(f"<b>{label}</b>", ps(f"sc_{label}", fontName=_FB, fontSize=8, textColor=C["navy"])),
-            Paragraph(f"<font color='{hex_str(sc)}'><b>{v}%</b></font>",
-                ps(f"sv_{label}", fontName=_FB, fontSize=11, alignment=TA_RIGHT)),
-        ],[
-            Table([[""]], colWidths=[max(2, int(v * 0.5))*mm if max(2, int(v * 0.5))*mm < 40*mm else 40*mm],
-                style=[("BACKGROUND",(0,0),(-1,-1),sc),("ROWHEIGHTS",(0,0),(-1,-1),3)]),
-            "",
-        ]], colWidths=[35*mm, 18*mm], style=TableStyle([
-            ("BACKGROUND",(0,0),(-1,-1),bg),
-            ("PADDING",(0,0),(-1,-1),4),
-            ("SPAN",(0,1),(1,1)),
-            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-        ]))
-
-    # 3 columns × 4 rows
-    n = len(score_map)
-    cols3 = 3
-    rows3 = (n + cols3 - 1) // cols3
-    dash_rows = []
-    for ri in range(rows3):
-        row = []
-        for ci in range(cols3):
-            idx = ri * cols3 + ci
-            if idx < n:
-                lbl, val = score_map[idx]
-                row.append(score_card(lbl, val))
-            else:
-                row.append("")
-        dash_rows.append(row)
-
-    dash_tbl = Table(dash_rows, colWidths=[W/3-1*mm]*3)
-    dash_tbl.setStyle(TableStyle([
-        ("PADDING",(0,0),(-1,-1),1.5),
-        ("VALIGN",(0,0),(-1,-1),"TOP"),
-    ]))
-    story.append(dash_tbl)
-    story.append(Spacer(1,5*mm))
-
-    # ── PRIORITY ACTIONS ──────────────────────────────────────────────────────
-    _prio = result.get("priority_improvements",[])
-    _acts = result.get("actions",[])
-    if _prio or _acts:
-        story.append(Paragraph("▌ ПРИОРИТЕТНЫЕ ДЕЙСТВИЯ", ps("pah", fontName=_FB, fontSize=11,
-            textColor=C["navy"], spaceBefore=2, spaceAfter=3)))
-        _all = []
-        for item in _prio:
-            _all.append({"action": _clean(item), "impact":"HIGH","effort":"","details":""})
-        for a in _acts:
-            if isinstance(a,dict):
-                _all.append(a)
-        _all.sort(key=lambda x:{"HIGH":0,"MEDIUM":1,"LOW":2}.get(x.get("impact","MEDIUM"),1))
-
-        for a in _all[:8]:
-            _imp = a.get("impact","MEDIUM")
-            _ic = C["red"] if _imp=="HIGH" else (C["yellow"] if _imp=="MEDIUM" else C["green"])
-            _ibg= colors.HexColor("#fee2e2") if _imp=="HIGH" else (colors.HexColor("#fef9c3") if _imp=="MEDIUM" else colors.HexColor("#dcfce7"))
-            _act_row = Table([[
-                Paragraph(f"<b>{_imp}</b>", ps(f"imp_{_imp}", fontName=_FB, fontSize=7,
-                    textColor=_ic, alignment=TA_CENTER)),
-                Paragraph(_clean(a.get("action","")), ps("act_t", fontSize=9, textColor=C["navy"])),
-            ]], colWidths=[14*mm, W-14*mm])
-            _act_row.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(0,0),_ibg),
-                ("BACKGROUND",(1,0),(1,0),C["white"]),
-                ("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),
-                ("PADDING",(0,0),(-1,-1),5),
-                ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-            ]))
-            story.append(_act_row)
-            if a.get("details"):
-                story.append(Paragraph(f"  → {_clean(a['details'])[:180]}", S["small"]))
-
-    story.append(PageBreak())
-
-    # ── PHOTO ANALYSIS ────────────────────────────────────────────────────────
-    story.append(Paragraph("▌ АНАЛИЗ ФОТОГРАФИЙ", ps("ph", fontName=_FB, fontSize=11,
-        textColor=C["navy"], spaceBefore=0, spaceAfter=4)))
-
-    _blocks = {}
-    if vision_text:
-        for _m in _re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", vision_text, _re.DOTALL):
-            _blocks[int(_m.group(1))] = _m.group(2).strip()
-
-    for i, img_d in enumerate(images[:5]):
-        blk = _blocks.get(i+1,"")
-        sc_m  = _re.search(r"(\d+)/10", blk)
-        typ_m = _re.search(r"(?:Тип|Type)\s*[:\-]\s*(.+)", blk)
-        str_m = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})", blk)
-        wk_m  = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})", blk)
-        ac_m  = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})", blk)
-        cv_m  = _re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.{3,})", blk)
-        em_m  = _re.search(r"(?:Эмоция|Emotion)\s*[:\-]\s*(.{3,})", blk)
-        sc_v  = int(sc_m.group(1)) if sc_m else 0
-        sc_c  = score_color(sc_v*10)
-        ptype = _clean(typ_m.group(1)) if typ_m else ""
-        stxt  = _clean(str_m.group(1)) if str_m else ""
-        wtxt  = _clean(wk_m.group(1))  if wk_m  else ""
-        atxt  = _clean(ac_m.group(1))  if ac_m  else ""
-        ctxt  = _clean(cv_m.group(1))  if cv_m  else ""
-        etxt  = _clean(em_m.group(1))  if em_m  else ""
-        sc_lbl = "Отлично" if sc_v>=8 else ("Хорошо" if sc_v>=6 else "Слабо")
-
-        try:
-            _b64 = img_d.get("b64","") if isinstance(img_d,dict) else img_d
-            _bytes = base64.b64decode(_b64)
-            _pil = PILImage.open(io.BytesIO(_bytes)).convert("RGB")
-            _pil.thumbnail((200,200))
-            _tb = io.BytesIO(); _pil.save(_tb,"JPEG",quality=80); _tb.seek(0)
-            _rl = RLImage(_tb, width=40*mm, height=40*mm)
-        except: _rl = Paragraph(f"#{i+1}", S["small"])
-
-        # Info content
-        info = []
-        hdr_txt = f"Фото #{i+1}" + (f" — {ptype}" if ptype else "")
-
-        # Header row with score
-        info.append(Table([[
-            Paragraph(f"<b>{hdr_txt}</b>",
-                ps("phdr", fontName=_FB, fontSize=10, textColor=C["navy"])),
-            Paragraph(
-                f"<font color='{hex_str(sc_c)}'><b>{sc_v}/10</b></font>  "
-                f"<font color='{hex_str(sc_c)}'>{sc_lbl}</font>",
-                ps("psc", fontName=_FB, fontSize=11, alignment=TA_RIGHT)),
-        ]], colWidths=[W*0.45, 28*mm], style=[
-            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-            ("PADDING",(0,0),(-1,-1),0),
-            ("LINEBELOW",(0,0),(-1,-1),1.5,sc_c),
-        ]))
-        info.append(Spacer(1,1.5*mm))
-
-        # Score bar — colored segments
-        bar_cells = []
-        for _b in range(10):
-            _bc = sc_c if _b < sc_v else C["border"]
-            bar_cells.append(Table([[""]], colWidths=[4.8*mm],
-                style=[("BACKGROUND",(0,0),(-1,-1),_bc),
-                       ("ROWHEIGHTS",(0,0),(-1,-1),6)]))
-        info.append(Table([bar_cells], colWidths=[4.8*mm]*10,
-            style=[("PADDING",(0,0),(-1,-1),0.5)]))
-        info.append(Spacer(1,2.5*mm))
-
-        if stxt:
-            st_box = Table([[Paragraph(f"✅  {stxt}", ps("pst", fontSize=9, textColor=C["green"]))]],
-                colWidths=[W-40*mm-4*mm])
-            st_box.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f0fdf4")),
-                ("LINEBEFORE",(0,0),(0,-1),2,C["green2"]),
-                ("PADDING",(0,0),(-1,-1),5),
-            ]))
-            info.append(st_box)
-            info.append(Spacer(1,1.5*mm))
-        if wtxt:
-            wt_box = Table([[Paragraph(f"⚠  {wtxt}", ps("pwt", fontSize=9, textColor=C["yellow"]))]],
-                colWidths=[W-40*mm-4*mm])
-            wt_box.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#fffbeb")),
-                ("LINEBEFORE",(0,0),(0,-1),2,C["yellow2"]),
-                ("PADDING",(0,0),(-1,-1),5),
-            ]))
-            info.append(wt_box)
-            info.append(Spacer(1,1.5*mm))
-        if atxt:
-            info.append(Paragraph(f"<b>→</b> {atxt}",
-                ps("pat", fontSize=9, textColor=C["blue"], fontName=_FB)))
-        if ctxt:
-            info.append(Paragraph(f"💡 {ctxt}", ps("pct", fontSize=8, textColor=C["muted"])))
-        if etxt:
-            em_box = Table([[Paragraph(
-                f"<font color='{hex_str(C['accent'])}'><b>😶 ЭМОЦИЯ:</b></font>  {etxt}",
-                ps("pet", fontSize=8, textColor=C["slate"]))]],
-                colWidths=[W-40*mm-4*mm])
-            em_box.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#faf5ff")),
-                ("LINEBEFORE",(0,0),(0,-1),2,C["accent"]),
-                ("PADDING",(0,0),(-1,-1),5),
-            ]))
-            info.append(Spacer(1,1.5*mm))
-            info.append(em_box)
-
-        photo_row = Table([[_rl, info]], colWidths=[43*mm, W-43*mm])
-        photo_row.setStyle(TableStyle([
-            ("VALIGN",(0,0),(-1,-1),"TOP"),
-            ("BACKGROUND",(0,0),(-1,-1),C["white"]),
-            ("LINEBELOW",(0,0),(-1,-1),0.5,C["border"]),
-            ("LINEBEFORE",(0,0),(0,-1),3,sc_c),
-            ("PADDING",(0,0),(0,0),5),
-            ("PADDING",(1,0),(1,0),6),
-        ]))
-        story.append(KeepTogether([photo_row, Spacer(1,2*mm)]))
-
-    # ── A+ ────────────────────────────────────────────────────────────────────
-    _av   = st.session_state.get("aplus_vision","")
-    _aurls= st.session_state.get("aplus_img_urls",[])
-    if _av or _aurls:
-        story.append(PageBreak())
-        story.append(Paragraph("▌ A+ КОНТЕНТ", ps("aph", fontName=_FB, fontSize=11,
-            textColor=C["navy"], spaceBefore=0, spaceAfter=4)))
-        _ap_s = pct(result.get("aplus_score",0))
-        story.append(Paragraph(
-            f"A+ Score: <font color='{hex_str(score_color(_ap_s))}'><b>{_ap_s}%</b></font>",
-            S["h2"]))
-        story.append(Spacer(1,2*mm))
-
-        _apblks = {}
-        if _av:
-            for _m in _re.finditer(r"APLUS_BLOCK_(\d+)\s*(.*?)(?=APLUS_BLOCK_\d+|$)",_av,_re.DOTALL):
-                _apblks[int(_m.group(1))] = _m.group(2).strip()
-
-        for _bi in range(max(len(_aurls),len(_apblks))):
-            _bblk = _apblks.get(_bi+1,"")
-            _bmod = _re.search(r"(?:Модуль|Module)\s*[:\-]\s*(.+)", _bblk)
-            _bsc  = _re.search(r"(\d+)/10", _bblk)
-            _bstr = _re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})", _bblk)
-            _bwk  = _re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})", _bblk)
-            _bact = _re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})", _bblk)
-            _bcv  = _re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.{3,})", _bblk)
-            _bscv = int(_bsc.group(1)) if _bsc else 0
-            _bscc = score_color(_bscv*10)
-
-            _ap_info = [Paragraph(
-                f"<b>Баннер #{_bi+1}" + (f" — {_clean(_bmod.group(1))}" if _bmod else "") +
-                f"</b>  <font color='{hex_str(_bscc)}'>{_bscv}/10</font>",
-                ps("aphi", fontName=_FB, fontSize=9, textColor=C["navy"]))]
-            if _bstr: _ap_info.append(Paragraph(f"✅ {_clean(_bstr.group(1))}", S["green"]))
-            if _bwk:  _ap_info.append(Paragraph(f"⚠ {_clean(_bwk.group(1))}", S["orange"]))
-            if _bact: _ap_info.append(Paragraph(f"→ {_clean(_bact.group(1))}", S["action"]))
-            if _bcv:  _ap_info.append(Paragraph(f"💡 {_clean(_bcv.group(1))}", S["body"]))
-
-            _ap_img = ""
-            if _bi < len(_aurls):
-                try:
-                    _apr = _req.get(_aurls[_bi], timeout=10, headers={"User-Agent":"Mozilla/5.0"})
-                    if _apr.ok:
-                        _apil = PILImage.open(io.BytesIO(_apr.content)).convert("RGB")
-                        _apil.thumbnail((500,200))
-                        _ab = io.BytesIO(); _apil.save(_ab,"JPEG",quality=70); _ab.seek(0)
-                        _ap_img = RLImage(_ab, width=W, height=35*mm)
-                except: pass
-
-            _ap_blk_parts = []
-            if _ap_img: _ap_blk_parts.append(_ap_img)
-            _ap_blk_parts += _ap_info + [Spacer(1,3*mm)]
-            story.append(KeepTogether(_ap_blk_parts))
-
-    # ── CONTENT ANALYSIS ─────────────────────────────────────────────────────
-    story.append(PageBreak())
-    story.append(Paragraph("▌ АНАЛИЗ КОНТЕНТА", ps("cah", fontName=_FB, fontSize=11,
-        textColor=C["navy"], spaceBefore=0, spaceAfter=4)))
-
-    for sec_key, sec_score_key, sec_name in [
-        ("title","title_score","Title"),
-        ("bullets","bullets_score","Bullets"),
-        ("description","description_score","Description"),
-        ("aplus","aplus_score","A+ Контент"),
-    ]:
-        sc_v = pct(result.get(sec_score_key,0))
-        sc_c = score_color(sc_v)
-        gaps = result.get(f"{sec_key}_gaps",[])
-        rec  = result.get(f"{sec_key}_rec","")
-        hdr_row = Table([[
-            Paragraph(f"<b>{sec_name}</b>",
-                ps(f"ch_{sec_key}", fontName=_FB, fontSize=10, textColor=C["navy"])),
-            Paragraph(f"<font color='{hex_str(sc_c)}'><b>{sc_v}%</b></font>",
-                ps(f"cs_{sec_key}", fontName=_FB, fontSize=14, alignment=TA_RIGHT)),
-        ]], colWidths=[W-25*mm, 25*mm])
-        hdr_row.setStyle(TableStyle([
-            ("LINEBELOW",(0,0),(-1,-1),1.5,sc_c),
-            ("PADDING",(0,0),(-1,-1),4),
-            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-        ]))
-        story.append(hdr_row)
-        if gaps:
-            for g in gaps[:3]: story.append(Paragraph(f"⚠ {_clean(g)}", S["orange"]))
-        if rec: story.append(Paragraph(f"→ {_clean(rec)}", S["action"]))
-        story.append(Spacer(1,3*mm))
-
-    # Raw content
-    _title_txt = our_data.get("title","")
-    _bullets = our_data.get("feature_bullets",[])
-    if _title_txt:
-        story.append(Paragraph("Title:", S["h2"]))
-        story.append(Paragraph(_clean(_title_txt)[:200], S["body"]))
-        story.append(Spacer(1,2*mm))
-    if _bullets:
-        story.append(Paragraph("Bullets:", S["h2"]))
-        for b in _bullets[:5]:
-            _bl = len(b.encode())
-            _bc = C["red"] if _bl>255 else C["slate"]
-            story.append(Paragraph(
-                f"<font color='{hex_str(_bc)}'>{'🔴' if _bl>255 else '✅'}</font> {_clean(b)[:200]} <font color='{hex_str(C['muted'])}'>[{_bl}b]</font>",
-                S["body"]))
-
-    # ── COSMO / RUFUS / JTBD / VPC ───────────────────────────────────────────
-    story.append(PageBreak())
-    story.append(Paragraph("▌ AI ВИДИМОСТЬ — COSMO / RUFUS", ps("aih", fontName=_FB, fontSize=11,
-        textColor=C["navy"], spaceBefore=0, spaceAfter=4)))
-
-    _ca = result.get("cosmo_analysis",{})
-    _ra = result.get("rufus_analysis",{})
-    _cs = pct(_ca.get("score",0))
-    _rs = pct(_ra.get("score",0))
-
-    ai_score_tbl = Table([[
-        Table([[
-            Paragraph(f"<b>{_cs}%</b>", ps("csp", fontName=_FB, fontSize=26,
-                textColor=score_color(_cs), alignment=TA_CENTER)),
-            Paragraph("COSMO Score", ps("csl", fontSize=8, alignment=TA_CENTER, textColor=C["muted"])),
-        ]], style=[("BACKGROUND",(0,0),(-1,-1),score_bg(_cs)),
-                   ("PADDING",(0,0),(-1,-1),8),("ROUNDEDCORNERS",(0,0),(-1,-1),3)]),
-        Table([[
-            Paragraph(f"<b>{_rs}%</b>", ps("rsp", fontName=_FB, fontSize=26,
-                textColor=score_color(_rs), alignment=TA_CENTER)),
-            Paragraph("Rufus Score", ps("rsl", fontSize=8, alignment=TA_CENTER, textColor=C["muted"])),
-        ]], style=[("BACKGROUND",(0,0),(-1,-1),score_bg(_rs)),
-                   ("PADDING",(0,0),(-1,-1),8),("ROUNDEDCORNERS",(0,0),(-1,-1),3)]),
-    ]], colWidths=[W/2-2*mm, W/2-2*mm])
-    ai_score_tbl.setStyle(TableStyle([("PADDING",(0,0),(-1,-1),2)]))
-    story.append(ai_score_tbl)
-    story.append(Spacer(1,4*mm))
-
-    _sig_p = _ca.get("signals_present",[])
-    _sig_m = _ca.get("signals_missing",[])
-    if _sig_p or _sig_m:
-        sig_tbl = Table([[
-            [Paragraph("<b>✅ Присутствуют</b>", S["h2"])] +
-            [Paragraph(f"• {_clean(s)}", S["green"]) for s in _sig_p[:6]],
-            [Paragraph("<b>❌ Отсутствуют</b>", S["h2"])] +
-            [Paragraph(f"• {_clean(s)}", S["orange"]) for s in _sig_m[:6]],
-        ]], colWidths=[W/2-2*mm, W/2-2*mm])
-        sig_tbl.setStyle(TableStyle([
-            ("VALIGN",(0,0),(-1,-1),"TOP"),
-            ("BACKGROUND",(0,0),(0,0),colors.HexColor("#f0fdf4")),
-            ("BACKGROUND",(1,0),(1,0),colors.HexColor("#fffbeb")),
-            ("GRID",(0,0),(-1,-1),0.3,C["border"]),
-            ("PADDING",(0,0),(-1,-1),6),
-        ]))
-        story.append(sig_tbl)
-
-    if _ra.get("issues"):
-        story.append(Spacer(1,3*mm))
-        story.append(Paragraph("<b>Rufus Issues:</b>", S["h2"]))
-        for iss in _ra["issues"][:4]:
-            story.append(Paragraph(f"⚠ {_clean(iss)}", S["orange"]))
-
-    # JTBD
-    _jtbd = result.get("jtbd_analysis",{})
-    if _jtbd:
-        story.append(Spacer(1,5*mm))
-        story.append(Paragraph("▌ JTBD — JOBS TO BE DONE", ps("jh", fontName=_FB, fontSize=11,
-            textColor=C["navy"], spaceAfter=3)))
-        _js = pct(_jtbd.get("alignment_score",0))
-        story.append(Paragraph(
-            f"Alignment Score: <font color='{hex_str(score_color(_js))}'><b>{_js}%</b></font>",
-            S["body"]))
-        if _jtbd.get("job_story"):
-            js_box = Table([[Paragraph(_clean(_jtbd["job_story"]),
-                ps("jbs", fontSize=9, textColor=C["navy"], fontName=_FB, leading=14))]],
-                colWidths=[W])
-            js_box.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f0f9ff")),
-                ("LINEBELOW",(0,0),(-1,-1),2,C["blue2"]),
-                ("PADDING",(0,0),(-1,-1),8),
-            ]))
-            story.append(Spacer(1,2*mm))
-            story.append(js_box)
-            story.append(Spacer(1,3*mm))
-
-        j_rows = []
-        for jkey, jlbl, jclr in [
-            ("functional_job","⚙️ Функциональная",C["blue"]),
-            ("emotional_job","❤️ Эмоциональная",C["red"]),
-            ("social_job","👥 Социальная",C["accent"]),
-        ]:
-            if _jtbd.get(jkey):
-                j_rows.append(Table([[
-                    Paragraph(f"<b>{jlbl}</b>", ps(f"jl_{jkey}", fontName=_FB, fontSize=8, textColor=jclr)),
-                    Paragraph(_clean(_jtbd[jkey]), ps(f"jv_{jkey}", fontSize=8, textColor=C["slate"])),
-                ]], colWidths=[30*mm, W-30*mm], style=[
-                    ("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),
-                    ("PADDING",(0,0),(-1,-1),4),
-                ]))
-        for jr in j_rows: story.append(jr)
-
-        if _jtbd.get("jtbd_gaps"):
-            story.append(Spacer(1,2*mm))
-            story.append(Paragraph("<b>Gaps:</b>", S["h2"]))
-            for g in _jtbd["jtbd_gaps"][:4]:
-                story.append(Paragraph(f"✗ {_clean(g)}", S["red"]))
-        if _jtbd.get("jtbd_recs"):
-            story.append(Paragraph("<b>Рекомендации:</b>", S["h2"]))
-            for rec in _jtbd["jtbd_recs"][:4]:
-                story.append(Paragraph(f"→ {_clean(rec)}", S["action"]))
-
-    # VPC
-    _vpc = result.get("vpc_analysis",{})
-    if _vpc:
-        story.append(PageBreak())
-        story.append(Paragraph("▌ VALUE PROPOSITION CANVAS", ps("vh", fontName=_FB, fontSize=11,
-            textColor=C["navy"], spaceAfter=3)))
-        _vfit = pct(_vpc.get("fit_score",0))
-        story.append(Paragraph(
-            f"VPC Fit Score: <font color='{hex_str(score_color(_vfit))}'><b>{_vfit}%</b></font>  |  "
-            f"Value Gap: <b>{100-_vfit}%</b>",
-            S["body"]))
-        if _vpc.get("vpc_verdict"):
-            verd_box = Table([[Paragraph(
-                f"<b>AI CRO Консультант:</b> {_clean(_vpc['vpc_verdict'])}",
-                ps("vb", fontSize=9, textColor=C["navy"], leading=13))]],
-                colWidths=[W])
-            verd_box.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#faf5ff")),
-                ("LINEBEFORE",(0,0),(0,-1),3,C["accent"]),
-                ("PADDING",(0,0),(-1,-1),8),
-            ]))
-            story.append(Spacer(1,2*mm))
-            story.append(verd_box)
-            story.append(Spacer(1,3*mm))
-
-        def _bullets_list(items, icon, clr):
-            return [Paragraph(f"<font color='{hex_str(clr)}'>{icon}</font> {_clean(it)}",
-                ps(f"vp_{icon}", fontSize=8, textColor=C["slate"])) for it in (items or [])[:4]]
-
-        vpc_tbl = Table([[
-            [Paragraph("<b>👤 Профиль покупателя</b>", ps("vclh", fontName=_FB, fontSize=9, textColor=C["navy"])),
-             Paragraph("<b>Jobs</b>", ps("vjh", fontName=_FB, fontSize=8, textColor=C["blue"]))] +
-             _bullets_list(_vpc.get("customer_jobs",[]),"◆",C["blue"]) +
-            [Paragraph("<b>Pains</b>", ps("vph2", fontName=_FB, fontSize=8, textColor=C["red"]))] +
-             _bullets_list(_vpc.get("customer_pains",[]),"◆",C["red"]),
-            [Paragraph("<b>📦 Карта ценности</b>", ps("vvlh", fontName=_FB, fontSize=9, textColor=C["navy"])),
-             Paragraph("<b>✅ Закрывает</b>", ps("vprh", fontName=_FB, fontSize=8, textColor=C["green"]))] +
-             _bullets_list(_vpc.get("pain_relievers_present",[]),"✓",C["green"]) +
-            [Paragraph("<b>❌ Не закрывает</b>", ps("vmh", fontName=_FB, fontSize=8, textColor=C["red"]))] +
-             _bullets_list(_vpc.get("pain_relievers_missing",[]),"✗",C["red"]),
-        ]], colWidths=[W/2-2*mm, W/2-2*mm])
-        vpc_tbl.setStyle(TableStyle([
-            ("VALIGN",(0,0),(-1,-1),"TOP"),
-            ("BACKGROUND",(0,0),(0,0),colors.HexColor("#f0f9ff")),
-            ("BACKGROUND",(1,0),(1,0),colors.HexColor("#f0fdf4")),
-            ("GRID",(0,0),(-1,-1),0.3,C["border"]),
-            ("PADDING",(0,0),(-1,-1),7),
-        ]))
-        story.append(vpc_tbl)
-
-    # ── FULL ACTIONS + MISSING CHARS + STOP WORDS ─────────────────────────────
-    _fa = result.get("actions",[])
-    _mc = result.get("missing_chars",[])
-    _sw = check_listing_stop_words(our_data)
-
-    if _fa or _mc or _sw:
-        story.append(PageBreak())
-
-    if _fa:
-        story.append(Paragraph("▌ ПОЛНЫЙ ПЛАН ДЕЙСТВИЙ", ps("fah", fontName=_FB, fontSize=11,
-            textColor=C["navy"], spaceAfter=3)))
-        _fa_sorted = sorted(_fa, key=lambda x: {"HIGH":0,"MEDIUM":1,"LOW":2}.get(x.get("impact","MEDIUM"),1))
-        for a in _fa_sorted:
-            if not isinstance(a,dict): continue
-            _imp = a.get("impact","MEDIUM")
-            _ic = C["red"] if _imp=="HIGH" else (C["yellow"] if _imp=="MEDIUM" else C["green"])
-            _ibg= colors.HexColor("#fee2e2") if _imp=="HIGH" else (colors.HexColor("#fef9c3") if _imp=="MEDIUM" else colors.HexColor("#dcfce7"))
-            story.append(Table([[
-                Paragraph(f"<b>{_imp}</b>", ps(f"fa_{_imp}", fontName=_FB, fontSize=7,
-                    textColor=_ic, alignment=TA_CENTER)),
-                [Paragraph(_clean(a.get("action","")),
-                    ps("fat", fontName=_FB, fontSize=9, textColor=C["navy"]))] +
-                ([Paragraph(_clean(a["details"])[:200], S["small"])] if a.get("details") else []),
-            ]], colWidths=[14*mm, W-14*mm], style=[
-                ("BACKGROUND",(0,0),(0,0),_ibg),
-                ("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),
-                ("PADDING",(0,0),(-1,-1),5),
-                ("VALIGN",(0,0),(-1,-1),"TOP"),
-            ]))
-
-    if _mc:
-        story.append(Spacer(1,5*mm))
-        story.append(Paragraph("▌ ОТСУТСТВУЮЩИЕ ХАРАКТЕРИСТИКИ", ps("mch", fontName=_FB,
-            fontSize=11, textColor=C["navy"], spaceAfter=3)))
-        _mc_h = [c for c in _mc if c.get("priority")=="HIGH"]
-        _mc_m = [c for c in _mc if c.get("priority")!="HIGH"]
-        for ch in (_mc_h+_mc_m)[:10]:
-            _cp = ch.get("priority","")
-            _cc = C["red"] if _cp=="HIGH" else C["yellow"]
-            story.append(Table([[
-                Paragraph(f"<b>[{_cp}]</b>", ps(f"mc_{_cp}", fontName=_FB, fontSize=7,
-                    textColor=_cc, alignment=TA_CENTER)),
-                [Paragraph(f"<b>{_clean(ch.get('name',''))}</b>",
-                    ps("mcn", fontName=_FB, fontSize=9, textColor=C["navy"])),
-                 Paragraph(_clean(ch.get("how_competitors_use",""))[:150], S["small"])],
-            ]], colWidths=[14*mm, W-14*mm], style=[
-                ("LINEBELOW",(0,0),(-1,-1),0.3,C["border"]),
-                ("PADDING",(0,0),(-1,-1),4),
-                ("VALIGN",(0,0),(-1,-1),"TOP"),
-            ]))
-
-    if _sw:
-        story.append(Spacer(1,4*mm))
-        story.append(Paragraph("▌ AMAZON STOP WORDS", ps("swh", fontName=_FB, fontSize=11,
-            textColor=C["navy"], spaceAfter=3)))
-        for field, found in _sw.items():
-            if found.get("do_not_use"):
-                story.append(Paragraph(f"<b>{field}</b> — 🚫 Запрещено: " +
-                    ", ".join(found["do_not_use"]), S["red"]))
-            if found.get("try_to_avoid"):
-                story.append(Paragraph(f"<b>{field}</b> — ⚠ Нежелательно: " +
-                    ", ".join(found["try_to_avoid"]), S["orange"]))
-
-    # ── COMPETITORS ───────────────────────────────────────────────────────────
-    if comp_data:
-        story.append(PageBreak())
-        story.append(Paragraph("▌ АНАЛИЗ КОНКУРЕНТОВ", ps("comph", fontName=_FB, fontSize=11,
-            textColor=C["navy"], spaceAfter=4)))
-
-        comp_hdr = [[
-            Paragraph("<b>ASIN</b>", S["small"]),
-            Paragraph("<b>Title</b>", S["small"]),
-            Paragraph("<b>Цена</b>", S["small"]),
-            Paragraph("<b>★</b>", S["small"]),
-            Paragraph("<b>Overall</b>", S["small"]),
-        ]]
-        for i, comp in enumerate(comp_data[:5]):
-            _cai = st.session_state.get(f"comp_ai_{i}",{})
-            _cov = pct(_cai.get("overall_score",0)) if _cai else 0
-            _coc = score_color(_cov)
-            comp_hdr.append([
-                Paragraph(get_asin_from_data(comp), S["small"]),
-                Paragraph(_clean(comp.get("title",""))[:45], S["small"]),
-                Paragraph(str(comp.get("price","")), S["small"]),
-                Paragraph(str(comp.get("average_rating","")), S["small"]),
-                Paragraph(f"<font color='{hex_str(_coc)}'><b>{_cov}%</b></font>",
-                    ps("cov", fontName=_FB, fontSize=9, alignment=TA_CENTER)),
-            ])
-
-        comp_tbl = Table(comp_hdr, colWidths=[26*mm, 80*mm, 18*mm, 12*mm, 18*mm])
-        comp_tbl.setStyle(TableStyle([
-            ("FONTNAME",(0,0),(-1,0),_FB), ("FONTSIZE",(0,0),(-1,-1),8),
-            ("BACKGROUND",(0,0),(-1,0),C["navy"]),
-            ("TEXTCOLOR",(0,0),(-1,0),C["white"]),
-            ("ROWBACKGROUNDS",(0,1),(-1,-1),[C["light"], C["white"]]),
-            ("GRID",(0,0),(-1,-1),0.3,C["border"]),
-            ("PADDING",(0,0),(-1,-1),5),
-        ]))
-        story.append(comp_tbl)
-
-        for i, comp in enumerate(comp_data[:3]):
-            _cb = comp.get("feature_bullets",[])
-            if not _cb: continue
-            story.append(Spacer(1,4*mm))
-            story.append(Paragraph(
-                f"<b>Конкурент {i+1}</b> — {get_asin_from_data(comp)}",
-                ps(f"cbh_{i}", fontName=_FB, fontSize=9, textColor=C["slate"])))
-            for b in _cb[:5]:
-                story.append(Paragraph(f"• {_clean(b)[:200]}", S["small"]))
-
-    # ── FOOTER ────────────────────────────────────────────────────────────────
-    story.append(Spacer(1,6*mm))
-    footer_tbl = Table([[
-        Paragraph(f"Amazon Listing Analyzer  |  ASIN: {asin}  |  {date_str}", S["footer"]),
-    ]], colWidths=[W])
-    footer_tbl.setStyle(TableStyle([
-        ("LINEABOVE",(0,0),(-1,-1),0.5,C["border"]),
-        ("PADDING",(0,0),(-1,-1),4),
-    ]))
-    story.append(footer_tbl)
-
-    doc.build(story)
-    buf.seek(0)
-    return buf.read()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: Обзор
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Pages dispatch ────────────────────────────────────────────────────────────
 if page == "🏠 Обзор":
     st.title("🏠 Обзор листинга")
     health_card()
 
-    # ── Frequently Returned warning ───────────────────────────────────────────
     if od.get("is_frequently_returned"):
-        st.markdown("""
-<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:10px;padding:14px 18px;margin:8px 0">
-<div style="font-size:1.1rem;font-weight:800;color:#fca5a5">🔴 ВНИМАНИЕ: Amazon пометил листинг как "Часто возвращают"</div>
-<div style="color:#fca5a5;font-size:0.88rem;margin-top:6px;line-height:1.7">
-Amazon показывает покупателям предупреждение прямо на странице товара — это <b>критично убивает конверсию</b>.<br><br>
-<b>Как убрать метку:</b><br>
-1. Проверь соответствие фото и описания реальному товару — самая частая причина<br>
-2. Исправь размерную сетку — добавь точные замеры, фото на модели с указанием роста<br>
-3. Добавь видео распаковки — снижает ожидание vs реальность<br>
-4. Улучши упаковку — товар должен доходить без повреждений<br>
-5. Снизи % возвратов ниже ~10% за 30 дней — только тогда Amazon снимет метку
-</div>
-</div>""", unsafe_allow_html=True)
+        st.markdown('<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:10px;padding:14px 18px;margin:8px 0"><div style="font-size:1.1rem;font-weight:800;color:#fca5a5">🔴 ВНИМАНИЕ: Amazon пометил листинг как "Часто возвращают"</div><div style="color:#fca5a5;font-size:0.88rem;margin-top:6px;line-height:1.7">Исправь фото/описание, размерную сетку, добавь видео распаковки. Снизи % возвратов ниже ~10% за 30 дней.</div></div>', unsafe_allow_html=True)
 
-    # Return analysis button — available always (not only for frequently_returned)
     _our_asin_ret = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
     if _our_asin_ret:
         _ret_col1, _ret_col2 = st.columns([2, 5])
@@ -3209,7 +2581,6 @@ Amazon показывает покупателям предупреждение 
                     st.warning("Отзывы не загружены — проверь APIFY_API_TOKEN")
         with _ret_col2:
             st.caption("Загружает отзывы 1-3★ → AI находит топ причины возвратов и что исправить в листинге")
-
         if st.session_state.get("_return_analysis"):
             src = st.session_state.get("_return_source","")
             cnt = st.session_state.get("_return_reviews_count",0)
@@ -3217,10 +2588,9 @@ Amazon показывает покупателям предупреждение 
                 st.markdown(st.session_state["_return_analysis"])
 
     st.divider()
-
-    _sum = r.get("summary", "")
     _cosmo = r.get("cosmo_analysis",{})
     _rufus = r.get("rufus_analysis",{})
+    _sum = r.get("summary","")
     if _sum: st.info(f"**📋 Резюме:** {_sum}")
 
     if _cosmo or _rufus:
@@ -3232,28 +2602,21 @@ Amazon показывает покупателям предупреждение 
             for sig in _cosmo.get("signals_missing",[])[:3]: st.caption(f"❌ {sig}")
         with cc2:
             rs = pct(_rufus.get("score",0))
-            rc = "#22c55e" if rs>=75 else ("#f59e0b" if rs>=50 else "#ef4444")
-            st.markdown(f"**🤖 Rufus:** <span style='color:{rc};font-size:1.2rem;font-weight:700'>{rs}%</span>", unsafe_allow_html=True)
+            rc2 = "#22c55e" if rs>=75 else ("#f59e0b" if rs>=50 else "#ef4444")
+            st.markdown(f"**🤖 Rufus:** <span style='color:{rc2};font-size:1.2rem;font-weight:700'>{rs}%</span>", unsafe_allow_html=True)
             for iss in _rufus.get("issues",[])[:3]: st.caption(f"⚠️ {iss}")
 
     actions = r.get("actions", [])
     priority_improvements = r.get("priority_improvements", [])
     if actions or priority_improvements:
         st.subheader("🎯 Приоритетные действия")
-
-        # Merge priority_improvements + actions into unified card list
         _all_actions = []
         for item in priority_improvements:
             _all_actions.append({"action": item, "impact": "HIGH", "effort": "MEDIUM", "details": ""})
         for a in actions:
-            if isinstance(a, dict):
-                _all_actions.append(a)
-
-        # Sort: HIGH first
+            if isinstance(a, dict): _all_actions.append(a)
         _order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
         _all_actions.sort(key=lambda x: _order.get(x.get("impact","MEDIUM"), 1))
-
-        # Group by impact
         _high = [a for a in _all_actions if a.get("impact","") == "HIGH"]
         _med  = [a for a in _all_actions if a.get("impact","") == "MEDIUM"]
         _low  = [a for a in _all_actions if a.get("impact","") == "LOW"]
@@ -3261,18 +2624,12 @@ Amazon показывает покупателям предупреждение 
         def _action_cards(items, color, label, icon):
             if not items: return
             st.markdown(f'<div style="font-size:0.75rem;font-weight:700;color:{color};letter-spacing:0.08em;margin:12px 0 6px">{icon} {label} — {len(items)} действий</div>', unsafe_allow_html=True)
-            for i, a in enumerate(items):
+            for a in items:
                 _effort = a.get("effort","MEDIUM")
-                _effort_c = {"LOW":"#22c55e","MEDIUM":"#f59e0b","HIGH":"#ef4444"}.get(_effort,"#94a3b8")
-                _act_text = a.get("action","")
-                _det_text = a.get("details","")
-                st.markdown(f"""<div style="background:#0f172a;border-left:4px solid {color};border-radius:8px;padding:12px 16px;margin-bottom:8px">
-<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-  <div style="font-size:0.9rem;font-weight:600;color:#e2e8f0;flex:1">{_act_text}</div>
-  <span style="background:{_effort_c}22;color:{_effort_c};border:1px solid {_effort_c};border-radius:4px;padding:2px 8px;font-size:0.72rem;font-weight:700;white-space:nowrap">⚡ {_effort}</span>
-</div>
-{f'<div style="font-size:0.8rem;color:#94a3b8;margin-top:6px;line-height:1.5">{_det_text}</div>' if _det_text else ''}
-</div>""", unsafe_allow_html=True)
+                _ec = {"LOW":"#22c55e","MEDIUM":"#f59e0b","HIGH":"#ef4444"}.get(_effort,"#94a3b8")
+                _act = a.get("action",""); _det = a.get("details","")
+                _det_html = f'<div style="font-size:0.8rem;color:#94a3b8;margin-top:6px">{_det}</div>' if _det else ""
+                st.markdown(f'<div style="background:#0f172a;border-left:4px solid {color};border-radius:8px;padding:12px 16px;margin-bottom:8px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="font-size:0.9rem;font-weight:600;color:#e2e8f0;flex:1">{_act}</div><span style="background:{_ec}22;color:{_ec};border:1px solid {_ec};border-radius:4px;padding:2px 8px;font-size:0.72rem;font-weight:700;white-space:nowrap">⚡ {_effort}</span></div>{_det_html}</div>', unsafe_allow_html=True)
 
         _action_cards(_high, "#ef4444", "КРИТИЧНО", "🔴")
         _action_cards(_med,  "#f59e0b", "ВАЖНО",    "🟡")
@@ -3280,77 +2637,39 @@ Amazon показывает покупателям предупреждение 
 
     if r.get("missing_chars"):
         st.subheader("🔍 Отсутствующие характеристики")
-        _mc_high = [c for c in r["missing_chars"] if c.get("priority","") == "HIGH"]
-        _mc_med  = [c for c in r["missing_chars"] if c.get("priority","") != "HIGH"]
-        for _mc_group, _mc_color in [(_mc_high,"#ef4444"), (_mc_med,"#f59e0b")]:
-            for ch in _mc_group:
-                st.markdown(f"""<div style="background:#0f172a;border-left:4px solid {_mc_color};border-radius:8px;padding:10px 14px;margin-bottom:6px">
-<div style="font-size:0.88rem;font-weight:600;color:#e2e8f0">{ch.get('name','')}</div>
-<div style="font-size:0.78rem;color:#94a3b8;margin-top:3px">{ch.get('how_competitors_use','')}</div>
-</div>""", unsafe_allow_html=True)
+        for ch in r["missing_chars"]:
+            _mc_color = "#ef4444" if ch.get("priority","") == "HIGH" else "#f59e0b"
+            st.markdown(f'<div style="background:#0f172a;border-left:4px solid {_mc_color};border-radius:8px;padding:10px 14px;margin-bottom:6px"><div style="font-size:0.88rem;font-weight:600;color:#e2e8f0">{ch.get("name","")}</div><div style="font-size:0.78rem;color:#94a3b8;margin-top:3px">{ch.get("how_competitors_use","")}</div></div>', unsafe_allow_html=True)
 
     st.divider()
     st.subheader("🤖 AI Инструменты")
-
     _tool_cols = st.columns(5)
 
-    # 1. AI Listing Rewriter
     with _tool_cols[0]:
         if st.button("✍️ Переписать листинг", use_container_width=True, key="btn_rewriter"):
             with st.spinner("✍️ AI пишет title + 5 буллетов..."):
-                _rw_prompt = f"""You are an expert Amazon listing copywriter. Using the full analysis below, write an optimized listing.
+                _rw_prompt = f"""Rewrite this Amazon listing. Product: {od.get('title','')}
+VPC gaps: {r.get('vpc_analysis',{}).get('pain_relievers_missing',[])}
+JTBD: {r.get('jtbd_analysis',{}).get('job_story','')}
+Title gaps: {r.get('title_gaps',[])}
+Bullets gaps: {r.get('bullets_gaps',[])}
+Write: 1. TITLE (max 125 chars) 2. BULLET 1-5 (max 200 chars each, "Feature: Benefit.")
+NO stop words. Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English'}."""
+                st.session_state["_ai_rewrite"] = ai_call("Amazon listing copywriter.", _rw_prompt, max_tokens=1500)
 
-PRODUCT: {od.get('title','')}
-ASIN: {od.get('parent_asin','')}
-
-ANALYSIS CONTEXT:
-- VPC gaps: {r.get('vpc_analysis',{}).get('pain_relievers_missing',[])}
-- JTBD Job Story: {r.get('jtbd_analysis',{}).get('job_story','')}
-- Title gaps: {r.get('title_gaps',[])}
-- Bullets gaps: {r.get('bullets_gaps',[])}
-- Stop words to avoid: check all output
-
-Write:
-1. TITLE (max 125 chars, include material+type+gender+use case)
-2. BULLET 1-5 (max 200 chars each, format: "Feature: Benefit. Context.")
-
-Rules: NO stop words (free/best/guarantee/organic/natural/safe), include job context, temperature ranges if relevant, quantify benefits.
-Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English')}."""
-                _rw = ai_call("Amazon listing copywriter. Write compelling, compliant copy.", _rw_prompt, max_tokens=1500)
-                st.session_state["_ai_rewrite"] = _rw
-
-    # 2. Keyword Gap
     with _tool_cols[1]:
         if st.button("🔑 Keyword Gap", use_container_width=True, key="btn_kwgap"):
             with st.spinner("🔑 Анализирую keyword gaps..."):
                 _comps = st.session_state.get("comp_data_list", [])
-                _our_words = set((od.get("title","") + " " + " ".join(od.get("feature_bullets",[]))).lower().split())
-                _comp_texts = []
-                for _cd in _comps:
-                    _comp_texts.append(_cd.get("title","") + " " + " ".join(_cd.get("feature_bullets",[])))
-                _comp_all = " ".join(_comp_texts).lower()
-                _kw_prompt = f"""Analyze keyword gaps between OUR listing and COMPETITORS.
-
-OUR TITLE+BULLETS:
-{od.get('title','')}
+                _comp_all = " ".join([_cd.get("title","") + " " + " ".join(_cd.get("feature_bullets",[])) for _cd in _comps]).lower()
+                _kw_prompt = f"""Keyword gaps OUR vs COMPETITORS.
+OUR: {od.get('title','')}
 {chr(10).join(od.get('feature_bullets',[]))}
+COMPETITORS: {_comp_all[:3000]}
+Find TOP 15 missing keywords. Format: KEYWORD | competitor usage | where to add (title/bullet/backend)
+Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English'}."""
+                st.session_state["_ai_kwgap"] = ai_call("Amazon SEO expert.", _kw_prompt, max_tokens=1200)
 
-COMPETITORS COMBINED:
-{_comp_all[:3000]}
-
-Find TOP 15 keywords/phrases that:
-1. Appear in competitor listings but NOT in ours
-2. Are high-value search terms (not stop words)
-3. Would improve ranking if added
-
-Format each as:
-- KEYWORD | where competitors use it | where to add in our listing (title/bullet/backend)
-
-Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English')}."""
-                _kw = ai_call("Amazon SEO expert.", _kw_prompt, max_tokens=1200)
-                st.session_state["_ai_kwgap"] = _kw
-
-    # 3. Health Score Chart
     with _tool_cols[2]:
         if st.button("📈 График Health Score", use_container_width=True, key="btn_chart"):
             _hist_asin = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
@@ -3359,39 +2678,27 @@ Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 
                 if _hconn:
                     try:
                         _hcur = _hconn.cursor()
-                        _hcur.execute("SELECT created_at, overall_score FROM listing_analysis WHERE asin=%s AND overall_score>0 ORDER BY created_at ASC LIMIT 30", (_hist_asin,))
-                        _hrows = _hcur.fetchall()
+                        _hcur.execute("SELECT analyzed_at, overall_score FROM listing_analysis WHERE asin=%s AND overall_score>0 ORDER BY analyzed_at ASC LIMIT 30", (_hist_asin,))
+                        st.session_state["_health_chart"] = _hcur.fetchall()
                         _hconn.close()
-                        st.session_state["_health_chart"] = _hrows
                     except: pass
 
-    # 4. Review Mining (позитив)
     with _tool_cols[3]:
         if st.button("💬 Mining отзывов", use_container_width=True, key="btn_review_mine"):
             _mine_asin = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
             if _mine_asin:
-                with st.spinner("📥 Загружаю 4-5★ отзывы..."):
+                with st.spinner("📥 Загружаю отзывы..."):
                     _mine_reviews = fetch_1star_reviews(_mine_asin, domain="com", max_pages=1)
                 if _mine_reviews:
                     _pos = [rv for rv in _mine_reviews if int(float(str(rv.get("rating",1) or 1).split()[0])) >= 4][:15]
                     with st.spinner("🧠 AI извлекает инсайты..."):
                         _mine_text = "\n".join([f"[{rv.get('rating')}★] {rv.get('title','')} — {rv.get('body',rv.get('text',rv.get('reviewText','')))[:200]}" for rv in _pos])
-                        _mine_prompt = f"""Extract buyer insights from these 4-5★ reviews for: {od.get('title','')}
+                        _mine_prompt = f"""Extract buyer insights from 4-5★ reviews for: {od.get('title','')}
+REVIEWS:\n{_mine_text}
+Extract: 1. TOP 5 phrases buyers use 2. TOP 3 use cases 3. TOP 3 overcome objections 4. Bullet rewrites
+Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English'}."""
+                        st.session_state["_ai_mining"] = ai_call("Amazon VOC expert.", _mine_prompt, max_tokens=1200)
 
-REVIEWS:
-{_mine_text}
-
-Extract:
-1. TOP 5 phrases buyers use to describe what they love (exact language to use in bullets)
-2. TOP 3 use cases/scenarios mentioned
-3. TOP 3 objections buyers say were WRONG (e.g. "I was worried about X but...")
-4. Suggested bullet rewrites using actual buyer language
-
-Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English')}."""
-                        _mine_result = ai_call("Amazon VOC expert.", _mine_prompt, max_tokens=1200)
-                        st.session_state["_ai_mining"] = _mine_result
-
-    # 5. AI Chat
     with _tool_cols[4]:
         st.markdown('<div style="font-size:0.75rem;color:#94a3b8;text-align:center;margin-top:4px">💬 AI Chat</div>', unsafe_allow_html=True)
         _chat_q = st.text_input("Спроси про листинг", placeholder="Почему низкий BSR?", key="ai_chat_input", label_visibility="collapsed")
@@ -3399,34 +2706,25 @@ Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 
             st.session_state["_chat_last"] = _chat_q
             with st.spinner("🧠"):
                 _chat_ctx = f"Listing: {od.get('title','')} | Overall: {pct(r.get('overall_score',0))}% | BSR: {od.get('product_information',{}).get('Best Sellers Rank','')} | Gaps: {r.get('title_gaps',[])} {r.get('bullets_gaps',[])}"
-                _chat_ans = ai_call("Amazon expert. Answer concisely about this listing.", f"Context: {_chat_ctx}\n\nQuestion: {_chat_q}", max_tokens=600)
-                st.session_state["_ai_chat_ans"] = _chat_ans
+                st.session_state["_ai_chat_ans"] = ai_call("Amazon expert. Answer concisely.", f"Context: {_chat_ctx}\n\nQuestion: {_chat_q}", max_tokens=600)
 
-    # Show results
     if st.session_state.get("_ai_rewrite"):
         with st.expander("✍️ Переписанный листинг", expanded=True):
             st.markdown(st.session_state["_ai_rewrite"])
-            if st.button("📋 Скопировать", key="btn_copy_rw"):
-                st.code(st.session_state["_ai_rewrite"])
-
     if st.session_state.get("_ai_kwgap"):
-        with st.expander("🔑 Keyword Gap — что добавить", expanded=True):
+        with st.expander("🔑 Keyword Gap", expanded=True):
             st.markdown(st.session_state["_ai_kwgap"])
-
     if st.session_state.get("_health_chart"):
         with st.expander("📈 История Health Score", expanded=True):
             _rows = st.session_state["_health_chart"]
             if len(_rows) >= 2:
                 import pandas as pd
-                _df = pd.DataFrame(_rows, columns=["Дата","Score"])
-                st.line_chart(_df.set_index("Дата"))
+                st.line_chart(pd.DataFrame(_rows, columns=["Дата","Score"]).set_index("Дата"))
             else:
-                st.info(f"Данных пока мало ({len(_rows)} запись) — нужно минимум 2 анализа")
-
+                st.info(f"Мало данных ({len(_rows)}) — нужно минимум 2 анализа")
     if st.session_state.get("_ai_mining"):
-        with st.expander("💬 Voice of Customer — язык покупателей", expanded=True):
+        with st.expander("💬 Voice of Customer", expanded=True):
             st.markdown(st.session_state["_ai_mining"])
-
     if st.session_state.get("_ai_chat_ans"):
         with st.expander("💬 AI ответ", expanded=True):
             st.markdown(st.session_state["_ai_chat_ans"])
@@ -3438,13 +2736,7 @@ Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 
         if st.button("📄 Сгенерировать PDF", type="primary", use_container_width=True):
             with st.spinner("Генерирую PDF отчёт..."):
                 try:
-                    _pdf_bytes = generate_pdf_report(
-                        result=r, our_data=od,
-                        vision_text=st.session_state.get("vision",""),
-                        images=st.session_state.get("images",[]),
-                        asin=od.get("parent_asin","") or od.get("asin",""),
-                        comp_data=st.session_state.get("comp_data_list",[])
-                    )
+                    _pdf_bytes = generate_pdf_report(result=r, our_data=od, vision_text=st.session_state.get("vision",""), images=st.session_state.get("images",[]), asin=od.get("parent_asin","") or od.get("asin",""), comp_data=st.session_state.get("comp_data_list",[]))
                     st.session_state["_pdf_bytes"] = _pdf_bytes
                     st.success("✅ PDF готов — нажми скачать")
                 except Exception as _pe:
@@ -3453,1155 +2745,515 @@ Respond in {('Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 
         if st.session_state.get("_pdf_bytes"):
             _asin_dl = od.get("parent_asin","") or od.get("asin","listing")
             _date_dl = __import__("datetime").datetime.now().strftime("%Y%m%d")
-            st.download_button(
-                label="⬇️ Скачать PDF",
-                data=st.session_state["_pdf_bytes"],
-                file_name=f"amazon_audit_{_asin_dl}_{_date_dl}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
+            st.download_button(label="⬇️ Скачать PDF", data=st.session_state["_pdf_bytes"], file_name=f"amazon_audit_{_asin_dl}_{_date_dl}.pdf", mime="application/pdf", use_container_width=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: Фото
-# ══════════════════════════════════════════════════════════════════════════════
+
+# ══ Фото ══════════════════════════════════════════════════════════════════════
 elif page == "📸 Фото":
     st.title("📸 Vision анализ фотографий")
-
     _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v) if v else []
     blocks = [b.strip() for b in _all_blocks if b.strip() and re.search(r"\d+/10", b)]
-    if not blocks:
-        blocks = [b.strip() for b in _all_blocks if b.strip()]
+    if not blocks: blocks = [b.strip() for b in _all_blocks if b.strip()]
 
-    if not imgs and blocks:
-        st.info("📅 История: фото не сохраняются в БД — показан текстовый анализ Vision")
-        for i, text in enumerate(blocks):
-            sm = re.search(r"(\d+)/10", text)
-            score = int(sm.group(1)) if sm else 0
-            bc = "#22c55e" if score>=8 else ("#f59e0b" if score>=6 else "#ef4444")
-            slbl = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
-            typ  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", text)
-            strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
-            weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
-            actn = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]?\s*(.{3,})", text)
-            conv = re.search(r"(?:[Кк]онверсия|Conversion)\s*[:\-]?\s*(.{3,})", text)
-            emot = re.search(r"(?:[Ээ]моция|Emotion)\s*[:\-]?\s*(.{3,})", text)
-            _strip = lambda s: s.strip().strip("*").strip()
-            ptype = _strip(typ.group(1)) if typ else ""
-            stxt  = _strip(strg.group(1)) if strg else ""
-            wtxt  = _strip(weak.group(1)) if weak else ""
-            atxt  = _strip(actn.group(1)) if actn else ""
-            ctxt  = _strip(conv.group(1)) if conv else ""
-            etxt  = _strip(emot.group(1)) if emot else ""
-            if wtxt and any(x in wtxt.lower() for x in ["none","n/a","no weakness","нет слабостей"]):
-                wtxt = ""
-            with st.container(border=True):
-                _head = f"Фото #{i+1}" + (f" — {ptype}" if ptype else "")
-                st.markdown(f"**{_head}**")
-                if score > 0:
-                    st.markdown(f'<span style="font-size:2rem;font-weight:800;color:{bc}">{score}/10</span> <span style="color:{bc}">{slbl}</span>', unsafe_allow_html=True)
-                    st.markdown(f'<div style="background:#e5e7eb;border-radius:4px;height:8px"><div style="background:{bc};width:{score*10}%;height:8px;border-radius:4px"></div></div>', unsafe_allow_html=True)
-                if stxt: st.success(f"✅ {stxt}")
-                if wtxt: st.warning(f"⚠️ {wtxt}")
-                if score > 0 and score < 8 and (atxt or wtxt):
-                    with st.expander("🛠 Что делать"):
-                        st.markdown(f"→ {atxt or wtxt}")
-                if ctxt:
-                    with st.expander("💡 Конверсия"):
-                        st.info(f"🎯 {ctxt}")
-                if etxt:
-                    _ec = {"доверие":"#22c55e","trust":"#22c55e","desire":"#22c55e",
-                           "желание":"#f59e0b","сомнение":"#ef4444","doubt":"#ef4444",
-                           "любопытство":"#3b82f6","curiosity":"#3b82f6",
-                           "безразличие":"#94a3b8","indifference":"#94a3b8"}.get(
-                           etxt.split()[0].lower().rstrip("/:"), "#8b5cf6")
-                    st.markdown(
-                        f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px">'
-                        f'<span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span>'
-                        f'<span style="font-size:0.82rem;color:#1e293b">{etxt}</span></div>',
-                        unsafe_allow_html=True)
-        st.stop()
-
-    if not imgs:
-        if not st.session_state.get("do_vision", True):
-            st.info("👁️ Vision фото был отключён при анализе — запусти повторно с включённым чекбоксом")
-        else:
-            st.warning("Фото не загружены")
-        st.stop()
-
-    for i, img in enumerate(imgs):
-        text = blocks[i] if i < len(blocks) else ""
-        sm   = re.search(r"(\d+)/10", text)
+    def _render_photo_block(img_data, text, idx):
+        sm = re.search(r"(\d+)/10", text)
         score = int(sm.group(1)) if sm else 0
-        bc    = "#22c55e" if score>=8 else ("#f59e0b" if score>=6 else "#ef4444")
-        slbl  = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
-        typ  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", text)
-        strg = re.search(r"(?:[Сс]ильная\s+сторона|Strength|(?<!\w)✅)\s*[:\-]?\s*(.{3,})", text)
-        weak = re.search(r"(?:[Сс]лабость|Weakness|(?<!\w)⚠️)\s*[:\-]?\s*(.{3,})", text)
-        actn = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]?\s*(.{3,})", text)
-        conv = re.search(r"(?:[Кк]онверсия|Conversion)\s*[:\-]?\s*(.{3,})", text)
-        emot = re.search(r"(?:[Ээ]моция|Emotion)\s*[:\-]?\s*(.{3,})", text)
-        _strip = lambda s: s.strip().strip("*").strip()
-        ptype = _strip(typ.group(1)) if typ else ""
-        stxt  = _strip(strg.group(1)) if strg else ""
-        wtxt  = _strip(weak.group(1)) if weak else ""
-        atxt  = _strip(actn.group(1)) if actn else ""
-        ctxt  = _strip(conv.group(1)) if conv else ""
-        etxt  = _strip(emot.group(1)) if emot else ""
-        if wtxt and any(x in wtxt.lower() for x in ["none", "n/a", "no weakness", "нет слабостей"]):
-            wtxt = ""
-
+        bc = "#22c55e" if score>=8 else ("#f59e0b" if score>=6 else "#ef4444")
+        slbl = "Отлично" if score>=8 else ("Хорошо" if score>=6 else "Слабо")
+        _s = lambda pat: re.search(pat, text)
+        _strip = lambda m: m.group(1).strip().strip("*").strip() if m else ""
+        typ  = _strip(_s(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)"))
+        stxt = _strip(_s(r"(?:[Сс]ильная\s+сторона|Strength)\s*[:\-]?\s*(.{3,})"))
+        wtxt = _strip(_s(r"(?:[Сс]лабость|Weakness)\s*[:\-]?\s*(.{3,})"))
+        atxt = _strip(_s(r"(?:[Дд]ействие|Action)\s*[:\-]?\s*(.{3,})"))
+        ctxt = _strip(_s(r"(?:[Кк]онверсия|Conversion)\s*[:\-]?\s*(.{3,})"))
+        etxt = _strip(_s(r"(?:[Ээ]моция|Emotion)\s*[:\-]?\s*(.{3,})"))
+        if wtxt and any(x in wtxt.lower() for x in ["none","n/a","no weakness","нет слабостей"]): wtxt = ""
         with st.container(border=True):
-            c1,c2 = st.columns([1,2])
-            with c1:
-                st.image(__import__("base64").b64decode(img["b64"]), use_container_width=True)
-            with c2:
-                _head = f"Фото #{i+1}" + (f" — {ptype}" if ptype else "")
-                st.markdown(f"**{_head}**")
+            if img_data:
+                c1,c2 = st.columns([1,2])
+                with c1: st.image(__import__("base64").b64decode(img_data["b64"]), use_container_width=True)
+                col = c2
+            else:
+                col = st.container()
+            with col:
+                st.markdown(f"**Фото #{idx+1}" + (f" — {typ}" if typ else "") + "**")
                 if score > 0:
                     st.markdown(f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0"><div style="font-size:2rem;font-weight:800;color:{bc}">{score}/10</div><div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px"><div style="background:{bc};width:{score*10}%;height:10px;border-radius:6px"></div></div><div style="color:{bc};font-size:0.8rem;margin-top:2px">{slbl}</div></div></div>', unsafe_allow_html=True)
-                else:
-                    st.warning("⚠️ Оценка не распознана")
                 if stxt: st.success(f"✅ {stxt}")
                 if wtxt: st.warning(f"⚠️ {wtxt}")
                 if score > 0 and score < 8 and (atxt or wtxt):
-                    with st.expander("🛠 Что делать"):
-                        st.markdown(f"→ {atxt or wtxt}")
-                        if score <= 5 and i == 0:
-                            st.error("🔴 Приоритет ВЫСОКИЙ — риск suppression листинга Amazon")
+                    with st.expander("🛠 Что делать"): st.markdown(f"→ {atxt or wtxt}")
                 if ctxt:
-                    with st.expander("💡 Конверсия"):
-                        st.info(f"🎯 {ctxt}")
+                    with st.expander("💡 Конверсия"): st.info(f"🎯 {ctxt}")
                 if etxt:
-                    _ec = {"доверие":"#22c55e","trust":"#22c55e","desire":"#22c55e",
-                           "желание":"#f59e0b","сомнение":"#ef4444","doubt":"#ef4444",
-                           "любопытство":"#3b82f6","curiosity":"#3b82f6",
-                           "безразличие":"#94a3b8","indifference":"#94a3b8"}.get(
-                           etxt.split()[0].lower().rstrip("/:"), "#8b5cf6")
-                    st.markdown(
-                        f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px">'
-                        f'<span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span>'
-                        f'<span style="font-size:0.82rem;color:#1e293b">{etxt}</span></div>',
-                        unsafe_allow_html=True)
-                if not stxt and text:
-                    with st.expander("🔧 Raw (Strength не распознан)"):
-                        st.code(text[:400])
+                    _ec = {"доверие":"#22c55e","trust":"#22c55e","желание":"#f59e0b","сомнение":"#ef4444","doubt":"#ef4444","любопытство":"#3b82f6","curiosity":"#3b82f6","безразличие":"#94a3b8","indifference":"#94a3b8"}.get(etxt.split()[0].lower().rstrip("/:"), "#8b5cf6")
+                    st.markdown(f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px"><span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span><span style="font-size:0.82rem;color:#1e293b">{etxt}</span></div>', unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: A+ Контент
-# ══════════════════════════════════════════════════════════════════════════════
+    if not imgs and blocks:
+        st.info("📅 История: показан текстовый анализ Vision (фото сохраняются только в новых анализах)")
+        for i, text in enumerate(blocks): _render_photo_block(None, text, i)
+        st.stop()
+    if not imgs:
+        st.info("👁️ Vision фото был отключён — запусти повторно с включённым чекбоксом")
+        st.stop()
+    for i, img in enumerate(imgs):
+        _render_photo_block(img, blocks[i] if i < len(blocks) else "", i)
+
+# ══ A+ Контент ════════════════════════════════════════════════════════════════
 elif page == "🎨 A+ Контент":
     st.title("🎨 A+ Контент")
     _av = st.session_state.get("aplus_vision","")
     _av_urls = st.session_state.get("aplus_img_urls", [])
     if not _av_urls:
         _av_urls = od.get("aplus_image_urls", od.get("aplus_images", []))
-        # Clean URLs just in case
-        _av_urls = [re.sub(r'\.__CR[^.]+_PT0_SX\d+_V\d+___', '', u) if isinstance(u,str) else u for u in _av_urls if isinstance(u,str) and u.startswith("http")]
+        _av_urls = [re.sub(r'\.__CR[^.]+_PT0_SX\d+_V\d+___','',u) for u in _av_urls if isinstance(u,str) and u.startswith("http")]
     _aplus_text = od.get("aplus_content","") or ""
     _desc_text  = od.get("description","") or ""
 
-    # A+ Text content (From the brand / Product description blocks)
     if _aplus_text or (od.get("aplus") and _desc_text):
-        with st.expander("📄 A+ Текстовый контент (From the brand / Product description)", expanded=not _av_urls):
-            if _aplus_text:
-                st.markdown("**A+ Content:**")
-                st.markdown(str(_aplus_text)[:3000])
-            if od.get("aplus") and _desc_text:
-                st.markdown("**Product Description (часть A+):**")
-                st.markdown(str(_desc_text)[:2000])
-        if not _av_urls:
-            st.info("ℹ️ ScrapingDog вернул A+ как текст — баннеры недоступны через API. Это нормально для 'From the brand' модулей.")
+        with st.expander("📄 A+ Текстовый контент", expanded=not _av_urls):
+            if _aplus_text: st.markdown(str(_aplus_text)[:3000])
+            if od.get("aplus") and _desc_text: st.markdown(str(_desc_text)[:2000])
 
     if not _av and not _av_urls and not _aplus_text:
-        if od.get("aplus"):
-            st.warning("⚠️ A+ баннеры не проанализированы. Нажми **🔄 Обновить анализ** в меню слева.")
-        else:
-            st.info("ℹ️ У этого листинга нет A+ контента.")
+        st.info("ℹ️ У этого листинга нет A+ контента." if not od.get("aplus") else "⚠️ A+ баннеры не проанализированы. Нажми 🔄 Обновить анализ.")
     elif _av_urls and not _av:
-        # Картинки есть, анализ отключён — показываем только картинки
-        st.info("👁️ Vision A+ был отключён — показаны баннеры без AI-анализа. Включи чекбокс и перезапусти.")
-        for _bi, _url in enumerate(_av_urls[:8]):
-            st.image(_url, caption=f"A+ баннер #{_bi+1}", use_container_width=True)
+        st.info("👁️ Vision A+ был отключён — баннеры без анализа.")
+        for _bi, _url in enumerate(_av_urls[:8]): st.image(_url, caption=f"A+ баннер #{_bi+1}", use_container_width=True)
     else:
         _av_total = pct(r.get("aplus_score", 0))
-        if _av_total:
-            st.metric("A+ Score", f"{_av_total}%")
-
+        if _av_total: st.metric("A+ Score", f"{_av_total}%")
         _av_blocks = []
         for _m in re.finditer(r"APLUS_BLOCK_\d+\s*(.*?)(?=APLUS_BLOCK_\d+|$)", _av, re.DOTALL):
             _blk = _m.group(1).strip()
-            if _blk:
-                _av_blocks.append(_blk)
-        # Убираем мусор из начала каждого блока (заголовки AI типа "# АНАЛИЗ A+ CONTENT ---")
-        _clean_blocks = []
-        for _blk in _av_blocks:
-            _lines = _blk.split("\n")
-            _lines = [l for l in _lines if not re.match(r"^#+\s|^---", l.strip())]
-            _clean_blocks.append("\n".join(_lines).strip())
-        _av_blocks = [b for b in _clean_blocks if b]
-        st.markdown(f"**{len(_av_blocks)} баннер(ов) проанализировано**")
-        st.divider()
-
+            if _blk: _av_blocks.append("\n".join([l for l in _blk.split("\n") if not re.match(r"^#+\s|^---",l.strip())]).strip())
+        _av_blocks = [b for b in _av_blocks if b]
+        st.markdown(f"**{len(_av_blocks)} баннер(ов)**"); st.divider()
         for _bi, _block in enumerate(_av_blocks):
-            _av_score_m = re.search(r"(?:Оценка|Score)\s*[:\-]?\s*(\d+)", _block)
-            _av_score = int(_av_score_m.group(1)) if _av_score_m else 0
-            _av_mod_m = re.search(r"(?:Модуль|Module)\s*[:\-]?\s*(.+)", _block)
-            _av_sum_m = re.search(r"(?:Содержание|Summary|Content)\s*[:\-]?\s*(.+)", _block)
-            _av_str_m = re.search(r"(?:Сильная сторона|Strength)\s*[:\-]?\s*(.{3,})", _block)
-            _av_weak_m = re.search(r"(?:Слабость|Weakness)\s*[:\-]?\s*(.{3,})", _block)
-            _av_act_m = re.search(r"(?:Действие|Action)\s*[:\-]?\s*(.{3,})", _block)
-            _av_conv_m = re.search(r"(?:Конверсия|Conversion)\s*[:\-]?\s*(.{3,})", _block)
-            _av_mod  = _av_mod_m.group(1).strip() if _av_mod_m else ""
-            _av_sum  = _av_sum_m.group(1).strip() if _av_sum_m else ""
-            _av_str  = _av_str_m.group(1).strip() if _av_str_m else ""
-            _av_weak = _av_weak_m.group(1).strip() if _av_weak_m else ""
-            _av_act  = _av_act_m.group(1).strip() if _av_act_m else ""
-            _av_conv = _av_conv_m.group(1).strip() if _av_conv_m else ""
+            _av_score = int(re.search(r"(?:Оценка|Score)\s*[:\-]?\s*(\d+)", _block).group(1)) if re.search(r"(?:Оценка|Score)\s*[:\-]?\s*(\d+)", _block) else 0
+            _s = lambda pat: re.search(pat, _block)
+            _strip = lambda m: m.group(1).strip() if m else ""
+            _av_mod  = _strip(_s(r"(?:Модуль|Module)\s*[:\-]\s*(.+)"))
+            _av_sum  = _strip(_s(r"(?:Содержание|Summary)\s*[:\-]\s*(.+)"))
+            _av_str  = _strip(_s(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})"))
+            _av_weak = _strip(_s(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})"))
+            _av_act  = _strip(_s(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})"))
+            _av_conv = _strip(_s(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.{3,})"))
             _av_bc = "#22c55e" if _av_score>=8 else ("#f59e0b" if _av_score>=6 else "#ef4444")
             _av_sl = "Отлично" if _av_score>=8 else ("Хорошо" if _av_score>=6 else "Слабо")
-
             with st.container(border=True):
-                if _av_urls and _bi < len(_av_urls):
-                    st.image(_av_urls[_bi], use_container_width=True)
-                _av_head = f"Баннер #{_bi+1}" + (f" — {_av_mod}" if _av_mod else "")
-                st.markdown(f"**{_av_head}**")
-                if _av_sum:
-                    st.markdown(f"_{_av_sum}_")
-                elif _block:
-                    _raw_lines = [l.strip() for l in _block.split("\n") if l.strip() and not re.match(r"^#+|^---", l)][:2]
-                    if _raw_lines: st.markdown(f"_{' '.join(_raw_lines)}_")
+                if _av_urls and _bi < len(_av_urls): st.image(_av_urls[_bi], use_container_width=True)
+                st.markdown(f"**Баннер #{_bi+1}" + (f" — {_av_mod}" if _av_mod else "") + "**")
+                if _av_sum: st.markdown(f"_{_av_sum}_")
                 if _av_score:
-                    st.markdown(
-                        f'<div style="display:flex;align-items:center;gap:16px;margin:12px 0">' +
-                        f'<div style="font-size:3.5rem;font-weight:800;color:{_av_bc};line-height:1">{_av_score}/10</div>' +
-                        f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:12px">' +
-                        f'<div style="background:{_av_bc};width:{_av_score*10}%;height:12px;border-radius:6px"></div></div>' +
-                        f'<div style="color:{_av_bc};font-size:0.9rem;margin-top:4px;font-weight:700">{_av_sl}</div></div></div>',
-                        unsafe_allow_html=True)
+                    st.markdown(f'<div style="display:flex;align-items:center;gap:16px;margin:12px 0"><div style="font-size:3.5rem;font-weight:800;color:{_av_bc};line-height:1">{_av_score}/10</div><div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:12px"><div style="background:{_av_bc};width:{_av_score*10}%;height:12px;border-radius:6px"></div></div><div style="color:{_av_bc};font-size:0.9rem;margin-top:4px;font-weight:700">{_av_sl}</div></div></div>', unsafe_allow_html=True)
                 if _av_str:  st.success(f"✅ {_av_str}")
                 if _av_weak: st.warning(f"⚠️ {_av_weak}")
                 if _av_act:
-                    with st.expander("🛠 Что делать"):
-                        st.markdown(f"→ {_av_act}")
+                    with st.expander("🛠 Что делать"): st.markdown(f"→ {_av_act}")
                 if _av_conv:
-                    with st.expander("💡 Конверсия"):
-                        st.info(f"🎯 {_av_conv}")
+                    with st.expander("💡 Конверсия"): st.info(f"🎯 {_av_conv}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: Контент
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ Контент ════════════════════════════════════════════════════════════════════
 elif page == "📝 Контент":
     st.title("📝 Анализ контента")
     our_title   = od.get("title","")
     our_bullets = od.get("feature_bullets",[])
     our_desc    = od.get("description","")
-
-    # ── Stop Words Check ──────────────────────────────────────────────────────
     _sw_results = check_listing_stop_words(od)
     if _sw_results:
-        _total_banned  = sum(len(v.get("do_not_use",[])) for v in _sw_results.values())
-        _total_warn    = sum(len(v.get("try_to_avoid",[])) for v in _sw_results.values())
-        _total_aplus   = sum(len(v.get("a_plus_restricted",[])) for v in _sw_results.values())
-        _sw_color = "#ef4444" if _total_banned > 0 else ("#f59e0b" if _total_warn > 0 else "#22c55e")
-        _sw_label = f"🚨 {_total_banned} запрещённых слов!" if _total_banned else (
-            f"⚠️ {_total_warn} нежелательных слов" if _total_warn else "✅ Стоп-слов нет")
+        _total_banned = sum(len(v.get("do_not_use",[])) for v in _sw_results.values())
+        _total_warn   = sum(len(v.get("try_to_avoid",[])) for v in _sw_results.values())
+        _sw_label = f"🚨 {_total_banned} запрещённых!" if _total_banned else f"⚠️ {_total_warn} нежелательных"
         with st.expander(f"🔴 Amazon Stop Words — {_sw_label}", expanded=_total_banned > 0):
             for field, found in _sw_results.items():
                 st.markdown(f"**{field}:**")
-                if found.get("do_not_use"):
-                    for w in found["do_not_use"]:
-                        st.markdown(f'<span style="background:#ef444433;border:1px solid #ef4444;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#ef4444">🚫 {w}</span>', unsafe_allow_html=True)
-                if found.get("try_to_avoid"):
-                    for w in found["try_to_avoid"]:
-                        st.markdown(f'<span style="background:#f59e0b33;border:1px solid #f59e0b;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#f59e0b">⚠️ {w}</span>', unsafe_allow_html=True)
-                if found.get("a_plus_restricted"):
-                    for w in found["a_plus_restricted"]:
-                        st.markdown(f'<span style="background:#3b82f633;border:1px solid #3b82f6;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#3b82f6">📋 A+ {w}</span>', unsafe_allow_html=True)
-            st.caption("🚫 Запрещено Amazon | ⚠️ Нежелательно | 📋 Запрещено в A+")
-    else:
-        st.success("✅ Стоп-слова Amazon не найдены")
+                for w in found.get("do_not_use",[]): st.markdown(f'<span style="background:#ef444433;border:1px solid #ef4444;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#ef4444">🚫 {w}</span>', unsafe_allow_html=True)
+                for w in found.get("try_to_avoid",[]): st.markdown(f'<span style="background:#f59e0b33;border:1px solid #f59e0b;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#f59e0b">⚠️ {w}</span>', unsafe_allow_html=True)
+                for w in found.get("a_plus_restricted",[]): st.markdown(f'<span style="background:#3b82f633;border:1px solid #3b82f6;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.85rem;color:#3b82f6">📋 A+ {w}</span>', unsafe_allow_html=True)
+    else: st.success("✅ Стоп-слова Amazon не найдены")
     st.divider()
 
     def _sec(label, key, **kw):
-        val = pct(r.get(key, 0))
-        gaps = r.get(key.replace("_score","_gaps"), [])
-        rec  = r.get(key.replace("_score","_rec"), "")
-        sc2  = sc_pct(val)
-        c1,c2 = st.columns([4,1])
+        val = pct(r.get(key, 0)); gaps = r.get(key.replace("_score","_gaps"), []); rec = r.get(key.replace("_score","_rec"), "")
+        sc2 = sc_pct(val); c1,c2 = st.columns([4,1])
         c1.markdown(f"**{label}**"); c2.markdown(f"{sc2} **{val}%**")
         st.progress(val/100)
         if kw.get("raw_text"):
             cl = kw.get("char_limit",0); ct = len(kw["raw_text"])
-            col = "red" if (cl and ct>cl) else "gray"
-            st.markdown(f"<small style='color:{col}'>📝 {ct} симв{f' / {cl} лимит' if cl else ''}</small>", unsafe_allow_html=True)
+            st.markdown(f"<small style='color:{'red' if (cl and ct>cl) else 'gray'}'>📝 {ct} симв{f' / {cl} лимит' if cl else ''}</small>", unsafe_allow_html=True)
             with st.expander("Показать текст"): st.markdown(f"> {kw['raw_text']}")
-        _real_gaps = [g for g in gaps if g and str(g).strip()] if isinstance(gaps, list) else []
+        _real_gaps = [g for g in gaps if g and str(g).strip()] if isinstance(gaps,list) else []
         if _real_gaps:
             with st.expander(f"⚠️ ({len(_real_gaps)})"):
                 for g in _real_gaps: st.markdown(f"- {g}")
         if rec: st.info(f"💡 {rec}")
 
     _sec("Title", "title_score", raw_text=our_title, char_limit=125)
-    _tlen = len(our_title)
-    _twords = [w.lower() for w in our_title.split() if len(w)>3]
-    _has_repeat = any(_twords.count(w)>=3 for w in _twords)
-    _has_spec = any(c in our_title for c in "!$?{}^¬¦")
-    _has_kw = any(w in our_title.lower() for w in ["merino","wool","tank","men","undershirt","shirt","layer"])
-    _title_rubric = [
-        ("Длина ≤125 симв.",     "15%", _tlen<=125,       f"{_tlen} симв."),
-        ("Бренд+тип+материал",   "35%", _has_kw,          "ключевые слова есть" if _has_kw else "❌ нет ключевых слов"),
-        ("Нет спецсимволов",     "10%", not _has_spec,    "есть ! $ ?" if _has_spec else ""),
-        ("Нет повторов (≥3×)",   "10%", not _has_repeat,  "повтор найден" if _has_repeat else ""),
-        ("Читаемость / цель",    "30%", True,             ""),
-    ]
-    _ai_title_score = pct(r.get("title_score", 0))
-    _auto_title_score = sum(int(_ok) * int(_wt.strip("%")) for _,_wt,_ok,_ in _title_rubric)
-    with st.expander("📐 Рубрика оценки Title"):
-        _sc1, _sc2 = st.columns(2)
-        _sc1.metric("🤖 AI оценка", f"{_ai_title_score}%")
-        _sc2.metric("🔧 Авто-проверка", f"{_auto_title_score}%",
-                    delta=f"{_ai_title_score - _auto_title_score:+d}%" if _ai_title_score != _auto_title_score else None,
-                    delta_color="normal")
-
     st.divider()
-    bullets_text = "\n".join([f"• {b}" for b in our_bullets]) if our_bullets else ""
-    _sec("Bullets", "bullets_score", raw_text=bullets_text)
+    _sec("Bullets", "bullets_score", raw_text="\n".join([f"• {b}" for b in our_bullets]) if our_bullets else "")
     st.divider()
     _desc_score = pct(r.get("description_score", 0))
     _has_aplus  = bool(od.get("aplus") or od.get("aplus_content"))
     if _desc_score == 0 and _has_aplus:
-        # Description hidden by A+ — this is normal
         st.markdown("**Description**")
-        st.markdown(
-            '<div style="background:#1e3a1e;border-left:4px solid #22c55e;border-radius:8px;'
-            'padding:10px 14px;margin:4px 0">'
-            '<span style="color:#22c55e;font-weight:700">✅ Скрыто A+ контентом — это нормально</span><br>'
-            '<span style="color:#94a3b8;font-size:0.82rem">Amazon показывает A+ вместо описания. '
-            'Описание не видит покупатель, но индексируется поиском — заполни для SEO.</span>'
-            '</div>', unsafe_allow_html=True)
-    else:
-        _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
-    st.divider()
-    _sec("A+", "aplus_score")
-
-    _av_check = st.session_state.get("aplus_vision","")
-    if _av_check:
-        st.info("🎨 Визуальный анализ A+ баннеров → перейди в раздел **A+ Контент** в меню слева")
-    elif od.get("aplus"):
-        st.info("🎨 A+ есть, но баннеры не загружены. Перезапусти анализ.")
-
-    st.divider()
-    _sec("Фото", "images_score")
-
+        st.markdown('<div style="background:#1e3a1e;border-left:4px solid #22c55e;border-radius:8px;padding:10px 14px;margin:4px 0"><span style="color:#22c55e;font-weight:700">✅ Скрыто A+ контентом — это нормально</span><br><span style="color:#94a3b8;font-size:0.82rem">Amazon показывает A+ вместо описания. Описание не видит покупатель, но индексируется поиском — заполни для SEO.</span></div>', unsafe_allow_html=True)
+    else: _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
+    st.divider(); _sec("A+", "aplus_score"); st.divider(); _sec("Фото", "images_score")
     ib = r.get("images_breakdown", {})
     if ib:
         st.subheader("📸 Детализация фото")
-        for k,v2 in ib.items():
-            st.markdown(f"**{k}:** {v2}")
-
+        for k,v2 in ib.items(): st.markdown(f"**{k}:** {v2}")
     if r.get("tech_params"):
-        st.divider()
-        st.subheader("⚙️ Технические параметры")
+        st.divider(); st.subheader("⚙️ Технические параметры")
         for p2 in r["tech_params"]:
             with st.container(border=True):
-                st.markdown(f"**{p2.get('param','')}**")
-                x1,x2 = st.columns(2)
+                st.markdown(f"**{p2.get('param','')}**"); x1,x2 = st.columns(2)
                 x1.caption(f"🏆 Конкуренты: {p2.get('competitor_value','')}"); x2.caption(f"→ Наш пробел: {p2.get('our_gap','')}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: Benchmark
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ Benchmark ════════════════════════════════════════════════════════════════
 elif page == "🏆 Benchmark":
-    st.title("🏆 Benchmark — Сравнение с конкурентами")
-
-    if not cd:
-        st.info("Добавь конкурентов в форму выше и запусти анализ повторно")
-        st.stop()
+    st.title("🏆 Benchmark")
+    if not cd: st.info("Добавь конкурентов в форму выше"); st.stop()
 
     def auto_score(d):
-        pi2 = d.get("product_information", {})
-        title2  = d.get("title",""); imgs2 = d.get("images",[])
-        bul2    = d.get("feature_bullets",[]); desc2 = d.get("description","")
-        rating2 = float(d.get("average_rating",0) or 0)
-        rev_cnt = int(str(pi2.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").replace(".","").strip() or 0)
-        has_vid = int(d.get("number_of_videos",0) or 0) > 0
-        has_ap  = bool(d.get("aplus")); is_prime = bool(d.get("is_prime_exclusive"))
-        bsr_num = 99999
-        bsr_m = re.search(r"#([\d,]+)", str(pi2.get("Best Sellers Rank","")))
+        pi2=d.get("product_information",{}); title2=d.get("title",""); imgs2=d.get("images",[]); bul2=d.get("feature_bullets",[])
+        desc2=d.get("description",""); rating2=float(d.get("average_rating",0) or 0)
+        rev_cnt=int(str(pi2.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").strip() or 0)
+        has_vid=int(d.get("number_of_videos",0) or 0)>0; has_ap=bool(d.get("aplus"))
+        is_prime=bool(d.get("is_prime_exclusive") or d.get("is_prime"))
+        bsr_num=99999; bsr_m=re.search(r"#([\d,]+)",str(pi2.get("Best Sellers Rank","")))
         if bsr_m:
-            try: bsr_num = int(bsr_m.group(1).replace(",",""))
+            try: bsr_num=int(bsr_m.group(1).replace(",",""))
             except: pass
-        colors2 = len([c for c in d.get("customization_options",{}).get("color",[]) if c.get("asin") and c.get("asin") != "undefined"])
-        sizes2  = len(d.get("customization_options",{}).get("size",[]))
-        # One Size products score full on size dimension
-        _pi2 = d.get("product_information", {})
-        _is_one_size = "one size" in str(_pi2.get("Size","")).lower() or "one size" in str(_pi2.get("size","")).lower()
-        if _is_one_size: sizes2 = 3  # treat One Size as having size variants
-
-        ts = min(10, max(0, (1.5 if len(title2)<=125 else 0) + (3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5) + 3.0 + (1.0 if not re.search(r"[!$?{}]",title2) else 0) + 1))
-        bs = min(10, max(0, (1.5 if len(bul2)<=5 else 0) + (2.5 if any(":" in b for b in bul2) else 1.0) + min(4.0,len(bul2)) + 1.0 + 1))
-        ds = 0 if not desc2 else min(10, 4+(3 if len(desc2)>200 else 1))
-        ps = min(10, max(0, (4.0 if len(imgs2)>=6 else len(imgs2)*0.6)+(2.0 if has_vid else 0)+(4.0 if len(imgs2)>=6 else 0)))
-        as_ = 0 if not has_ap else 7
-        rs = 10 if (rating2>=4.4 and rev_cnt>=50) else (7 if rating2>=4.0 else 4)
-        bsrs = 10 if bsr_num<=1000 else (8 if bsr_num<=5000 else 5)
-        has_vid = int(d.get("number_of_videos",0) or 0) > 0
-        has_ap  = bool(d.get("aplus")); is_prime = bool(d.get("is_prime_exclusive") or d.get("is_prime") or "amazon" in str(d.get("ships_from","")).lower())
-        prs = 10 if is_prime else 5
-        vs = 10 if (colors2>=5 and sizes2>=3) else (8 if colors2>=5 else (7 if sizes2>=3 else 4))
-        h = int((ts*0.10+bs*0.10+ds*0.10+ps*0.10+as_*0.10+rs*0.15+bsrs*0.15+7*0.10+vs*0.05+prs*0.05)*10)
+        colors2=len([c for c in d.get("customization_options",{}).get("color",[]) if c.get("asin") and c.get("asin")!="undefined"])
+        sizes2=len(d.get("customization_options",{}).get("size",[]))
+        if "one size" in str(pi2.get("Size","")).lower(): sizes2=3
+        ts=min(10,max(0,(1.5 if len(title2)<=125 else 0)+(3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",title2) else 0)+1))
+        bs=min(10,max(0,(1.5 if len(bul2)<=5 else 0)+(2.5 if any(":"in b for b in bul2) else 1)+min(4,len(bul2))+1+1))
+        ds=0 if not desc2 else min(10,4+(3 if len(desc2)>200 else 1))
+        ps=min(10,max(0,(4 if len(imgs2)>=6 else len(imgs2)*0.6)+(2 if has_vid else 0)+(4 if len(imgs2)>=6 else 0)))
+        as_=0 if not has_ap else 7; rs=10 if (rating2>=4.4 and rev_cnt>=50) else (7 if rating2>=4.0 else 4)
+        bsrs=10 if bsr_num<=1000 else (8 if bsr_num<=5000 else 5); prs=10 if is_prime else 5
+        vs=10 if (colors2>=5 and sizes2>=3) else (8 if colors2>=5 else (7 if sizes2>=3 else 4))
+        h=int((ts*0.10+bs*0.10+ds*0.10+ps*0.10+as_*0.10+rs*0.15+bsrs*0.15+7*0.10+vs*0.05+prs*0.05)*10)
         return {"title":round(ts,1),"bullets":round(bs,1),"description":round(ds,1),"photos":round(ps,1),"aplus":as_,"reviews":rs,"bsr":bsrs,"variants":vs,"prime":prs,"health":h}
 
-    our_scores = {
-        "title":       pct(r.get("title_score",0)),
-        "bullets":     pct(r.get("bullets_score",0)),
-        "description": pct(r.get("description_score",0)),
-        "photos":      pct(r.get("images_score",0)),
-        "aplus":       pct(r.get("aplus_score",0)),
-        "reviews":     pct(r.get("reviews_score",0)),
-        "bsr":         pct(r.get("bsr_score",0)),
-        "variants":    pct(r.get("customization_score",0)),
-        "prime":       pct(r.get("prime_score",0)),
-        "health":      pct(r.get("overall_score",0)),
-    }
-    def get_comp_scores(c, i):
-        cai = st.session_state.get(f"comp_ai_{i}")
-        if cai:
-            return {
-                "title":       pct(cai.get("title_score",0)),
-                "bullets":     pct(cai.get("bullets_score",0)),
-                "description": pct(cai.get("description_score",0)),
-                "photos":      pct(cai.get("images_score",0)),
-                "aplus":       pct(cai.get("aplus_score",0)),
-                "reviews":     pct(cai.get("reviews_score",0)),
-                "bsr":         pct(cai.get("bsr_score",0)),
-                "variants":    pct(cai.get("customization_score",0)),
-                "prime":       pct(cai.get("prime_score",0)),
-                "health":      pct(cai.get("overall_score",0)),
-            }
+    our_scores={"title":pct(r.get("title_score",0)),"bullets":pct(r.get("bullets_score",0)),"description":pct(r.get("description_score",0)),"photos":pct(r.get("images_score",0)),"aplus":pct(r.get("aplus_score",0)),"reviews":pct(r.get("reviews_score",0)),"bsr":pct(r.get("bsr_score",0)),"variants":pct(r.get("customization_score",0)),"prime":pct(r.get("prime_score",0)),"health":pct(r.get("overall_score",0))}
+    def get_comp_scores(c,i):
+        cai=st.session_state.get(f"comp_ai_{i}")
+        if cai: return {"title":pct(cai.get("title_score",0)),"bullets":pct(cai.get("bullets_score",0)),"description":pct(cai.get("description_score",0)),"photos":pct(cai.get("images_score",0)),"aplus":pct(cai.get("aplus_score",0)),"reviews":pct(cai.get("reviews_score",0)),"bsr":pct(cai.get("bsr_score",0)),"variants":pct(cai.get("customization_score",0)),"prime":pct(cai.get("prime_score",0)),"health":pct(cai.get("overall_score",0))}
         return auto_score(c)
-
-    comp_scores = [get_comp_scores(c, i) for i,c in enumerate(cd)]
-    all_scores  = [our_scores] + comp_scores
-    asin_labels = ["🔵 НАШ"] + [f"🔴 {get_asin_from_data(c) or f'Конк.{i+1}'}" for i,c in enumerate(cd)]
-
-    total_scores = []
-    for sc2 in all_scores:
-        if sc2.get("health", 0) > 0:
-            total_scores.append(sc2["health"])
-        else:
-            keys = ["title","bullets","description","photos","aplus","reviews","bsr","variants","prime"]
-            w    = [0.10,0.10,0.10,0.10,0.10,0.15,0.15,0.05,0.05]
-            total = sum(sc2.get(k,0)*wi for k,wi in zip(keys,w))
-            total_scores.append(round(total))
-    ranked = sorted(enumerate(zip(asin_labels, total_scores)), key=lambda x: x[1][1], reverse=True)
-    medals = ["🥇","🥈","🥉","4️⃣","5️⃣"]
+    comp_scores=[get_comp_scores(c,i) for i,c in enumerate(cd)]
+    all_scores=[our_scores]+comp_scores
+    asin_labels=["🔵 НАШ"]+[f"🔴 {get_asin_from_data(c) or f'Конк.{i+1}'}" for i,c in enumerate(cd)]
+    total_scores=[s["health"] if s.get("health",0)>0 else round(sum(s.get(k,0)*wi for k,wi in zip(["title","bullets","description","photos","aplus","reviews","bsr","variants","prime"],[0.10,0.10,0.10,0.10,0.10,0.15,0.15,0.05,0.05]))) for s in all_scores]
+    ranked=sorted(enumerate(zip(asin_labels,total_scores)),key=lambda x:x[1][1],reverse=True)
+    medals=["🥇","🥈","🥉","4️⃣","5️⃣"]
 
     st.subheader("🏅 Итоговый рейтинг")
-    pcols = st.columns(len(ranked))
+    pcols=st.columns(len(ranked))
     for rank,(orig_idx,(lbl,score)) in enumerate(ranked):
-        medal = medals[rank] if rank < len(medals) else ""
-        bg = "#fef9c3" if rank==0 else ("#f8fafc" if rank==1 else "#fff7ed")
-        border = "#f59e0b" if rank==0 else ("#94a3b8" if rank==1 else "#fb923c")
-        tag = "Лучший" if rank==0 else f"#{rank+1} место"
-        pcols[rank].markdown(
-            f'<div style="background:{bg};border:2px solid {border};border-radius:12px;padding:14px;text-align:center">'
-            f'<div style="font-size:1.8rem">{medal}</div>'
-            f'<div style="font-size:0.82rem;font-weight:700;margin-top:4px">{lbl}</div>'
-            f'<div style="font-size:1.6rem;font-weight:800;color:{border};margin-top:4px">{score}%</div>'
-            f'<div style="font-size:0.65rem;color:#64748b">{tag}</div>'
-            f'</div>', unsafe_allow_html=True)
+        medal=medals[rank] if rank<len(medals) else ""
+        bg="#fef9c3" if rank==0 else ("#f8fafc" if rank==1 else "#fff7ed")
+        border="#f59e0b" if rank==0 else ("#94a3b8" if rank==1 else "#fb923c")
+        pcols[rank].markdown(f'<div style="background:{bg};border:2px solid {border};border-radius:12px;padding:14px;text-align:center"><div style="font-size:1.8rem">{medal}</div><div style="font-size:0.82rem;font-weight:700;margin-top:4px">{lbl}</div><div style="font-size:1.6rem;font-weight:800;color:{border};margin-top:4px">{score}%</div><div style="font-size:0.65rem;color:#64748b">{"Лучший" if rank==0 else f"#{rank+1} место"}</div></div>', unsafe_allow_html=True)
 
-    st.divider()
-    st.subheader("📊 Сравнение оценок")
-    score_rows = [
-        ("🏷️ Title","title",100),("📋 Bullets","bullets",100),
-        ("📄 Описание","description",100),("📸 Фото","photos",100),
-        ("✨ A+","aplus",100),("⭐ Отзывы","reviews",100),
-        ("📊 BSR","bsr",100),("🎨 Варианты","variants",100),
-        ("🚀 Prime","prime",100),("💯 Overall","health",100),
-    ]
-    hdr2 = st.columns([2]+[3]*(1+len(cd)))
+    st.divider(); st.subheader("📊 Сравнение оценок")
+    score_rows=[("🏷️ Title","title"),("📋 Bullets","bullets"),("📄 Описание","description"),("📸 Фото","photos"),("✨ A+","aplus"),("⭐ Отзывы","reviews"),("📊 BSR","bsr"),("🎨 Варианты","variants"),("🚀 Prime","prime"),("💯 Overall","health")]
+    hdr2=st.columns([2]+[3]*(1+len(cd)))
     hdr2[0].markdown("**Метрика**")
     for j,al in enumerate(asin_labels): hdr2[j+1].markdown(f"**{al}**")
-
-    for lbl,key,mx in score_rows:
-        vals = [s.get(key,0) for s in all_scores]
-        best_val = max(vals)
-        row2 = st.columns([2]+[3]*(1+len(cd)))
-        row2[0].caption(lbl)
+    for lbl,key in score_rows:
+        vals=[s.get(key,0) for s in all_scores]; best_val=max(vals)
+        row2=st.columns([2]+[3]*(1+len(cd))); row2[0].caption(lbl)
         for j,val in enumerate(vals):
-            p3 = int(val); is_best = (val==best_val)
-            cc = "#22c55e" if is_best else ("#f59e0b" if p3>=50 else "#ef4444")
-            row2[j+1].markdown(
-                f'<div style="background:#e5e7eb;border-radius:5px;height:22px;position:relative">'
-                f'<div style="background:{cc};width:{p3}%;height:22px;border-radius:5px"></div>'
-                f'<div style="position:absolute;top:2px;left:6px;font-size:0.75rem;font-weight:700;color:white">{p3}%{"★" if is_best else ""}</div>'
-                f'</div>', unsafe_allow_html=True)
+            p3=int(val); is_best=(val==best_val); cc="#22c55e" if is_best else ("#f59e0b" if p3>=50 else "#ef4444")
+            row2[j+1].markdown(f'<div style="background:#e5e7eb;border-radius:5px;height:22px;position:relative"><div style="background:{cc};width:{p3}%;height:22px;border-radius:5px"></div><div style="position:absolute;top:2px;left:6px;font-size:0.75rem;font-weight:700;color:white">{p3}%{"★" if is_best else ""}</div></div>', unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: COSMO / Rufus
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ COSMO / Rufus ════════════════════════════════════════════════════════════
 elif page == "🧠 COSMO / Rufus":
     st.title("🧠 COSMO / Rufus Анализ")
-
-    _ca   = r.get("cosmo_analysis", {})
-    cosmo = pct(_ca.get("score", r.get("cosmo_score",0)))
-    _ra   = r.get("rufus_analysis", {})
-    rufus_s = pct(_ra.get("score", 0))
-    cc    = "#22c55e" if cosmo>=75 else ("#f59e0b" if cosmo>=50 else "#ef4444")
-    rc2   = "#22c55e" if rufus_s>=75 else ("#f59e0b" if rufus_s>=50 else "#ef4444")
-    ccc1,ccc2 = st.columns(2)
-    with ccc1:
-        st.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{cc}">{cosmo}%</div><div style="color:{cc};font-weight:600">COSMO Score</div></div>', unsafe_allow_html=True)
-    with ccc2:
-        st.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{rc2}">{rufus_s}%</div><div style="color:{rc2};font-weight:600">Rufus Score</div></div>', unsafe_allow_html=True)
+    _ca=r.get("cosmo_analysis",{}); cosmo=pct(_ca.get("score",r.get("cosmo_score",0)))
+    _ra=r.get("rufus_analysis",{}); rufus_s=pct(_ra.get("score",0))
+    cc="#22c55e" if cosmo>=75 else ("#f59e0b" if cosmo>=50 else "#ef4444")
+    rc2="#22c55e" if rufus_s>=75 else ("#f59e0b" if rufus_s>=50 else "#ef4444")
+    ccc1,ccc2=st.columns(2)
+    ccc1.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{cc}">{cosmo}%</div><div style="color:{cc};font-weight:600">COSMO Score</div></div>', unsafe_allow_html=True)
+    ccc2.markdown(f'<div style="text-align:center;padding:16px;background:#f8fafc;border-radius:12px"><div style="font-size:2.5rem;font-weight:800;color:{rc2}">{rufus_s}%</div><div style="color:{rc2};font-weight:600">Rufus Score</div></div>', unsafe_allow_html=True)
     st.divider()
-
     if _ca:
-        c_present = _ca.get("signals_present",[])
-        c_missing = _ca.get("signals_missing",[])
+        c_present=_ca.get("signals_present",[]); c_missing=_ca.get("signals_missing",[])
         if c_present or c_missing:
-            st.subheader("📡 COSMO сигналы")
-            col_p, col_m = st.columns(2)
+            st.subheader("📡 COSMO сигналы"); col_p,col_m=st.columns(2)
             with col_p:
                 st.markdown("**✅ Присутствуют**")
                 for s2 in c_present: st.success(s2)
             with col_m:
                 st.markdown("**❌ Отсутствуют**")
                 for s2 in c_missing: st.error(s2)
-
-    st.divider()
-    st.subheader("🤖 Rufus Issues")
+    st.divider(); st.subheader("🤖 Rufus Issues")
     if _ra.get("issues"):
-        for iss in _ra["issues"]:
-            st.warning(f"⚠️ {iss}")
-
-    # ── JTBD ─────────────────────────────────────────────────────────────────
-    _jtbd = r.get("jtbd_analysis", {})
+        for iss in _ra["issues"]: st.warning(f"⚠️ {iss}")
+    _jtbd=r.get("jtbd_analysis",{})
     if _jtbd:
-        st.divider()
-        st.subheader("🎯 JTBD — Jobs To Be Done")
-        st.caption("Покупатель не покупает продукт — он нанимает его для работы")
-
-        _jtbd_score = pct(_jtbd.get("alignment_score", 0))
-        _jc = "#22c55e" if _jtbd_score>=75 else ("#f59e0b" if _jtbd_score>=50 else "#ef4444")
-        _jlbl = "Листинг говорит на языке покупателя" if _jtbd_score>=75 else ("Работа частично видна" if _jtbd_score>=50 else "Листинг говорит о фичах, не о работе")
-
-        st.markdown(
-            f'<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:12px">'
-            f'<div style="font-size:2rem;font-weight:800;color:{_jc}">{_jtbd_score}%</div>'
-            f'<div style="color:{_jc};font-size:0.85rem;font-weight:600">{_jlbl}</div>'
-            f'</div>', unsafe_allow_html=True)
-
-        _js = _jtbd.get("job_story","")
-        if _js:
-            st.info(f"**📖 Job Story:**\n\n_{_js}_")
-
-        _j1, _j2, _j3 = st.columns(3)
-        if _jtbd.get("functional_job"):
-            _j1.markdown(f"**⚙️ Функциональная работа**\n\n{_jtbd['functional_job']}")
-        if _jtbd.get("emotional_job"):
-            _j2.markdown(f"**❤️ Эмоциональная работа**\n\n{_jtbd['emotional_job']}")
-        if _jtbd.get("social_job"):
-            _j3.markdown(f"**👥 Социальная работа**\n\n{_jtbd['social_job']}")
-
+        st.divider(); st.subheader("🎯 JTBD — Jobs To Be Done")
+        _jtbd_score=pct(_jtbd.get("alignment_score",0)); _jc="#22c55e" if _jtbd_score>=75 else ("#f59e0b" if _jtbd_score>=50 else "#ef4444")
+        st.markdown(f'<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:12px"><div style="font-size:2rem;font-weight:800;color:{_jc}">{_jtbd_score}%</div></div>', unsafe_allow_html=True)
+        if _jtbd.get("job_story"): st.info(f"**📖 Job Story:**\n\n_{_jtbd['job_story']}_")
+        _j1,_j2,_j3=st.columns(3)
+        if _jtbd.get("functional_job"): _j1.markdown(f"**⚙️ Функциональная**\n\n{_jtbd['functional_job']}")
+        if _jtbd.get("emotional_job"):  _j2.markdown(f"**❤️ Эмоциональная**\n\n{_jtbd['emotional_job']}")
+        if _jtbd.get("social_job"):     _j3.markdown(f"**👥 Социальная**\n\n{_jtbd['social_job']}")
         if _jtbd.get("jtbd_gaps"):
-            st.subheader("❌ Что листинг не коммуницирует")
-            for g in _jtbd["jtbd_gaps"]:
-                st.error(f"✗ {g}")
-
+            st.subheader("❌ Gaps")
+            for g in _jtbd["jtbd_gaps"]: st.error(f"✗ {g}")
         if _jtbd.get("jtbd_recs"):
-            st.subheader("✅ Как переписать под JTBD")
-            for rec in _jtbd["jtbd_recs"]:
-                st.success(f"→ {rec}")
+            st.subheader("✅ Рекомендации")
+            for rec in _jtbd["jtbd_recs"]: st.success(f"→ {rec}")
+    with st.expander("🔧 Raw JSON"): st.json(r)
 
-    with st.expander("🔧 Raw JSON"):
-        st.json(r)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: VPC / JTBD
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ VPC / JTBD ════════════════════════════════════════════════════════════════
 elif page == "🎯 VPC / JTBD":
     st.title("🎯 Value Proposition Canvas + JTBD")
-
-    _vpc  = r.get("vpc_analysis", {})
-    _jtbd = r.get("jtbd_analysis", {})
-    _asin_vpc = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
-
-    if not _vpc and not _jtbd:
-        st.info("Данные VPC/JTBD появятся после следующего анализа — перезапусти с новым ключом API")
-        st.stop()
-
-    # ── Fit Score header ──────────────────────────────────────────────────────
-    _fit  = pct(_vpc.get("fit_score", _jtbd.get("alignment_score", 0)))
-    _jfit = pct(_jtbd.get("alignment_score", 0))
-    _fc   = "#22c55e" if _fit>=75 else ("#f59e0b" if _fit>=50 else "#ef4444")
-    _jfc  = "#22c55e" if _jfit>=75 else ("#f59e0b" if _jfit>=50 else "#ef4444")
-
-    _hc1, _hc2, _hc3 = st.columns(3)
-    _hc1.markdown(f"""<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center">
-<div style="font-size:2.5rem;font-weight:800;color:{_fc}">{_fit}%</div>
-<div style="color:{_fc};font-size:0.85rem;font-weight:600">VPC Fit Score</div>
-<div style="color:#64748b;font-size:0.75rem;margin-top:2px">Product–Market fit</div>
-</div>""", unsafe_allow_html=True)
-    _hc2.markdown(f"""<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center">
-<div style="font-size:2.5rem;font-weight:800;color:{_jfc}">{_jfit}%</div>
-<div style="color:{_jfc};font-size:0.85rem;font-weight:600">JTBD Alignment</div>
-<div style="color:#64748b;font-size:0.75rem;margin-top:2px">Листинг говорит о работе</div>
-</div>""", unsafe_allow_html=True)
-    _gap = 100 - max(_fit, _jfit)
-    _gc3 = "#ef4444" if _gap>50 else ("#f59e0b" if _gap>25 else "#22c55e")
-    _hc3.markdown(f"""<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center">
-<div style="font-size:2.5rem;font-weight:800;color:{_gc3}">{_gap}%</div>
-<div style="color:{_gc3};font-size:0.85rem;font-weight:600">Value Gap</div>
-<div style="color:#64748b;font-size:0.75rem;margin-top:2px">Ценность не коммуницирована</div>
-</div>""", unsafe_allow_html=True)
-
-    # ── VPC Verdict ────────────────────────────────────────────────────────────
-    if _vpc.get("vpc_verdict"):
-        st.markdown(f"""<div style="background:#0f172a;border-left:4px solid {_fc};border-radius:8px;
-padding:14px 18px;margin:16px 0;font-size:0.95rem;color:#e2e8f0;line-height:1.6">
-<b style="color:{_fc}">🤖 AI CRO Консультант:</b> {_vpc['vpc_verdict']}</div>""", unsafe_allow_html=True)
-
-    # ── JTBD Job Story ─────────────────────────────────────────────────────────
-    if _jtbd.get("job_story"):
-        st.markdown(f"""<div style="background:#1e293b;border-radius:10px;padding:14px 18px;margin-bottom:16px">
-<div style="font-size:0.75rem;font-weight:700;color:#64748b;letter-spacing:0.08em;margin-bottom:6px">JOB STORY</div>
-<div style="font-size:0.95rem;color:#e2e8f0;font-style:italic;line-height:1.6">{_jtbd['job_story']}</div>
-</div>""", unsafe_allow_html=True)
-
-    st.divider()
-
-    # ── VPC Canvas ─────────────────────────────────────────────────────────────
-    st.subheader("📊 Value Proposition Canvas")
-    _lc, _rc = st.columns(2)
-
+    _vpc=r.get("vpc_analysis",{}); _jtbd=r.get("jtbd_analysis",{})
+    if not _vpc and not _jtbd: st.info("Данные VPC/JTBD появятся после следующего анализа"); st.stop()
+    _fit=pct(_vpc.get("fit_score",_jtbd.get("alignment_score",0))); _jfit=pct(_jtbd.get("alignment_score",0))
+    _fc="#22c55e" if _fit>=75 else ("#f59e0b" if _fit>=50 else "#ef4444")
+    _jfc="#22c55e" if _jfit>=75 else ("#f59e0b" if _jfit>=50 else "#ef4444")
+    _gap=100-max(_fit,_jfit); _gc3="#ef4444" if _gap>50 else ("#f59e0b" if _gap>25 else "#22c55e")
+    _hc1,_hc2,_hc3=st.columns(3)
+    _hc1.markdown(f'<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center"><div style="font-size:2.5rem;font-weight:800;color:{_fc}">{_fit}%</div><div style="color:{_fc};font-size:0.85rem;font-weight:600">VPC Fit Score</div></div>', unsafe_allow_html=True)
+    _hc2.markdown(f'<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center"><div style="font-size:2.5rem;font-weight:800;color:{_jfc}">{_jfit}%</div><div style="color:{_jfc};font-size:0.85rem;font-weight:600">JTBD Alignment</div></div>', unsafe_allow_html=True)
+    _hc3.markdown(f'<div style="background:#1e293b;border-radius:12px;padding:16px;text-align:center"><div style="font-size:2.5rem;font-weight:800;color:{_gc3}">{_gap}%</div><div style="color:{_gc3};font-size:0.85rem;font-weight:600">Value Gap</div></div>', unsafe_allow_html=True)
+    if _vpc.get("vpc_verdict"): st.markdown(f'<div style="background:#0f172a;border-left:4px solid {_fc};border-radius:8px;padding:14px 18px;margin:16px 0;color:#e2e8f0;line-height:1.6"><b style="color:{_fc}">🤖 AI CRO Консультант:</b> {_vpc["vpc_verdict"]}</div>', unsafe_allow_html=True)
+    if _jtbd.get("job_story"): st.markdown(f'<div style="background:#1e293b;border-radius:10px;padding:14px 18px;margin-bottom:16px"><div style="font-size:0.75rem;font-weight:700;color:#64748b;letter-spacing:0.08em;margin-bottom:6px">JOB STORY</div><div style="font-size:0.95rem;color:#e2e8f0;font-style:italic;line-height:1.6">{_jtbd["job_story"]}</div></div>', unsafe_allow_html=True)
+    st.divider(); st.subheader("📊 Value Proposition Canvas")
+    _lc,_rc=st.columns(2)
     with _lc:
         st.markdown("**👤 Профиль покупателя**")
-
-        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#3b82f6;letter-spacing:0.06em;margin:8px 0 4px">ЗАДАЧИ (JOBS)</div>', unsafe_allow_html=True)
-        _jobs = _vpc.get("customer_jobs", [
-            _jtbd.get("functional_job",""),
-            _jtbd.get("emotional_job",""),
-            _jtbd.get("social_job","")
-        ])
-        for j in [x for x in _jobs if x]:
-            st.markdown(f'<div style="background:#1e3a5f22;border-left:3px solid #3b82f6;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem;color:var(--text)">{j}</div>', unsafe_allow_html=True)
-
-        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#ef4444;letter-spacing:0.06em;margin:10px 0 4px">БОЛИ (PAINS)</div>', unsafe_allow_html=True)
-        for p in _vpc.get("customer_pains", []):
-            st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{p}</div>', unsafe_allow_html=True)
-
-        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#22c55e;letter-spacing:0.06em;margin:10px 0 4px">ВЫГОДЫ (GAINS)</div>', unsafe_allow_html=True)
-        for g in _vpc.get("customer_gains", []):
-            st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{g}</div>', unsafe_allow_html=True)
-
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#3b82f6;margin:8px 0 4px">ЗАДАЧИ</div>', unsafe_allow_html=True)
+        for j in [x for x in _vpc.get("customer_jobs",[_jtbd.get("functional_job",""),_jtbd.get("emotional_job",""),_jtbd.get("social_job","")]) if x]:
+            st.markdown(f'<div style="background:#1e3a5f22;border-left:3px solid #3b82f6;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{j}</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#ef4444;margin:10px 0 4px">БОЛИ</div>', unsafe_allow_html=True)
+        for p in _vpc.get("customer_pains",[]): st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{p}</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#22c55e;margin:10px 0 4px">ВЫГОДЫ</div>', unsafe_allow_html=True)
+        for g in _vpc.get("customer_gains",[]): st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{g}</div>', unsafe_allow_html=True)
     with _rc:
-        st.markdown("**📦 Карта ценности (листинг)**")
-
-        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#94a3b8;letter-spacing:0.06em;margin:8px 0 4px">ПРОДУКТ / ФИЧИ</div>', unsafe_allow_html=True)
-        for ps in _vpc.get("products_services", []):
-            st.markdown(f'<div style="background:#33333322;border-left:3px solid #94a3b8;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{ps}</div>', unsafe_allow_html=True)
-
-        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#ef4444;letter-spacing:0.06em;margin:10px 0 4px">ОБЕЗБОЛИВАЮЩИЕ (PAIN RELIEVERS)</div>', unsafe_allow_html=True)
-        for pr in _vpc.get("pain_relievers_present", []):
-            st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">✅ {pr}</div>', unsafe_allow_html=True)
-        for pr in _vpc.get("pain_relievers_missing", []):
-            st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">❌ {pr}</div>', unsafe_allow_html=True)
-
-        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#22c55e;letter-spacing:0.06em;margin:10px 0 4px">ГЕНЕРАТОРЫ ВЫГОД (GAIN CREATORS)</div>', unsafe_allow_html=True)
-        for gc in _vpc.get("gain_creators_present", []):
-            st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">✅ {gc}</div>', unsafe_allow_html=True)
-        for gc in _vpc.get("gain_creators_missing", []):
-            st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">❌ {gc}</div>', unsafe_allow_html=True)
-
-    st.divider()
-
-    # ── JTBD 3 Jobs ────────────────────────────────────────────────────────────
-    st.subheader("🎯 JTBD — 3 типа работ")
-    _j1, _j2, _j3 = st.columns(3)
-    with _j1:
-        st.markdown("**⚙️ Функциональная**")
-        if _jtbd.get("functional_job"):
-            st.info(_jtbd["functional_job"])
-    with _j2:
-        st.markdown("**❤️ Эмоциональная**")
-        if _jtbd.get("emotional_job"):
-            st.info(_jtbd["emotional_job"])
-    with _j3:
-        st.markdown("**👥 Социальная**")
-        if _jtbd.get("social_job"):
-            st.info(_jtbd["social_job"])
-
-    # ── Gaps & Recs ────────────────────────────────────────────────────────────
-    st.divider()
-    _gc1, _gc2 = st.columns(2)
+        st.markdown("**📦 Карта ценности**")
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#94a3b8;margin:8px 0 4px">ФИЧИ</div>', unsafe_allow_html=True)
+        for ps in _vpc.get("products_services",[]): st.markdown(f'<div style="background:#33333322;border-left:3px solid #94a3b8;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">{ps}</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#ef4444;margin:10px 0 4px">PAIN RELIEVERS</div>', unsafe_allow_html=True)
+        for pr in _vpc.get("pain_relievers_present",[]): st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">✅ {pr}</div>', unsafe_allow_html=True)
+        for pr in _vpc.get("pain_relievers_missing",[]): st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">❌ {pr}</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#22c55e;margin:10px 0 4px">GAIN CREATORS</div>', unsafe_allow_html=True)
+        for gc in _vpc.get("gain_creators_present",[]): st.markdown(f'<div style="background:#22c55e22;border-left:3px solid #22c55e;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">✅ {gc}</div>', unsafe_allow_html=True)
+        for gc in _vpc.get("gain_creators_missing",[]): st.markdown(f'<div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-bottom:4px;font-size:0.85rem">❌ {gc}</div>', unsafe_allow_html=True)
+    st.divider(); _gc1,_gc2=st.columns(2)
     with _gc1:
         st.subheader("❌ Что не коммуницирует")
-        for g in _jtbd.get("jtbd_gaps", []):
-            st.error(f"✗ {g}")
-        for g in _vpc.get("pain_relievers_missing", []):
-            if g not in str(_jtbd.get("jtbd_gaps",[])):
-                st.error(f"✗ {g}")
+        for g in _jtbd.get("jtbd_gaps",[]): st.error(f"✗ {g}")
+        for g in _vpc.get("pain_relievers_missing",[]):
+            if g not in str(_jtbd.get("jtbd_gaps",[])): st.error(f"✗ {g}")
     with _gc2:
         st.subheader("✅ Как переписать")
-        for rec in _jtbd.get("jtbd_recs", []):
-            st.success(f"→ {rec}")
+        for rec in _jtbd.get("jtbd_recs",[]): st.success(f"→ {rec}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: Конкурент N
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ Конкурент N ════════════════════════════════════════════════════════════════
 elif _is_competitor_page:
-    idx_m = re.search(r"Конкурент (\d+)", page)
-    cidx = int(idx_m.group(1)) - 1 if idx_m else 0
-    c = cd[cidx] if cidx < len(cd) else {}
-
-    if not c:
-        st.warning("Данные конкурента не найдены"); st.stop()
-
-    cpi   = c.get("product_information", {})
-    casin = get_asin_from_data(c)
-    _t2 = c.get("title",""); _i2 = c.get("images",[]); _b2 = c.get("feature_bullets",[])
-    _d2 = c.get("description",""); _rat2 = float(c.get("average_rating",0) or 0)
-    _rev2 = int(str(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").replace(".","").strip() or 0)
-    _vid2 = int(c.get("number_of_videos",0) or 0)>0; _ap2 = bool(c.get("aplus"))
-    _pr2  = bool(c.get("is_prime_exclusive") or c.get("is_prime") or
-                 "amazon" in str(c.get("ships_from","")).lower())
-    _bsr2 = 99999
-    _bm = re.search(r"#([\d,]+)", str(cpi.get("Best Sellers Rank","")))
+    idx_m=re.search(r"Конкурент (\d+)",page)
+    cidx=int(idx_m.group(1))-1 if idx_m else 0
+    c=cd[cidx] if cidx<len(cd) else {}
+    if not c: st.warning("Данные конкурента не найдены"); st.stop()
+    cpi=c.get("product_information",{}); casin=get_asin_from_data(c); _t2=c.get("title","")
+    _i2=c.get("images",[]); _b2=c.get("feature_bullets",[]); _d2=c.get("description","")
+    _rat2=float(c.get("average_rating",0) or 0)
+    _rev2=int(str(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").strip() or 0)
+    _vid2=int(c.get("number_of_videos",0) or 0)>0; _ap2=bool(c.get("aplus"))
+    _pr2=bool(c.get("is_prime_exclusive") or c.get("is_prime") or "amazon" in str(c.get("ships_from","")).lower())
+    _bsr2=99999; _bm=re.search(r"#([\d,]+)",str(cpi.get("Best Sellers Rank","")))
     if _bm:
-        try: _bsr2 = int(_bm.group(1).replace(",",""))
+        try: _bsr2=int(_bm.group(1).replace(",",""))
         except: pass
-    _col2 = len([_cv for _cv in c.get("customization_options",{}).get("color",[]) if isinstance(_cv, dict) and _cv.get("asin","") not in ("","undefined")])
-    _sz2  = len(c.get("customization_options",{}).get("size",[]))
-    _cis_one_size = "one size" in str(cpi.get("Size","")).lower()
-    if _cis_one_size: _sz2 = 3
-    _ts = min(10, max(0, (1.5 if len(_t2)<=125 else 0)+(3.5 if any(k in _t2.lower() for k in ["merino","wool","tank","shirt","base layer"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",_t2) else 0)+1))
-    _bs = min(10, max(0, (1.5 if len(_b2)<=5 else 0)+(2.5 if any(":" in b for b in _b2) else 1)+min(4,len(_b2))+1+1))
-    _ds = 0 if not _d2 else min(10, 4+(3 if len(_d2)>200 else 1))
-    _ps = min(10, max(0, (4 if len(_i2)>=6 else len(_i2)*0.6)+(2 if _vid2 else 0)+(4 if len(_i2)>=6 else 0)))
-    _as = 0 if not _ap2 else 7
-    _rs = 10 if (_rat2>=4.4 and _rev2>=50) else (7 if _rat2>=4.0 else 4)
-    _bsrs = 10 if _bsr2<=1000 else (8 if _bsr2<=5000 else 5)
-    _prs = 10 if _pr2 else 5
-    _vs = 10 if (_col2>=5 and _sz2>=3) else (8 if _col2>=5 else (7 if _sz2>=3 or _cis_one_size else 4))
-    _h = int((_ts*0.10+_bs*0.10+_ds*0.10+_ps*0.10+_as*0.10+_rs*0.15+_bsrs*0.15+7*0.10+_vs*0.05+_prs*0.05)*10)
-
-    ch = _h; hc = "#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
-    tlen = len(_t2); cprice = c.get("price",""); cbrand = c.get("brand","")
-    crating = c.get("average_rating",""); crev = cpi.get("Customer Reviews",{}).get("ratings_count","")
-    cbsr_s = str(cpi.get("Best Sellers Rank",""))[:50]
-    _cprev   = c.get("previous_price","") or c.get("list_price","")
-    _ccoupon = c.get("coupon_text","") or ("🎟️ Купон" if c.get("is_coupon_exists") else "")
-    _cpromo  = c.get("promo_text","")
-    _cbought = c.get("number_of_people_bought","")
-
-    # Competitor price line
-    _cprice_parts = []
-    if cprice:
-        _ps = f"💰 <b>{cprice}</b>"
-        if _cprev and _cprev != cprice:
-            _ps += f" <span style='text-decoration:line-through;opacity:0.5'>{_cprev}</span>"
-        _cprice_parts.append(_ps)
-    if _ccoupon:
-        _cprice_parts.append(f"<span style='background:#16a34a;color:white;border-radius:4px;padding:1px 6px;font-size:0.75rem'>🎟️ {_ccoupon}</span>")
-    if _cpromo:
-        _cprice_parts.append(f"<span style='background:#1d4ed8;color:white;border-radius:4px;padding:1px 6px;font-size:0.75rem'>📦 {_cpromo[:35]}</span>")
-    if _pr2:
-        _cprice_parts.append(f"<span style='background:#f59e0b;color:#1c1917;border-radius:4px;padding:1px 6px;font-size:0.75rem'>👑 Prime</span>")
-    if _cbought:
-        _cprice_parts.append(f"<span style='opacity:0.7;font-size:0.75rem'>🛒 {_cbought}</span>")
-    _cprice_line = "  ".join(_cprice_parts)
+    _col2=len([_cv for _cv in c.get("customization_options",{}).get("color",[]) if isinstance(_cv,dict) and _cv.get("asin","") not in ("","undefined")])
+    _sz2=len(c.get("customization_options",{}).get("size",[]))
+    if "one size" in str(cpi.get("Size","")).lower(): _sz2=3
+    tlen=len(_t2); cprice=c.get("price",""); cbrand=c.get("brand","")
+    crating=c.get("average_rating",""); crev=cpi.get("Customer Reviews",{}).get("ratings_count","")
+    cbsr_s=str(cpi.get("Best Sellers Rank",""))[:50]
+    _ts=min(10,max(0,(1.5 if tlen<=125 else 0)+(3.5 if any(k in _t2.lower() for k in ["merino","wool","tank","shirt","base layer"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",_t2) else 0)+1))
+    _bs=min(10,max(0,(1.5 if len(_b2)<=5 else 0)+(2.5 if any(":"in b for b in _b2) else 1)+min(4,len(_b2))+1+1))
+    _ds=0 if not _d2 else min(10,4+(3 if len(_d2)>200 else 1))
+    _ps=min(10,max(0,(4 if len(_i2)>=6 else len(_i2)*0.6)+(2 if _vid2 else 0)+(4 if len(_i2)>=6 else 0)))
+    _as=0 if not _ap2 else 7; _rs=10 if (_rat2>=4.4 and _rev2>=50) else (7 if _rat2>=4.0 else 4)
+    _bsrs=10 if _bsr2<=1000 else (8 if _bsr2<=5000 else 5); _prs=10 if _pr2 else 5
+    _vs=10 if (_col2>=5 and _sz2>=3) else (8 if _col2>=5 else (7 if _sz2>=3 else 4))
+    _h=int((_ts*0.10+_bs*0.10+_ds*0.10+_ps*0.10+_as*0.10+_rs*0.15+_bsrs*0.15+7*0.10+_vs*0.05+_prs*0.05)*10)
+    ch=_h; hc="#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
 
     st.title(f"🔴 Конкурент {cidx+1}")
+    st.markdown(f'<div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:14px;padding:18px;color:white;margin-bottom:14px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px"><div><a href="https://www.amazon.com/dp/{casin}" target="_blank" style="font-size:0.78rem;opacity:0.6;color:#93c5fd;text-decoration:none">{cbrand} · {casin} ↗</a><div style="font-size:0.95rem;font-weight:600;max-width:500px;margin-top:3px">{_t2[:80]}{"..." if tlen>80 else ""}</div><div style="display:flex;gap:12px;margin-top:5px;font-size:0.78rem;opacity:0.8"><span>⭐ {crating} ({crev})</span><span>💰 {cprice}</span><span>{tlen} симв.</span></div></div><div style="text-align:center"><div style="font-size:2.8rem;font-weight:800;color:{hc}">{ch}%</div></div></div></div>', unsafe_allow_html=True)
 
-    st.markdown(f"""
-<div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:14px;padding:18px;color:white;margin-bottom:14px">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-    <div>
-      <div style="font-size:0.78rem;opacity:0.6">{cbrand} - <a href="https://www.amazon.com/dp/{casin}" target="_blank" style="color:#93c5fd;text-decoration:none">{casin} ↗</a></div>
-      <div style="font-size:0.95rem;font-weight:600;max-width:500px;margin-top:3px">{_t2[:80]}{"..." if tlen>80 else ""}</div>
-      <div style="display:flex;gap:8px;margin-top:7px;font-size:0.8rem;flex-wrap:wrap;align-items:center">
-        {_cprice_line}
-      </div>
-      <div style="display:flex;gap:12px;margin-top:5px;font-size:0.78rem;opacity:0.8;flex-wrap:wrap">
-        <span style="color:{'#22c55e' if float(crating or 0)>=4.4 else ('#f59e0b' if float(crating or 0)>=4.3 else '#ef4444')};font-weight:600">⭐ {crating} ({crev} отз.)</span>
-        <span style="color:{'#fca5a5' if tlen>125 else '#86efac'}">{tlen} симв.</span>
-      </div>
-    </div>
-    <div style="text-align:center">
-      <div style="font-size:2.8rem;font-weight:800;color:{hc}">{ch}%</div>
-      <div style="font-size:0.75rem;color:{hc}">Health Score</div>
-    </div>
-  </div>
-</div>""", unsafe_allow_html=True)
+    _cai_key=f"comp_ai_{cidx}"; _vision_key=f"comp_vision_{cidx}"; _cai_result=st.session_state.get(_cai_key)
 
-    _cai_key    = f"comp_ai_{cidx}"
-    _vision_key = f"comp_vision_{cidx}"
-    _cai_result = st.session_state.get(_cai_key)
-
-    # Frequently returned warning + analysis button
-    if c.get("is_frequently_returned"):
-        st.markdown("""
-<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:8px;padding:12px 16px;margin-bottom:8px">
-<div style="font-size:0.95rem;font-weight:800;color:#fca5a5">🔴 Amazon: "Часто возвращают" — конкурент имеет проблемы с возвратами!</div>
-<div style="color:#fca5a5;font-size:0.8rem;margin-top:6px;line-height:1.6">
-Это их слабое место — изучи причины и сделай наш листинг лучше по этим пунктам.
-</div>
-</div>""", unsafe_allow_html=True)
-
-    # Return analysis button for competitor (always available)
-    _comp_ret_col1, _comp_ret_col2 = st.columns([2,4])
+    _comp_ret_col1,_comp_ret_col2=st.columns([2,4])
     with _comp_ret_col1:
-        if st.button("🔍 Анализ возвратов (1★+2★)", key=f"btn_comp_ret_{cidx}", use_container_width=True):
+        if st.button("🔍 Анализ возвратов", key=f"btn_comp_ret_{cidx}", use_container_width=True):
             with st.spinner("📥 Загружаю 1★ отзывы..."):
-                _cret_reviews = fetch_1star_reviews(casin, domain="com", max_pages=1)
+                _cret_reviews=fetch_1star_reviews(casin,domain="com",max_pages=1)
             if _cret_reviews:
                 with st.spinner("🧠 AI анализирует..."):
-                    _cret_analysis = analyze_return_reasons(
-                        _cret_reviews, _t2, casin,
-                        lang=st.session_state.get("analysis_lang","ru"))
-                st.session_state[f"_comp_ret_{cidx}"] = _cret_analysis
-                st.session_state[f"_comp_ret_cnt_{cidx}"] = len(_cret_reviews)
-            else:
-                st.warning("Отзывы не загружены — проверь APIFY_API_TOKEN")
-    with _comp_ret_col2:
-        st.caption("10 однозвёздочных отзывов → AI находит слабые места конкурента")
-
+                    st.session_state[f"_comp_ret_{cidx}"]=analyze_return_reasons(_cret_reviews,_t2,casin,lang=st.session_state.get("analysis_lang","ru"))
+                    st.session_state[f"_comp_ret_cnt_{cidx}"]=len(_cret_reviews)
+            else: st.warning("Отзывы не загружены")
     if st.session_state.get(f"_comp_ret_{cidx}"):
-        with st.expander(f"📊 Анализ возвратов конкурента ({st.session_state.get(f'_comp_ret_cnt_{cidx}',0)} отзывов)", expanded=True):
+        with st.expander(f"📊 Анализ возвратов ({st.session_state.get(f'_comp_ret_cnt_{cidx}',0)} отзывов)", expanded=True):
             st.markdown(st.session_state[f"_comp_ret_{cidx}"])
-    _vision_key = f"comp_vision_{cidx}"
-    _cai_result = st.session_state.get(_cai_key)
 
     if not _cai_result:
-        _cbtn1, _cbtn2 = st.columns([3,1])
-        with _cbtn1:
-            st.info("💡 Нажми Анализ — или перезапусти главный анализ с URL конкурента")
+        _cbtn1,_cbtn2=st.columns([3,1])
+        with _cbtn1: st.info("💡 Нажми Анализ")
         with _cbtn2:
-            if st.button("🧠 Анализ", key=f"ai_btn_{cidx}", type="primary"):
-                _clang = st.session_state.get("analysis_lang","ru")
-                _cimgs_urls = c.get("images",[])
-                _prog = st.progress(0, text="⬇️ Загружаю фото...")
-                _cimgs_dl = download_images(_cimgs_urls[:5], lambda m: None) if _cimgs_urls else []
-                _prog.progress(33, text="👁️ Vision анализ фото...")
-                _comp_vision = analyze_vision(_cimgs_dl, c, casin, lambda m: None, lang=_clang) if _cimgs_dl else ""
-                _prog.progress(66, text="🧠 AI анализ текста...")
-                _cai_result = analyze_text(c, [], _comp_vision, casin, lambda m: None, lang=_clang, is_competitor=True)
-                st.session_state[_cai_key]    = _cai_result
-                st.session_state[_vision_key] = (_cimgs_dl, _comp_vision) if _cimgs_dl else None
-                _prog.progress(100, text="✅ Готово!")
+            if st.button("🧠 Анализ",key=f"ai_btn_{cidx}",type="primary"):
+                _clang=st.session_state.get("analysis_lang","ru")
+                _prog=st.progress(0,text="⬇️ Загружаю фото...")
+                _cimgs_dl=download_images(c.get("images",[])[:5],lambda m:None) if c.get("images") else []
+                _prog.progress(33,text="👁️ Vision...")
+                _comp_vision=analyze_vision(_cimgs_dl,c,casin,lambda m:None,lang=_clang) if _cimgs_dl else ""
+                _prog.progress(66,text="🧠 AI анализ...")
+                _cai_result=analyze_text(c,[],_comp_vision,casin,lambda m:None,lang=_clang,is_competitor=True)
+                st.session_state[_cai_key]=_cai_result
+                if _cimgs_dl: st.session_state[_vision_key]=(_cimgs_dl,_comp_vision)
+                _prog.progress(100,text="✅ Готово!")
                 st.rerun()
 
     if _cai_result:
-        _sitems = [
-            ("Title",   pct(_cai_result.get("title_score",0))),
-            ("Bullets", pct(_cai_result.get("bullets_score",0))),
-            ("Описание",pct(_cai_result.get("description_score",0))),
-            ("Фото",    pct(_cai_result.get("images_score",0))),
-            ("A+",      pct(_cai_result.get("aplus_score",0))),
-            ("Отзывы",  pct(_cai_result.get("reviews_score",0))),
-            ("BSR",     pct(_cai_result.get("bsr_score",0))),
-            ("Варианты",pct(_cai_result.get("customization_score",0))),
-            ("Prime",   pct(_cai_result.get("prime_score",0))),
-        ]
-        _overall = pct(_cai_result.get("overall_score",0))
-        _ohc = "#22c55e" if _overall>=75 else ("#f59e0b" if _overall>=50 else "#ef4444")
+        _sitems=[("Title",pct(_cai_result.get("title_score",0))),("Bullets",pct(_cai_result.get("bullets_score",0))),("Описание",pct(_cai_result.get("description_score",0))),("Фото",pct(_cai_result.get("images_score",0))),("A+",pct(_cai_result.get("aplus_score",0))),("Отзывы",pct(_cai_result.get("reviews_score",0))),("BSR",pct(_cai_result.get("bsr_score",0))),("Варианты",pct(_cai_result.get("customization_score",0))),("Prime",pct(_cai_result.get("prime_score",0)))]
+        _overall=pct(_cai_result.get("overall_score",0)); _ohc="#22c55e" if _overall>=75 else ("#f59e0b" if _overall>=50 else "#ef4444")
         st.markdown(f"**🧠 AI Overall: <span style='color:{_ohc};font-size:1.3rem'>{_overall}%</span>**", unsafe_allow_html=True)
     else:
-        _sitems = [("Title",_ts*10),("Bullets",_bs*10),("Описание",_ds*10),("Фото",_ps*10),
-                   ("A+",_as*10),("Отзывы",_rs*10),("BSR",_bsrs*10),("Варианты",_vs*10),("Prime",_prs*10)]
-        st.caption("📊 Авто-оценка (формула) — нажми AI Анализ для точных данных")
+        _sitems=[("Title",_ts*10),("Bullets",_bs*10),("Описание",_ds*10),("Фото",_ps*10),("A+",_as*10),("Отзывы",_rs*10),("BSR",_bsrs*10),("Варианты",_vs*10),("Prime",_prs*10)]
+        st.caption("📊 Авто-оценка — нажми AI Анализ")
 
-    _sc2 = st.columns(len(_sitems))
+    _sc2=st.columns(len(_sitems))
     for _col3,(_lbl3,_p3) in zip(_sc2,_sitems):
-        # Special case: description 0% but A+ present → show as grey "A+"
-        if _lbl3 == "Описание" and _p3 == 0 and _ap2:
-            _col3.markdown(
-                '<div style="border-left:3px solid #64748b;padding:5px 4px;text-align:center;'
-                'background:#f8fafc;border-radius:4px">'
-                '<div style="font-size:0.85rem;font-weight:700;color:#64748b">A+</div>'
-                '<div style="font-size:0.62rem;color:#64748b">Описание</div></div>',
-                unsafe_allow_html=True)
+        if _lbl3=="Описание" and _p3==0 and _ap2:
+            _col3.markdown('<div style="border-left:3px solid #64748b;padding:5px 4px;text-align:center;background:#f8fafc;border-radius:4px"><div style="font-size:0.85rem;font-weight:700;color:#64748b">A+</div><div style="font-size:0.62rem;color:#64748b">Описание</div></div>', unsafe_allow_html=True)
         else:
-            _c3 = "#22c55e" if _p3>=75 else ("#f59e0b" if _p3>=50 else "#ef4444")
+            _c3="#22c55e" if _p3>=75 else ("#f59e0b" if _p3>=50 else "#ef4444")
             _col3.markdown(f'<div style="border-left:3px solid {_c3};padding:5px 4px;text-align:center;background:#f8fafc;border-radius:4px"><div style="font-size:1.05rem;font-weight:700;color:{_c3}">{_p3}%</div><div style="font-size:0.62rem;color:#64748b">{_lbl3}</div></div>', unsafe_allow_html=True)
 
     st.divider()
-
-    tab_cont, tab_photo, tab_aplus, tab_data = st.tabs(["📝 Контент", "📸 Фото", "🎨 A+", "📊 Данные"])
+    tab_cont,tab_photo,tab_aplus,tab_data=st.tabs(["📝 Контент","📸 Фото","🎨 A+","📊 Данные"])
     with tab_cont:
-        # Stop words check for competitor
-        _csw = check_listing_stop_words(c)
-        if _csw:
-            _csw_banned = sum(len(v.get("do_not_use",[])) for v in _csw.values())
-            _csw_warn   = sum(len(v.get("try_to_avoid",[])) for v in _csw.values())
-            _csw_color  = "#ef4444" if _csw_banned > 0 else ("#f59e0b" if _csw_warn > 0 else "#22c55e")
-            _csw_label  = f"🚨 {_csw_banned} запрещённых!" if _csw_banned else f"⚠️ {_csw_warn} нежелательных"
-            with st.expander(f"🔴 Stop Words — {_csw_label}", expanded=_csw_banned > 0):
-                for _cf, _cfw in _csw.items():
-                    st.markdown(f"**{_cf}:**")
-                    if _cfw.get("do_not_use"):
-                        for _cw in _cfw["do_not_use"]:
-                            st.markdown(f'<span style="background:#ef444433;border:1px solid #ef4444;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.82rem;color:#ef4444">🚫 {_cw}</span>', unsafe_allow_html=True)
-                    if _cfw.get("try_to_avoid"):
-                        for _cw in _cfw["try_to_avoid"]:
-                            st.markdown(f'<span style="background:#f59e0b33;border:1px solid #f59e0b;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.82rem;color:#f59e0b">⚠️ {_cw}</span>', unsafe_allow_html=True)
-                    if _cfw.get("a_plus_restricted"):
-                        for _cw in _cfw["a_plus_restricted"]:
-                            st.markdown(f'<span style="background:#3b82f633;border:1px solid #3b82f6;border-radius:4px;padding:2px 8px;margin:2px;display:inline-block;font-size:0.82rem;color:#3b82f6">📋 {_cw}</span>', unsafe_allow_html=True)
-            st.divider()
-        _tcc = "#ef4444" if tlen>125 else "#22c55e"
-        _cai_title_score = pct(_cai_result.get("title_score",0)) if _cai_result else int(_ts*10)
-        st.markdown(f"**Title** — <span style='color:{_tcc}'>{tlen} симв.</span>", unsafe_allow_html=True)
-        st.progress(_cai_title_score/100)
-        st.markdown(f"> {_t2}")
-
-        # Авто-проверка title
-        _ctwords = [w.lower() for w in _t2.split() if len(w)>3]
-        _chas_repeat = any(_ctwords.count(w)>=3 for w in _ctwords)
-        _chas_spec = any(c in _t2 for c in "!$?{}^¬¦")
-        _chas_kw = any(w in _t2.lower() for w in ["merino","wool","tank","men","women","shirt","beanie","hat","layer","jacket"])
-        _cauto_title = min(100, (15 if tlen<=125 else 0) + (35 if _chas_kw else 15) + 30 + (10 if not _chas_spec else 0) + 10)
-        with st.expander("📐 Рубрика оценки Title"):
-            _ct1, _ct2 = st.columns(2)
-            _ct1.metric("🤖 AI оценка", f"{_cai_title_score}%")
-            _ct2.metric("🔧 Авто-проверка", f"{_cauto_title}%",
-                delta=f"{_cai_title_score - _cauto_title:+d}%" if _cai_title_score != _cauto_title else None,
-                delta_color="normal")
-
-        if _cai_result:
-            _ctgaps = _cai_result.get("title_gaps", [])
-            _ctrec  = _cai_result.get("title_rec", "")
-            if _ctgaps:
-                with st.expander(f"⚠️ Пробелы ({len(_ctgaps)})"):
-                    for g in _ctgaps: st.markdown(f"- {g}")
-            if _ctrec: st.info(f"💡 {_ctrec}")
-        st.divider()
-        st.markdown(f"**Bullets** ({len(_b2)})")
+        st.markdown(f"**Title** ({tlen} симв.)"); st.progress(min(pct(_cai_result.get("title_score",0)) if _cai_result else int(_ts*10),100)/100); st.markdown(f"> {_t2}")
+        if _cai_result and _cai_result.get("title_gaps"):
+            with st.expander(f"⚠️ ({len(_cai_result['title_gaps'])})"):
+                for g in _cai_result["title_gaps"]: st.markdown(f"- {g}")
+        st.divider(); st.markdown(f"**Bullets** ({len(_b2)})")
         for _bul in _b2:
-            _blen = len(_bul.encode())
-            st.markdown(f"{'🔴' if _blen>255 else '✅'} {_bul}")
-            st.caption(f"{_blen} байт")
-        if not _b2: st.caption("Нет буллетов")
-        st.divider()
-        st.markdown("**Описание**")
-        if _d2:
-            st.markdown(str(_d2)[:600])
-        elif _ap2:
-            st.markdown(
-                '<div style="background:#1e3a1e;border-left:4px solid #22c55e;border-radius:8px;'
-                'padding:10px 14px">'
-                '<span style="color:#22c55e;font-weight:700">✅ Скрыто A+ контентом — это нормально</span><br>'
-                '<span style="color:#94a3b8;font-size:0.82rem">Amazon показывает A+ вместо описания покупателю.</span>'
-                '</div>', unsafe_allow_html=True)
-        else:
-            st.warning("Описание отсутствует")
-        st.divider()
-        st.markdown(f"**A+:** {'✅' if _ap2 else '❌'}  |  **Видео:** {'✅ '+str(int(c.get('number_of_videos',0) or 0))+' шт.' if _vid2 else '❌'}")
+            _blen=len(_bul.encode()); st.markdown(f"{'🔴' if _blen>255 else '✅'} {_bul}"); st.caption(f"{_blen} байт")
+        st.divider(); st.markdown("**Описание**")
+        if _d2: st.markdown(str(_d2)[:600])
+        elif _ap2: st.markdown('<div style="background:#1e3a1e;border-left:4px solid #22c55e;border-radius:8px;padding:10px 14px"><span style="color:#22c55e;font-weight:700">✅ Скрыто A+</span></div>', unsafe_allow_html=True)
+        else: st.warning("Описание отсутствует")
+        st.divider(); st.markdown(f"**A+:** {'✅' if _ap2 else '❌'}  |  **Видео:** {'✅' if _vid2 else '❌'}")
     with tab_photo:
-        _cimgs = c.get("images",[])
+        _cimgs=c.get("images",[])
         if _cimgs:
             if _vision_key in st.session_state and st.session_state[_vision_key]:
-                _cv_imgs, _cv_text = st.session_state[_vision_key]
-                # Use finditer for correct block mapping
-                _cv_blocks = {}
-                for _m in re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _cv_text, re.DOTALL):
-                    _cv_blocks[int(_m.group(1))] = _m.group(2).strip()
-
-                _cstrip2 = lambda s: s.strip().strip("*").strip() if s else ""
-
-                for _pi3, _pimg in enumerate(_cv_imgs):
-                    _ptext = _cv_blocks.get(_pi3+1, "")
-                    _psm   = re.search(r"(\d+)/10", _ptext)
-                    _pscore = int(_psm.group(1)) if _psm else 0
-                    _pbc   = "#22c55e" if _pscore>=8 else ("#f59e0b" if _pscore>=6 else "#ef4444")
-                    _pslbl = "Отлично" if _pscore>=8 else ("Хорошо" if _pscore>=6 else "Слабо")
-                    _ptyp  = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", _ptext)
-                    _pstrg = re.search(r"(?:[Сс]ильная\s+сторона|Strength)\s*[:\-]\s*(.{3,})", _ptext)
-                    _pweak = re.search(r"(?:[Сс]лабость|Weakness)\s*[:\-]\s*(.{3,})", _ptext)
-                    _pact  = re.search(r"(?:[Дд]ействие|Action)\s*[:\-]\s*(.{3,})", _ptext)
-                    _pconv = re.search(r"(?:[Кк]онверсия|Conversion)\s*[:\-]\s*(.{3,})", _ptext)
-                    _pemot = re.search(r"(?:[Ээ]моция|Emotion)\s*[:\-]\s*(.{3,})", _ptext)
-
+                _cv_imgs,_cv_text=st.session_state[_vision_key]
+                _cv_blocks={}
+                for _m in re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)",_cv_text,re.DOTALL):
+                    _cv_blocks[int(_m.group(1))]=_m.group(2).strip()
+                for _pi3,_pimg in enumerate(_cv_imgs):
+                    _ptext=_cv_blocks.get(_pi3+1,""); _psm=re.search(r"(\d+)/10",_ptext)
+                    _pscore=int(_psm.group(1)) if _psm else 0; _pbc="#22c55e" if _pscore>=8 else ("#f59e0b" if _pscore>=6 else "#ef4444")
+                    _s2=lambda pat,t=_ptext: re.search(pat,t); _st=lambda m: m.group(1).strip().strip("*").strip() if m else ""
                     with st.container(border=True):
-                        _pc1,_pc2 = st.columns([1,2])
-                        with _pc1:
-                            st.image(__import__("base64").b64decode(_pimg["b64"]), use_container_width=True)
+                        _pc1,_pc2=st.columns([1,2])
+                        with _pc1: st.image(__import__("base64").b64decode(_pimg["b64"]),use_container_width=True)
                         with _pc2:
-                            _phead = f"Фото #{_pi3+1}" + (f" — {_cstrip2(_ptyp.group(1))}" if _ptyp else "")
-                            st.markdown(f"**{_phead}**")
-                            if _pscore > 0:
-                                st.markdown(
-                                    f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">'
-                                    f'<div style="font-size:2rem;font-weight:800;color:{_pbc}">{_pscore}/10</div>'
-                                    f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">'
-                                    f'<div style="background:{_pbc};width:{_pscore*10}%;height:10px;border-radius:6px"></div>'
-                                    f'</div><div style="color:{_pbc};font-size:0.8rem;margin-top:2px">{_pslbl}</div></div></div>',
-                                    unsafe_allow_html=True)
-                            else:
-                                st.warning("⚠️ Оценка не распознана")
-                            if _pstrg: st.success(f"✅ {_cstrip2(_pstrg.group(1))}")
-                            if _pweak: st.warning(f"⚠️ {_cstrip2(_pweak.group(1))}")
-                            if _pact:
-                                with st.expander("🛠 Что делать"):
-                                    st.markdown(f"→ {_cstrip2(_pact.group(1))}")
-                            if _pconv:
-                                with st.expander("💡 Конверсия"):
-                                    st.info(f"🎯 {_cstrip2(_pconv.group(1))}")
-                            if _pemot:
-                                _etxt2 = _cstrip2(_pemot.group(1))
-                                _ec2 = {"доверие":"#22c55e","trust":"#22c55e","желание":"#f59e0b",
-                                        "сомнение":"#ef4444","doubt":"#ef4444","любопытство":"#3b82f6",
-                                        "curiosity":"#3b82f6","безразличие":"#94a3b8"}.get(
-                                        _etxt2.split()[0].lower().rstrip("/:"), "#8b5cf6")
-                                st.markdown(
-                                    f'<div style="background:{_ec2}22;border-left:3px solid {_ec2};border-radius:6px;padding:8px 12px;margin-top:4px">'
-                                    f'<span style="font-size:0.8rem;font-weight:700;color:{_ec2}">😶 ЭМОЦИЯ: </span>'
-                                    f'<span style="font-size:0.82rem;color:#1e293b">{_etxt2}</span></div>',
-                                    unsafe_allow_html=True)
+                            st.markdown(f"**Фото #{_pi3+1}**")
+                            if _pscore>0: st.markdown(f'<div style="font-size:2rem;font-weight:800;color:{_pbc}">{_pscore}/10</div>', unsafe_allow_html=True)
+                            _pstrg=_st(_s2(r"(?:[Сс]ильная\s+сторона|Strength)\s*[:\-]\s*(.{3,})"))
+                            _pweak=_st(_s2(r"(?:[Сс]лабость|Weakness)\s*[:\-]\s*(.{3,})"))
+                            if _pstrg: st.success(f"✅ {_pstrg}")
+                            if _pweak: st.warning(f"⚠️ {_pweak}")
             else:
-                if not st.session_state.get("do_comp_vision", True):
-                    st.info("👁️ Vision конкурентов был отключён. Нажми 🧠 Анализ выше для анализа этого конкурента.")
-                for _rs in range(0, min(len(_cimgs),9), 3):
-                    _rc = st.columns(3)
+                st.info("👁️ Vision отключён — нажми 🧠 Анализ")
+                for _rs in range(0,min(len(_cimgs),9),3):
+                    _rc=st.columns(3)
                     for _ci2,_iu in enumerate(_cimgs[_rs:_rs+3]):
                         try:
-                            _ri2 = requests.get(_iu, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
-                            if _ri2.ok: _rc[_ci2].image(_ri2.content, caption=f"#{_rs+_ci2+1}", use_container_width=True)
-                        except: _rc[_ci2].caption(f"#{_rs+_ci2+1} ошибка")
-            st.caption(f"Всего: {len(_cimgs)} фото")
+                            _ri2=requests.get(_iu,timeout=10,headers={"User-Agent":"Mozilla/5.0"})
+                            if _ri2.ok: _rc[_ci2].image(_ri2.content,caption=f"#{_rs+_ci2+1}",use_container_width=True)
+                        except: pass
         else: st.warning("Нет фото")
     with tab_aplus:
-        _cap2 = c.get("aplus_content","")
-        _cap2_urls = st.session_state.get(f"comp_aplus_urls_{cidx}", c.get("aplus_image_urls", []))
-        _cav_text  = st.session_state.get(f"comp_aplus_vision_{cidx}", "")
-        _cvid2 = int(c.get("number_of_videos", 0) or 0)
-        # Stats
-        _ac1, _ac2, _ac3 = st.columns(3)
-        _ac1.metric("A+ Контент", "✅ Есть" if _ap2 else "❌ Нет")
-        _ac2.metric("Видео", f"✅ {_cvid2} шт." if _cvid2 > 0 else "❌ Нет")
-        _ac3.metric("A+ баннеры", f"{len(_cap2_urls)} шт." if _cap2_urls else "—")
+        _cap2_urls=st.session_state.get(f"comp_aplus_urls_{cidx}",c.get("aplus_image_urls",[]))
+        _cav_text=st.session_state.get(f"comp_aplus_vision_{cidx}","")
+        _ac1,_ac2,_ac3=st.columns(3)
+        _ac1.metric("A+","✅" if _ap2 else "❌"); _ac2.metric("Видео","✅" if _vid2 else "❌"); _ac3.metric("Баннеры",f"{len(_cap2_urls)}")
         st.divider()
-
-        if not _cap2_urls:
-            st.warning("❌ A+ баннеры не загружены")
-        elif _cav_text:
-            # Show Vision analysis like our A+ page
-            _cav_blocks = {}
-            for _m in re.finditer(r"APLUS_BLOCK_(\d+)\s*(.*?)(?=APLUS_BLOCK_\d+|$)", _cav_text, re.DOTALL):
-                _cav_blocks[int(_m.group(1))] = _m.group(2).strip()
-
-            st.markdown(f"**{len(_cap2_urls)} баннер(ов) проанализировано**")
-            for _bi, _burl in enumerate(_cap2_urls[:8]):
-                _bblk  = _cav_blocks.get(_bi+1, "")
-                _bmod  = re.search(r"(?:Модуль|Module)\s*[:\-]\s*(.+)", _bblk)
-                _bsum  = re.search(r"(?:Содержание|Summary)\s*[:\-]\s*(.+)", _bblk)
-                _bsc   = re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)", _bblk)
-                _bstr  = re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})", _bblk)
-                _bweak = re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})", _bblk)
-                _bact  = re.search(r"(?:Действие|Action)\s*[:\-]\s*(.{3,})", _bblk)
-                _bconv = re.search(r"(?:Конверсия|Conversion)\s*[:\-]\s*(.{3,})", _bblk)
-                _bscv  = int(_bsc.group(1)) if _bsc else 0
-                _bbc   = "#22c55e" if _bscv>=8 else ("#f59e0b" if _bscv>=6 else "#ef4444")
-                _bsl   = "Отлично" if _bscv>=8 else ("Хорошо" if _bscv>=6 else "Слабо")
-                _bstrip = lambda s: s.strip().strip("*").strip() if s else ""
-
-                with st.container(border=True):
-                    _bc1, _bc2 = st.columns([3, 2])
-                    with _bc1:
-                        try: st.image(_burl, use_container_width=True)
-                        except: st.caption(f"❌ {_burl[:50]}")
-                    with _bc2:
-                        _bhead = f"Баннер #{_bi+1}" + (f" — {_bstrip(_bmod.group(1))}" if _bmod else "")
-                        st.markdown(f"**{_bhead}**")
-                        if _bsum: st.caption(_bstrip(_bsum.group(1)))
-                        if _bscv:
-                            st.markdown(
-                                f'<div style="display:flex;align-items:center;gap:12px;margin:10px 0">'
-                                f'<div style="font-size:2.8rem;font-weight:800;color:{_bbc};line-height:1">{_bscv}/10</div>'
-                                f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">'
-                                f'<div style="background:{_bbc};width:{_bscv*10}%;height:10px;border-radius:6px"></div></div>'
-                                f'<div style="color:{_bbc};font-size:0.85rem;margin-top:3px;font-weight:600">{_bsl}</div>'
-                                f'</div></div>', unsafe_allow_html=True)
-                        if _bstr:  st.success(f"✅ {_bstrip(_bstr.group(1))}")
-                        if _bweak: st.warning(f"⚠️ {_bstrip(_bweak.group(1))}")
-                        if _bact:
-                            with st.expander("🛠 Что делать"):
-                                st.markdown(f"→ {_bstrip(_bact.group(1))}")
-                        if _bconv:
-                            with st.expander("💡 Конверсия"):
-                                st.info(f"🎯 {_bstrip(_bconv.group(1))}")
+        if not _cap2_urls: st.warning("❌ A+ баннеры не загружены")
         else:
-            # No Vision analysis — just show images
-            if not st.session_state.get("do_comp_vision", True):
-                st.info("👁️ Vision конкурентов отключён — баннеры без анализа")
-            st.markdown("**A+ баннеры:**")
-            for _apu in _cap2_urls[:8]:
-                try: st.image(_apu, use_container_width=True)
-                except: st.caption(f"❌ {_apu[:60]}")
-
-        if _cap2:
-            with st.expander("📄 A+ текст"):
-                st.markdown(str(_cap2)[:2000])
+            for _bi,_burl in enumerate(_cap2_urls[:8]):
+                with st.container(border=True):
+                    try: st.image(_burl,use_container_width=True)
+                    except: st.caption(f"❌ {_burl[:50]}")
+                    if _cav_text:
+                        _cav_m=re.search(rf"APLUS_BLOCK_{_bi+1}\s*(.*?)(?=APLUS_BLOCK_\d+|$)",_cav_text,re.DOTALL)
+                        if _cav_m:
+                            _cblk=_cav_m.group(1).strip()
+                            _bsc2=re.search(r"(?:Оценка|Score)\s*[:\-]\s*(\d+)",_cblk)
+                            _bstr2=re.search(r"(?:Сильная сторона|Strength)\s*[:\-]\s*(.{3,})",_cblk)
+                            _bwk2=re.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{3,})",_cblk)
+                            if _bsc2: st.markdown(f"**{_bsc2.group(1)}/10**")
+                            if _bstr2: st.success(f"✅ {_bstr2.group(1).strip()}")
+                            if _bwk2: st.warning(f"⚠️ {_bwk2.group(1).strip()}")
     with tab_data:
-        _da1,_da2 = st.columns(2)
-        _da1.metric("Цена", cprice); _da2.metric("Рейтинг", crating)
-        _da1.metric("Отзывов", crev); _da2.metric("BSR", cbsr_s[:30])
-        _da1.metric("Материал", cpi.get("Material Type","") or "—"); _da2.metric("Prime", "Да" if _pr2 else "Нет")
-        _ccolors = c.get("customization_options",{}).get("color",[])
-        _csizes  = c.get("customization_options",{}).get("size",[])
-        _da1.metric("Цветов", len(_ccolors)); _da2.metric("Размеров", len(_csizes))
+        _da1,_da2=st.columns(2)
+        _da1.metric("Цена",cprice); _da2.metric("Рейтинг",crating)
+        _da1.metric("Отзывов",crev); _da2.metric("BSR",cbsr_s[:30])
+        _da1.metric("Prime","Да" if _pr2 else "Нет"); _da2.metric("A+","Да" if _ap2 else "Нет")
+        _da1.metric("Цветов",len(c.get("customization_options",{}).get("color",[])))
+        _da2.metric("Размеров",len(c.get("customization_options",{}).get("size",[])))
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: Workflow
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ Workflow ══════════════════════════════════════════════════════════════════
 elif page == "📋 Workflow":
     st.title("📋 Workflow — Pipeline листингов")
-
-    _board = db_workflow_board()
-
-    if not _board:
-        st.info("Нет данных. Запусти анализ хотя бы одного листинга.")
+    _board=db_workflow_board()
+    if not _board: st.info("Нет данных. Запусти анализ хотя бы одного листинга.")
     else:
-        _status_cols = {key: [] for _, key, _ in WORKFLOW_STATUSES}
+        _status_cols={key:[] for _,key,_ in WORKFLOW_STATUSES}
         for item in _board:
-            _s = item.get("status", "new_audit")
-            if _s not in _status_cols: _s = "new_audit"
+            _s=item.get("status","new_audit")
+            if _s not in _status_cols: _s="new_audit"
             _status_cols[_s].append(item)
-
-        _wf_cols = st.columns(len(WORKFLOW_STATUSES))
-        for _ci, (icon, key, label) in enumerate(WORKFLOW_STATUSES):
+        _wf_cols=st.columns(len(WORKFLOW_STATUSES))
+        for _ci,(icon,key,label) in enumerate(WORKFLOW_STATUSES):
             with _wf_cols[_ci]:
-                _items = _status_cols[key]
-                st.markdown(f"**{icon} {label}**")
-                st.caption(f"{len(_items)} листинг(ов)")
+                _items=_status_cols[key]; st.markdown(f"**{icon} {label}**"); st.caption(f"{len(_items)} листинг(ов)")
                 for _it in _items:
-                    _score = _it.get("score") or 0
-                    _sc_color = "#22c55e" if _score>=80 else ("#f59e0b" if _score>=60 else "#ef4444")
+                    _score=_it.get("score") or 0; _sc_color="#22c55e" if _score>=80 else ("#f59e0b" if _score>=60 else "#ef4444")
                     with st.container(border=True):
                         st.markdown(f"**{_it['asin']}**")
                         st.markdown(f'<span style="color:{_sc_color};font-weight:700">{_score}%</span>', unsafe_allow_html=True)
                         if _it.get("title"): st.caption(_it["title"][:40])
                         if _it.get("note"): st.caption(f"📝 {_it['note']}")
-
-        st.divider()
-        st.subheader("✏️ Изменить статус")
-        if _board:
-            _sel_asin = st.selectbox("ASIN", [i["asin"] for i in _board], key="wf_sel_asin")
-            _sel_item = next((i for i in _board if i["asin"]==_sel_asin), None)
-            if _sel_item:
-                _cur_status = _sel_item.get("status","new_audit")
-                _status_keys = [k for _,k,_ in WORKFLOW_STATUSES]
-                _status_labels = [f"{ic} {lb}" for ic,_,lb in WORKFLOW_STATUSES]
-                _cur_idx = _status_keys.index(_cur_status) if _cur_status in _status_keys else 0
-                _new_status_label = st.radio("Статус", _status_labels, index=_cur_idx, horizontal=True, key="wf_status_radio")
-                _new_status = _status_keys[_status_labels.index(_new_status_label)]
-                _new_note = st.text_input("Заметка (необязательно)", value=_sel_item.get("note",""), key="wf_note")
-                if st.button("💾 Сохранить", type="primary", key="wf_save"):
-                    if db_update_workflow(_sel_item["id"], _new_status, _new_note):
-                        st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}")
-                        st.rerun()
-                    else:
-                        st.error("Ошибка сохранения")
+        st.divider(); st.subheader("✏️ Изменить статус")
+        _sel_asin=st.selectbox("ASIN",[i["asin"] for i in _board],key="wf_sel_asin")
+        _sel_item=next((i for i in _board if i["asin"]==_sel_asin),None)
+        if _sel_item:
+            _cur_status=_sel_item.get("status","new_audit"); _status_keys=[k for _,k,_ in WORKFLOW_STATUSES]
+            _status_labels=[f"{ic} {lb}" for ic,_,lb in WORKFLOW_STATUSES]
+            _cur_idx=_status_keys.index(_cur_status) if _cur_status in _status_keys else 0
+            _new_status_label=st.radio("Статус",_status_labels,index=_cur_idx,horizontal=True,key="wf_status_radio")
+            _new_status=_status_keys[_status_labels.index(_new_status_label)]
+            _new_note=st.text_input("Заметка",value=_sel_item.get("note",""),key="wf_note")
+            if st.button("💾 Сохранить",type="primary",key="wf_save"):
+                if db_update_workflow(_sel_item["id"],_new_status,_new_note):
+                    st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}"); st.rerun()
+                else: st.error("Ошибка сохранения")
