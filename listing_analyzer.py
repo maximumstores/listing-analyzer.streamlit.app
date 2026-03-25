@@ -56,6 +56,8 @@ def db_init():
             ("workflow_note", "TEXT"),
             ("workflow_updated_at", "TIMESTAMP"),
             ("our_data_json", "TEXT"),
+            ("images_json", "TEXT"),
+            ("aplus_img_urls_json", "TEXT"),
             ("marketplace", "TEXT DEFAULT 'com'"),
         ]:
             try:
@@ -90,13 +92,26 @@ def db_save(asin, result, vision_text, our_title):
                 "rating": _cd.get("average_rating",""),
                 "reviews": _cd.get("reviews_count",""),
             })
+        # Compress images for DB (thumbnails ~30KB, max 3 фото)
+        _imgs_to_save = []
+        for _img_d in st.session_state.get("images", [])[:3]:
+            try:
+                _ib = base64.b64decode(_img_d["b64"])
+                _pil = Image.open(io.BytesIO(_ib)).convert("RGB")
+                _pil.thumbnail((300, 300))
+                _tb = io.BytesIO(); _pil.save(_tb, "JPEG", quality=55); _tb.seek(0)
+                _imgs_to_save.append({"b64": base64.b64encode(_tb.read()).decode(), "media_type": "image/jpeg"})
+            except: pass
+        _aplus_urls_save = st.session_state.get("aplus_img_urls", [])
+
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO listing_analysis
               (asin, overall_score, title_score, bullets_score, images_score,
                aplus_score, cosmo_score, rufus_score, result_json, vision_text,
-               our_title, competitors_json, our_data_json, marketplace)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               our_title, competitors_json, our_data_json, marketplace,
+               images_json, aplus_img_urls_json)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (asin,
               pct(result.get("overall_score",0)),
               pct(result.get("title_score",0)),
@@ -109,7 +124,9 @@ def db_save(asin, result, vision_text, our_title):
               our_title or "",
               json.dumps(comp_snap, ensure_ascii=False),
               json.dumps(st.session_state.get("our_data",{}), ensure_ascii=False),
-              st.session_state.get("_marketplace","com")))
+              st.session_state.get("_marketplace","com"),
+              json.dumps(_imgs_to_save, ensure_ascii=False),
+              json.dumps(_aplus_urls_save, ensure_ascii=False)))
         conn.commit()
         conn.close()
         return True
@@ -1919,7 +1936,8 @@ def page_history():
                     try:
                         _cur_o = _conn_o.cursor()
                         _cur_o.execute("""
-                            SELECT result_json, vision_text, competitors_json, our_data_json
+                            SELECT result_json, vision_text, competitors_json, our_data_json,
+                                   images_json, aplus_img_urls_json
                             FROM listing_analysis WHERE asin=%s AND overall_score>0
                             ORDER BY overall_score DESC, analyzed_at DESC LIMIT 1
                         """, (_asin,))
@@ -1935,6 +1953,12 @@ def page_history():
                                     st.session_state[f"comp_ai_{_ci2o}"] = {"overall_score": f"{_ch2.get('overall',0)}%"}
                             if _row_o[3]:
                                 try: st.session_state["our_data"] = json.loads(_row_o[3])
+                                except: pass
+                            if _row_o[4]:
+                                try: st.session_state["images"] = json.loads(_row_o[4])
+                                except: pass
+                            if _row_o[5]:
+                                try: st.session_state["aplus_img_urls"] = json.loads(_row_o[5])
                                 except: pass
                             st.session_state["_hist_loaded"] = _asin
                             st.session_state["page"] = "🏠 Обзор"
@@ -2096,7 +2120,8 @@ def page_history():
                     conn_h.commit()
                 except Exception: pass
                 cur_h.execute("""
-                    SELECT result_json, vision_text, competitors_json, our_data_json
+                    SELECT result_json, vision_text, competitors_json, our_data_json,
+                           images_json, aplus_img_urls_json
                     FROM listing_analysis
                     WHERE asin = %s
                     ORDER BY analyzed_at DESC
@@ -2112,11 +2137,14 @@ def page_history():
                     comps_h = json.loads(row_h[2])
                     for _ci, _ch in enumerate(comps_h):
                         st.session_state[f"comp_ai_{_ci}"] = {"overall_score": f"{_ch.get('overall',0)}%"}
-                # Restore our_data if saved
                 if row_h[3]:
-                    try:
-                        _od_hist = json.loads(row_h[3])
-                        st.session_state["our_data"] = _od_hist
+                    try: st.session_state["our_data"] = json.loads(row_h[3])
+                    except: pass
+                if row_h[4]:
+                    try: st.session_state["images"] = json.loads(row_h[4])
+                    except: pass
+                if row_h[5]:
+                    try: st.session_state["aplus_img_urls"] = json.loads(row_h[5])
                     except: pass
                 st.session_state["_hist_loaded"] = sel_hist
                 st.session_state["page"] = "🏠 Обзор"
