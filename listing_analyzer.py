@@ -4054,7 +4054,7 @@ elif page == "ℹ️ О инструменте":
     _s3.markdown('<div style="text-align:center;padding:16px;background:#1e293b;border-radius:10px"><div style="font-size:2rem;font-weight:900;color:#22c55e">Rufus</div><div style="color:#64748b;font-size:0.8rem">симулятор Amazon AI</div></div>', unsafe_allow_html=True)
     st.markdown('<div style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:16px">Helium10 и Jungle Scout дают <b>данные</b>. Мы даём <b style="color:#22c55e">смысл и рекомендации</b>.</div>', unsafe_allow_html=True)
     st.divider()
-    st.caption("Built by MR.EQUIPP / Merino.tech · Powered by Claude AI + Gemini")
+    st.caption("Built by Vitaly Terershin / Merino.tech · Powered by Claude AI + Gemini")
 
 # ══ Workflow ══════════════════════════════════════════════════════════════════
 elif page == "📋 Workflow":
