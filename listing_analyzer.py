@@ -4007,110 +4007,54 @@ Mobile Score: {_mob_overall}%
 
 # ══ О инструменте ═════════════════════════════════════════════════════════════
 elif page == "ℹ️ О инструменте":
-    st.markdown("""
-<div style="max-width:800px;margin:0 auto">
+    st.markdown("## 🔍 Amazon Listing Analyzer")
+    st.markdown("**Listing 3.0 — AI-инструмент нового поколения для Amazon продавцов**")
+    st.divider()
+    st.markdown("#### ЧТО ДЕЛАЕТ ИНСТРУМЕНТ")
 
-<div style="text-align:center;margin-bottom:40px">
-  <div style="font-size:3rem;margin-bottom:8px">🔍</div>
-  <h1 style="font-size:2.2rem;font-weight:900;margin-bottom:8px">Amazon Listing Analyzer</h1>
-  <p style="color:#64748b;font-size:1.1rem">Listing 3.0 — AI-инструмент нового поколения для Amazon продавцов</p>
-  <div style="background:linear-gradient(90deg,#3b82f6,#8b5cf6);height:3px;border-radius:2px;margin:16px auto;max-width:200px"></div>
-</div>
+    _features = [
+        ("📸", "Vision AI", "Анализ фотографий", "#3b82f6",
+         "Оценивает каждое фото по 6 критериям — видимость товара, фон, Amazon compliance. Определяет эмоцию покупателя: Доверие / Желание / Сомнение. McKinsey-вывод по всей галерее."),
+        ("🧠", "COSMO / Rufus", "AI-видимость товара", "#8b5cf6",
+         "Проверяет как Amazon AI понимает твой товар. Rufus Симулятор — задаёшь вопрос покупателя, AI отвечает как Amazon Rufus и показывает что не хватает в листинге."),
+        ("🤖", "AI Readiness Score", "Метрика будущего", "#22c55e",
+         "Насколько листинг готов к эпохе AI-агентов Amazon. Взвешенная оценка: COSMO × 30% + Rufus × 25% + JTBD × 20% + VPC × 15% + Title + Bullets."),
+        ("🎯", "VPC / JTBD", "Язык покупателя", "#f59e0b",
+         "Value Proposition Canvas — разрыв между тем что хочет покупатель и что говорит листинг. Jobs To Be Done — покупатель не покупает продукт, он нанимает его для работы."),
+        ("📱", "Mobile Score", "Превью как на телефоне", "#06b6d4",
+         "70% покупок Amazon — с мобильного. Показывает как title обрезается в поиске, как выглядит первый экран страницы товара. Конкретные фиксы с указанием влияния на конверсию."),
+        ("🔥", "Топ ниши", "Разведка конкурентов", "#ef4444",
+         "Ищет топ-продавцов в нише по любому запросу. AI-отчёт: что объединяет лидеров, какие ключевые слова используют, что нужно изменить чтобы попасть в топ-3."),
+        ("🏆", "Benchmark", "Подиум vs конкуренты", "#94a3b8",
+         "Сравнивает до 5 конкурентов по 10 метрикам. Показывает кто на первом месте и по каким параметрам ты проигрываешь. Vision анализ фото конкурентов — те же оценки что у нас."),
+        ("📄", "PDF Отчёт", "Для клиентов и команды", "#f97316",
+         "Профессиональный PDF с обложкой, Score Dashboard, анализом фото с миниатюрами, A+ баннерами, COSMO/Rufus/JTBD/VPC данными и сравнением конкурентов."),
+        ("📋", "Workflow", "Pipeline листингов", "#10b981",
+         "Kanban-доска для управления статусами: Новый аудит → Нужен рерайт → К дизайнеру → К загрузке → Готово. История всех анализов с динамикой Score."),
+        ("🗄️", "История", "Трекинг изменений", "#e879f9",
+         "Сохраняет каждый анализ в PostgreSQL. Показывает динамику Score. Фото и A+ Vision сохраняются для просмотра без повторного анализа."),
+    ]
 
-<div style="background:#0f172a;border-radius:16px;padding:24px;margin-bottom:24px;border:1px solid #1e293b">
-  <div style="font-size:0.75rem;font-weight:700;color:#3b82f6;letter-spacing:0.1em;margin-bottom:16px">ЧТО ДЕЛАЕТ ИНСТРУМЕНТ</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    for i in range(0, len(_features), 2):
+        _fc1, _fc2 = st.columns(2)
+        for _col, _f in zip([_fc1, _fc2], _features[i:i+2]):
+            icon, name, subtitle, color, desc = _f
+            _col.markdown(
+                f'<div style="background:#1e293b;border-radius:10px;padding:16px;border-left:4px solid {color};margin-bottom:8px">' +
+                f'<div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">{icon} {name}</div>' +
+                f'<div style="font-size:0.8rem;font-weight:600;color:{color};margin-bottom:6px">{subtitle}</div>' +
+                f'<div style="font-size:0.8rem;color:#94a3b8;line-height:1.5">{desc}</div></div>',
+                unsafe_allow_html=True
+            )
 
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #3b82f6">
-      <div style="font-size:1.2rem;margin-bottom:6px">📸 Vision AI</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Анализ фотографий</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Оценивает каждое фото по 6 критериям — видимость товара, фон, Amazon compliance. Определяет эмоцию покупателя: Доверие / Желание / Сомнение. McKinsey-вывод по всей галерее.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #8b5cf6">
-      <div style="font-size:1.2rem;margin-bottom:6px">🧠 COSMO / Rufus</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">AI-видимость товара</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Проверяет как Amazon AI понимает твой товар. Rufus Симулятор — задаёшь вопрос покупателя, AI отвечает как Amazon Rufus и показывает что не хватает в листинге.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #22c55e">
-      <div style="font-size:1.2rem;margin-bottom:6px">🤖 AI Readiness Score</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Метрика будущего</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Насколько листинг готов к эпохе AI-агентов Amazon. Взвешенная оценка: COSMO × 30% + Rufus × 25% + JTBD × 20% + VPC × 15% + Title + Bullets.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #f59e0b">
-      <div style="font-size:1.2rem;margin-bottom:6px">🎯 VPC / JTBD</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Язык покупателя</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Value Proposition Canvas — разрыв между тем что хочет покупатель и что говорит листинг. Jobs To Be Done — покупатель не покупает продукт, он нанимает его для работы.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #06b6d4">
-      <div style="font-size:1.2rem;margin-bottom:6px">📱 Mobile Score</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Превью как на телефоне</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">70% покупок Amazon — с мобильного. Показывает как title обрезается в поиске, как выглядит первый экран страницы товара. Конкретные фиксы с указанием влияния на конверсию.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #ef4444">
-      <div style="font-size:1.2rem;margin-bottom:6px">🔥 Топ ниши</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Разведка конкурентов</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Ищет топ-продавцов в нише по любому запросу. AI-отчёт: что объединяет лидеров, какие ключевые слова используют, что нужно изменить чтобы попасть в топ-3.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #94a3b8">
-      <div style="font-size:1.2rem;margin-bottom:6px">🏆 Benchmark</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Подиум vs конкуренты</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Сравнивает до 5 конкурентов по 10 метрикам. Показывает кто на первом месте и по каким параметрам ты проигрываешь. Vision анализ фото конкурентов — те же оценки что у нас.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #f97316">
-      <div style="font-size:1.2rem;margin-bottom:6px">📄 PDF Отчёт</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Для клиентов и команды</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Профессиональный PDF с обложкой, Score Dashboard, анализом фото с миниатюрами, A+ банnerами, COSMO/Rufus/JTBD/VPC данными и сравнением конкурентов.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #10b981">
-      <div style="font-size:1.2rem;margin-bottom:6px">📋 Workflow</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Pipeline листингов</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Kanban-доска для управления статусами: Новый аудит → Нужен рерайт → К дизайнеру → К загрузке → Готово. История всех анализов с динамикой Score.</div>
-    </div>
-
-    <div style="background:#1e293b;border-radius:10px;padding:16px;border-left:3px solid #e879f9">
-      <div style="font-size:1.2rem;margin-bottom:6px">🗄️ История</div>
-      <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">Трекинг изменений</div>
-      <div style="font-size:0.8rem;color:#64748b;line-height:1.5">Сохраняет каждый анализ в PostgreSQL. Показывает динамику Score, сравнение с предыдущими запусками. Фото и A+ Vision сохраняются для просмотра без повторного анализа.</div>
-    </div>
-
-  </div>
-</div>
-
-<div style="background:#0f172a;border-radius:16px;padding:24px;margin-bottom:24px;border:1px solid #1e293b">
-  <div style="font-size:0.75rem;font-weight:700;color:#22c55e;letter-spacing:0.1em;margin-bottom:16px">ПОЧЕМУ ЭТО ЛУЧШЕ ЧЕМ HELIUM10 / JUNGLE SCOUT</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-    <div style="text-align:center;padding:12px">
-      <div style="font-size:2rem;font-weight:900;color:#3b82f6">17</div>
-      <div style="font-size:0.75rem;color:#64748b">метрик анализа</div>
-    </div>
-    <div style="text-align:center;padding:12px">
-      <div style="font-size:2rem;font-weight:900;color:#8b5cf6">Vision AI</div>
-      <div style="font-size:0.75rem;color:#64748b">оценка каждого фото</div>
-    </div>
-    <div style="text-align:center;padding:12px">
-      <div style="font-size:2rem;font-weight:900;color:#22c55e">Rufus</div>
-      <div style="font-size:0.75rem;color:#64748b">симулятор Amazon AI</div>
-    </div>
-  </div>
-  <div style="color:#64748b;font-size:0.85rem;text-align:center;margin-top:8px">
-    Helium10 и Jungle Scout дают <b style="color:#e2e8f0">данные</b>. Мы даём <b style="color:#22c55e">смысл и рекомендации</b>.
-  </div>
-</div>
-
-<div style="text-align:center;color:#475569;font-size:0.8rem;padding:16px">
-  Built by MR.EQUIPP / Merino.tech · Powered by Claude AI + Gemini
-</div>
-
-</div>
-""", unsafe_allow_html=True)
+    st.divider()
+    _s1, _s2, _s3 = st.columns(3)
+    _s1.markdown('<div style="text-align:center;padding:16px;background:#1e293b;border-radius:10px"><div style="font-size:2.5rem;font-weight:900;color:#3b82f6">17</div><div style="color:#64748b;font-size:0.8rem">метрик анализа</div></div>', unsafe_allow_html=True)
+    _s2.markdown('<div style="text-align:center;padding:16px;background:#1e293b;border-radius:10px"><div style="font-size:1.8rem;font-weight:900;color:#8b5cf6">Vision AI</div><div style="color:#64748b;font-size:0.8rem">оценка каждого фото</div></div>', unsafe_allow_html=True)
+    _s3.markdown('<div style="text-align:center;padding:16px;background:#1e293b;border-radius:10px"><div style="font-size:2rem;font-weight:900;color:#22c55e">Rufus</div><div style="color:#64748b;font-size:0.8rem">симулятор Amazon AI</div></div>', unsafe_allow_html=True)
+    st.markdown('<div style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:16px">Helium10 и Jungle Scout дают <b>данные</b>. Мы даём <b style="color:#22c55e">смысл и рекомендации</b>.</div>', unsafe_allow_html=True)
+    st.divider()
+    st.caption("Built by MR.EQUIPP / Merino.tech · Powered by Claude AI + Gemini")
 
 # ══ Workflow ══════════════════════════════════════════════════════════════════
 elif page == "📋 Workflow":
@@ -4147,4 +4091,4 @@ elif page == "📋 Workflow":
             if st.button("💾 Сохранить",type="primary",key="wf_save"):
                 if db_update_workflow(_sel_item["id"],_new_status,_new_note):
                     st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}"); st.rerun()
-                else: st.error("Ошибка сохранения") 
+                else: st.error("Ошибка сохранения")
