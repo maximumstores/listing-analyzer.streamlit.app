@@ -1507,8 +1507,18 @@ with st.sidebar:
                 st.caption(f"  {_casin2}  {_ct2_short}")
     else:
         st.caption("Запусти анализ чтобы открыть все страницы")
+        cur_no_result = st.session_state.get("page","")
         for icon, label in NAV_ITEMS:
-            st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
+            full = f"{icon} {label}"
+            _always = label in ["Топ ниши", "Mobile Score"]
+            if _always:
+                is_active = (cur_no_result == full)
+                if st.button(f"{icon}  {label}", key=f"nav_pre_{label}", use_container_width=True,
+                             type="primary" if is_active else "secondary"):
+                    st.session_state["page"] = full
+                    st.rerun()
+            else:
+                st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
 
     st.divider()
     _cur3 = st.session_state.get("page","")
@@ -2217,9 +2227,13 @@ if "result" not in st.session_state:
 <p style="text-align:center;color:#94a3b8;font-size:0.8rem">👈 Введи ссылку на листинг в форме выше и нажми «Запустить анализ»</p>
 </div>
 """, unsafe_allow_html=True)
-    st.stop()
+    # Allow standalone pages even without analysis
+    if page in ["🔥 Топ ниши", "📱 Mobile Score"]:
+        pass
+    else:
+        st.stop()
 
-r  = st.session_state["result"]
+r  = st.session_state.get("result", {})
 v  = st.session_state.get("vision", "")
 od = st.session_state.get("our_data", {})
 pi = od.get("product_information", {})
