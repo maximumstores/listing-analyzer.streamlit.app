@@ -1456,6 +1456,7 @@ with st.sidebar:
         ("🏆", "Benchmark"),
         ("🧠", "COSMO / Rufus"),
         ("🎯", "VPC / JTBD"),
+        ("🔥", "Топ ниши"),
     ]
 
     if "result" in st.session_state:
@@ -3105,6 +3106,166 @@ elif page == "🧠 COSMO / Rufus":
         if _jtbd.get("jtbd_recs"):
             st.subheader("✅ Рекомендации")
             for rec in _jtbd["jtbd_recs"]: st.success(f"→ {rec}")
+    # ══ AI READINESS SCORE ════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("🤖 AI Readiness Score")
+    st.caption("Насколько листинг готов к эпохе AI-рекомендаций (Rufus, Cosmo, агенты)")
+
+    _jtbd_score = pct(r.get("jtbd_analysis",{}).get("alignment_score",0)) if r.get("jtbd_analysis") else 0
+    _vpc_score  = pct(r.get("vpc_analysis",{}).get("fit_score",0)) if r.get("vpc_analysis") else 0
+    _cosmo_s    = cosmo
+    _rufus_s2   = rufus_s
+    _title_s    = pct(r.get("title_score",0))
+    _bullets_s  = pct(r.get("bullets_score",0))
+
+    # AI Readiness = weighted combo of AI-relevant signals
+    _ai_ready = int(
+        _cosmo_s   * 0.30 +   # Cosmo понимает товар
+        _rufus_s2  * 0.25 +   # Rufus может ответить на вопросы
+        _jtbd_score* 0.20 +   # Листинг говорит языком покупателя
+        _vpc_score * 0.15 +   # Ценность коммуницирована
+        _title_s   * 0.05 +   # Title индексируется
+        _bullets_s * 0.05     # Bullets индексируются
+    )
+    _ar_c = "#22c55e" if _ai_ready>=75 else ("#f59e0b" if _ai_ready>=50 else "#ef4444")
+    _ar_label = (
+        "🟢 Готов к AI-эпохе" if _ai_ready>=75 else
+        "🟡 Частично готов — нужны правки" if _ai_ready>=50 else
+        "🔴 Не готов — AI-агент не выберет этот товар"
+    )
+    _ar_desc = (
+        "AI-агент Amazon сможет точно рекомендовать этот товар нужной аудитории" if _ai_ready>=75 else
+        "Rufus найдёт товар, но не всегда выберет его первым — листинг не говорит языком покупателя" if _ai_ready>=50 else
+        "Cosmo/Rufus не понимают товар достаточно — листинг будет проигрывать конкурентам в AI-рекомендациях"
+    )
+
+    st.markdown(f"""
+<div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:14px;padding:20px 24px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+    <div>
+      <div style="font-size:1.1rem;font-weight:700;color:{_ar_c}">{_ar_label}</div>
+      <div style="font-size:0.85rem;color:#94a3b8;margin-top:4px;max-width:480px">{_ar_desc}</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:3rem;font-weight:800;color:{_ar_c};line-height:1">{_ai_ready}%</div>
+      <div style="font-size:0.75rem;color:#64748b">AI Readiness</div>
+    </div>
+  </div>
+  <div style="background:rgba(255,255,255,0.08);border-radius:6px;height:8px;margin-top:14px">
+    <div style="background:{_ar_c};width:{_ai_ready}%;height:8px;border-radius:6px"></div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    # Component breakdown
+    _ai_comps = [
+        ("🧠 COSMO", _cosmo_s, 30, "Алгоритм понимает товар"),
+        ("🤖 Rufus", _rufus_s2, 25, "Отвечает на вопросы покупателей"),
+        ("🎯 JTBD", _jtbd_score, 20, "Язык покупателя"),
+        ("📦 VPC", _vpc_score, 15, "Ценность коммуницирована"),
+        ("🏷️ Title", _title_s, 5, "SEO индексация"),
+        ("📋 Bullets", _bullets_s, 5, "Структура контента"),
+    ]
+    _ac_cols = st.columns(len(_ai_comps))
+    for _col, (_lbl, _val, _wt, _hint) in zip(_ac_cols, _ai_comps):
+        _cc2 = "#22c55e" if _val>=75 else ("#f59e0b" if _val>=50 else "#ef4444")
+        _col.markdown(
+            f'<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-top:3px solid {_cc2}">'
+            f'<div style="font-size:0.65rem;color:#64748b">{_lbl}</div>'
+            f'<div style="font-size:1.1rem;font-weight:800;color:{_cc2}">{_val}%</div>'
+            f'<div style="font-size:0.58rem;color:#94a3b8">вес {_wt}%</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+        _col.caption(_hint)
+
+    # ══ RUFUS SIMULATOR ═══════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("🤖 Rufus Симулятор")
+    st.caption("Задай вопрос как покупатель — AI ответит как Amazon Rufus, используя данные твоего листинга")
+
+    _rfcol1, _rfcol2 = st.columns([3,1])
+    with _rfcol1:
+        _rufus_q = st.text_input(
+            "Вопрос покупателя",
+            placeholder="Is this good for hiking in cold weather? / Подойдёт ли для горного туризма?",
+            key="rufus_sim_input",
+            label_visibility="collapsed"
+        )
+    with _rfcol2:
+        _run_rufus = st.button("▶ Спросить Rufus", key="btn_rufus_sim", type="primary", use_container_width=True)
+
+    # Suggested questions
+    _title_for_rufus = od.get("title","")
+    _cat_hint = "base layer" if any(w in _title_for_rufus.lower() for w in ["merino","wool","thermal","base"]) else                 "jacket" if any(w in _title_for_rufus.lower() for w in ["jacket","coat","parka"]) else                 "outdoor apparel"
+    _suggested = [
+        f"What temperature is this {_cat_hint} good for?",
+        f"Is this suitable for hiking?",
+        f"How does this fit — true to size?",
+        f"Can I wear this for everyday use?",
+        f"How does this compare to competitors?",
+    ]
+    st.markdown('<div style="font-size:0.75rem;color:#94a3b8;margin:4px 0 8px">💡 Быстрые вопросы:</div>', unsafe_allow_html=True)
+    _q_cols = st.columns(len(_suggested))
+    for _qi, (_qc, _qs) in enumerate(zip(_q_cols, _suggested)):
+        if _qc.button(_qs[:35]+"…" if len(_qs)>35 else _qs, key=f"rufus_q_{_qi}", use_container_width=True):
+            st.session_state["_rufus_quick_q"] = _qs
+            st.rerun()
+
+    # Handle quick question selection
+    if st.session_state.get("_rufus_quick_q"):
+        _rufus_q = st.session_state.pop("_rufus_quick_q")
+        _run_rufus = True
+
+    if _run_rufus and _rufus_q:
+        with st.spinner("🤖 Rufus анализирует листинг..."):
+            _listing_ctx = f"""Title: {od.get("title","")}
+Price: {od.get("price","")} | Rating: {od.get("average_rating","")} | Reviews: {od.get("product_information",{}).get("Customer Reviews",{}).get("ratings_count","")}
+Material: {od.get("product_information",{}).get("Material Type","")}
+Bullets:\n{chr(10).join(od.get("feature_bullets",[])[:5])}
+Description: {str(od.get("description",""))[:500]}
+A+: {str(od.get("aplus_content",""))[:500]}"""
+
+            _rufus_prompt = f"""You are Amazon Rufus — Amazon's AI shopping assistant. A customer asked you about this product.
+
+PRODUCT LISTING:
+{_listing_ctx}
+
+CUSTOMER QUESTION: {_rufus_q}
+
+Answer EXACTLY as Amazon Rufus would:
+1. Give a direct, helpful answer based ONLY on what is in the listing
+2. If the listing doesn't contain the answer — say "Based on the listing, I couldn't find specific information about [X]" and suggest what to look for
+3. Quote specific bullets or specs when relevant
+4. Keep it conversational, 2-4 sentences max
+5. End with: "⚠️ LISTING GAP:" — one sentence on what info is MISSING from listing that would help answer this better
+
+Respond in {'Russian' if st.session_state.get("analysis_lang","ru")=="ru" else "English"}."""
+
+            _rufus_answer = ai_call("You are Amazon Rufus AI shopping assistant.", _rufus_prompt, max_tokens=400)
+            if "rufus_history" not in st.session_state:
+                st.session_state["rufus_history"] = []
+            st.session_state["rufus_history"].insert(0, {"q": _rufus_q, "a": _rufus_answer})
+
+    # Show Rufus conversation history
+    if st.session_state.get("rufus_history"):
+        for _rh in st.session_state["rufus_history"][:5]:
+            _ans = _rh["a"]
+            _gap_part = ""
+            _main_part = _ans
+            if "⚠️ LISTING GAP:" in _ans:
+                _parts = _ans.split("⚠️ LISTING GAP:")
+                _main_part = _parts[0].strip()
+                _gap_part = _parts[1].strip() if len(_parts)>1 else ""
+            st.markdown(f"""
+<div style="background:#0f172a;border-radius:10px;padding:14px 16px;margin-bottom:10px">
+  <div style="font-size:0.75rem;color:#3b82f6;font-weight:700;margin-bottom:6px">❓ {_rh["q"]}</div>
+  <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.6">{_main_part}</div>
+  {f'<div style="background:#7f1d1d22;border-left:3px solid #ef4444;border-radius:4px;padding:6px 10px;margin-top:8px;font-size:0.8rem;color:#fca5a5"><b>⚠️ Gap в листинге:</b> {_gap_part}</div>' if _gap_part else ""}
+</div>""", unsafe_allow_html=True)
+        if st.button("🗑️ Очистить историю", key="clear_rufus"):
+            st.session_state.pop("rufus_history", None)
+            st.rerun()
+
     with st.expander("🔧 Raw JSON"): st.json(r)
 
 # ══ VPC / JTBD ════════════════════════════════════════════════════════════════
@@ -3260,20 +3421,75 @@ elif _is_competitor_page:
                 _cv_blocks={}
                 for _m in re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)",_cv_text,re.DOTALL):
                     _cv_blocks[int(_m.group(1))]=_m.group(2).strip()
+                # ── Сводка конкурента ─────────────────────────────────
+                _cscores_sum = []
+                for _bi2, _bt2 in enumerate(_cv_blocks.values()):
+                    _sm2 = re.search(r"(\d+)/10", _bt2)
+                    _sv2 = int(_sm2.group(1)) if _sm2 else 0
+                    _tm2 = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", _bt2)
+                    _tv2 = _tm2.group(1).strip()[:16] if _tm2 else f"#{_bi2+1}"
+                    _cscores_sum.append((_bi2+1, _sv2, _tv2))
+                if _cscores_sum:
+                    _cavg = sum(s for _,s,_ in _cscores_sum) / len(_cscores_sum)
+                    _cavg_c = "#22c55e" if _cavg>=7 else ("#f59e0b" if _cavg>=5 else "#ef4444")
+                    _cc_html = "".join([
+                        f'<div style="display:flex;flex-direction:column;align-items:center;background:#1e293b;border-radius:8px;padding:6px 8px;min-width:60px;border-top:3px solid {"#22c55e" if s>=8 else ("#f59e0b" if s>=6 else "#ef4444")}">' +
+                        f'<div style="font-size:0.65rem;color:#64748b">#{n}</div>' +
+                        f'<div style="font-size:1.3rem;font-weight:800;color:{"#22c55e" if s>=8 else ("#f59e0b" if s>=6 else "#ef4444")}">{s}</div>' +
+                        f'<div style="font-size:0.55rem;color:#64748b;text-align:center;max-width:55px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">{t}</div></div>'
+                        for n,s,t in _cscores_sum
+                    ])
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-radius:10px;padding:12px 14px;margin-bottom:12px">' +
+                        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+                        f'<div style="font-size:0.8rem;color:#94a3b8">📊 {len(_cscores_sum)} фото</div>' +
+                        f'<div style="font-size:1rem;font-weight:800;color:{_cavg_c}">Ср: {_cavg:.1f}/10</div></div>' +
+                        f'<div style="display:flex;gap:6px;flex-wrap:wrap">{_cc_html}</div></div>',
+                        unsafe_allow_html=True
+                    )
+                st.divider()
+
                 for _pi3,_pimg in enumerate(_cv_imgs):
                     _ptext=_cv_blocks.get(_pi3+1,""); _psm=re.search(r"(\d+)/10",_ptext)
-                    _pscore=int(_psm.group(1)) if _psm else 0; _pbc="#22c55e" if _pscore>=8 else ("#f59e0b" if _pscore>=6 else "#ef4444")
-                    _s2=lambda pat,t=_ptext: re.search(pat,t); _st=lambda m: m.group(1).strip().strip("*").strip() if m else ""
+                    _pscore=int(_psm.group(1)) if _psm else 0
+                    _pbc="#22c55e" if _pscore>=8 else ("#f59e0b" if _pscore>=6 else "#ef4444")
+                    _pslbl="Отлично" if _pscore>=8 else ("Хорошо" if _pscore>=6 else "Слабо")
+                    _s2=lambda pat,t=_ptext: re.search(pat,t)
+                    _st=lambda m: m.group(1).strip().strip("*").strip() if m else ""
+                    _ptyp  = _st(_s2(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)"))
+                    _pstrg = _st(_s2(r"(?:[Сс]ильная\s+сторона|Strength)\s*[:\-]\s*(.{3,})"))
+                    _pweak = _st(_s2(r"(?:[Сс]лабость|Weakness)\s*[:\-]\s*(.{3,})"))
+                    _pact  = _st(_s2(r"(?:[Дд]ействие|Action)\s*[:\-]\s*(.{3,})"))
+                    _pconv = _st(_s2(r"(?:[Кк]онверсия|Conversion)\s*[:\-]\s*(.{3,})"))
+                    _pemot = _st(_s2(r"(?:[Ээ]моция|Emotion)\s*[:\-]\s*(.{3,})"))
+                    if _pweak and any(x in _pweak.lower() for x in ["none","n/a","нет слабостей"]): _pweak=""
                     with st.container(border=True):
                         _pc1,_pc2=st.columns([1,2])
                         with _pc1: st.image(__import__("base64").b64decode(_pimg["b64"]),use_container_width=True)
                         with _pc2:
-                            st.markdown(f"**Фото #{_pi3+1}**")
-                            if _pscore>0: st.markdown(f'<div style="font-size:2rem;font-weight:800;color:{_pbc}">{_pscore}/10</div>', unsafe_allow_html=True)
-                            _pstrg=_st(_s2(r"(?:[Сс]ильная\s+сторона|Strength)\s*[:\-]\s*(.{3,})"))
-                            _pweak=_st(_s2(r"(?:[Сс]лабость|Weakness)\s*[:\-]\s*(.{3,})"))
+                            _phead = f"Фото #{_pi3+1}" + (f" — {_ptyp}" if _ptyp else "")
+                            st.markdown(f"**{_phead}**")
+                            if _pscore>0:
+                                st.markdown(
+                                    f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0">' +
+                                    f'<div style="font-size:2rem;font-weight:800;color:{_pbc}">{_pscore}/10</div>' +
+                                    f'<div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px">' +
+                                    f'<div style="background:{_pbc};width:{_pscore*10}%;height:10px;border-radius:6px"></div></div>' +
+                                    f'<div style="color:{_pbc};font-size:0.8rem;margin-top:2px">{_pslbl}</div></div></div>',
+                                    unsafe_allow_html=True)
                             if _pstrg: st.success(f"✅ {_pstrg}")
                             if _pweak: st.warning(f"⚠️ {_pweak}")
+                            if _pact:
+                                with st.expander("🛠 Что делать"): st.markdown(f"→ {_pact}")
+                            if _pconv:
+                                with st.expander("💡 Конверсия"): st.info(f"🎯 {_pconv}")
+                            if _pemot:
+                                _ec2={"доверие":"#22c55e","trust":"#22c55e","желание":"#f59e0b","сомнение":"#ef4444","doubt":"#ef4444","любопытство":"#3b82f6","curiosity":"#3b82f6","безразличие":"#94a3b8"}.get(_pemot.split()[0].lower().rstrip("/:"), "#8b5cf6")
+                                st.markdown(
+                                    f'<div style="background:{_ec2}22;border-left:3px solid {_ec2};border-radius:6px;padding:8px 12px;margin-top:4px">' +
+                                    f'<span style="font-size:0.8rem;font-weight:700;color:{_ec2}">😶 ЭМОЦИЯ: </span>' +
+                                    f'<span style="font-size:0.82rem;color:#1e293b">{_pemot}</span></div>',
+                                    unsafe_allow_html=True)
             else:
                 st.info("👁️ Vision отключён — нажми 🧠 Анализ")
                 for _rs in range(0,min(len(_cimgs),9),3):
@@ -3313,6 +3529,200 @@ elif _is_competitor_page:
         _da1.metric("Prime","Да" if _pr2 else "Нет"); _da2.metric("A+","Да" if _ap2 else "Нет")
         _da1.metric("Цветов",len(c.get("customization_options",{}).get("color",[])))
         _da2.metric("Размеров",len(c.get("customization_options",{}).get("size",[])))
+
+# ══ Топ ниши ══════════════════════════════════════════════════════════════════
+elif page == "🔥 Топ ниши":
+    st.title("🔥 Топ ниши — AI-анализ лидеров")
+    st.caption("Найди топ-продавцов в своей нише и узнай что делает их листинги лучшими")
+
+    _our_title = od.get("title","") if od else ""
+    _our_asin  = od.get("parent_asin","") if od else ""
+    _mp_niche  = st.session_state.get("_marketplace","com")
+
+    # Search query input
+    _nc1, _nc2 = st.columns([4,1])
+    with _nc1:
+        _niche_q = st.text_input(
+            "🔍 Ниша / поисковый запрос",
+            value=st.session_state.get("_niche_query_saved", " ".join(_our_title.split()[:4]) if _our_title else ""),
+            placeholder="merino wool base layer men, hiking socks, outdoor jacket...",
+            key="niche_query_input",
+            label_visibility="collapsed"
+        )
+    with _nc2:
+        _run_niche = st.button("🔍 Найти топ", type="primary", use_container_width=True, key="btn_niche_search")
+
+    _niche_mp_col1, _niche_mp_col2 = st.columns([2,4])
+    with _niche_mp_col1:
+        _niche_mp = st.selectbox("Маркетплейс", ["com","de","fr","it","es","co.uk","ca","nl"], 
+                                  index=["com","de","fr","it","es","co.uk","ca","nl"].index(_mp_niche) if _mp_niche in ["com","de","fr","it","es","co.uk","ca","nl"] else 0,
+                                  key="niche_mp_sel")
+
+    if _run_niche and _niche_q.strip():
+        st.session_state["_niche_query_saved"] = _niche_q.strip()
+        sd_key = st.secrets.get("SCRAPINGDOG_API_KEY","")
+        if not sd_key:
+            st.error("❌ SCRAPINGDOG_API_KEY не задан в Secrets")
+        else:
+            with st.spinner(f"🔍 Ищу топ листинги: '{_niche_q}'..."):
+                try:
+                    _search_r = requests.get(
+                        "https://api.scrapingdog.com/amazon/search",
+                        params={"api_key": sd_key, "query": _niche_q, "domain": _niche_mp, "page": "1"},
+                        timeout=60
+                    )
+                    if _search_r.ok:
+                        _search_data = _search_r.json()
+                        _products = _search_data if isinstance(_search_data, list) else _search_data.get("products", _search_data.get("results", []))
+                        if _products:
+                            st.session_state["_niche_results"] = _products[:12]
+                            st.session_state["_niche_mp"] = _niche_mp
+                            st.success(f"✅ Найдено {len(_products[:12])} товаров")
+                        else:
+                            st.warning("Результаты не найдены — попробуй другой запрос")
+                    else:
+                        st.error(f"❌ ScrapingDog: {_search_r.status_code} — {_search_r.text[:200]}")
+                except Exception as _ne:
+                    st.error(f"❌ Ошибка: {_ne}")
+
+    if st.session_state.get("_niche_results"):
+        _niche_products = st.session_state["_niche_results"]
+        _niche_mp_saved = st.session_state.get("_niche_mp","com")
+        _mp_flags = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
+
+        st.subheader(f"📋 Топ листинги {_mp_flags.get(_niche_mp_saved,'')} amazon.{_niche_mp_saved}")
+
+        # Display grid of results
+        for _ni in range(0, len(_niche_products), 3):
+            _row_cols = st.columns(3)
+            for _nj, (_nc, _np) in enumerate(zip(_row_cols, _niche_products[_ni:_ni+3])):
+                if not _np: continue
+                _np_asin  = _np.get("asin","")
+                _np_title = _np.get("title","")[:60]
+                _np_price = _np.get("price","") or _np.get("current_price","")
+                _np_rat   = str(_np.get("rating","") or _np.get("stars",""))
+                _np_rev   = str(_np.get("reviews","") or _np.get("reviews_count","") or _np.get("number_of_reviews",""))
+                _np_img   = _np.get("image","") or _np.get("thumbnail","") or _np.get("img","")
+                _np_spon  = _np.get("sponsored", False)
+                _is_ours  = (_np_asin == _our_asin)
+                _border   = "#3b82f6" if _is_ours else ("#94a3b8" if _np_spon else "#334155")
+
+                with _nc:
+                    with st.container(border=True):
+                        if _np_img:
+                            st.markdown(
+                                f'<img src="{_np_img}" style="width:100%;height:140px;object-fit:contain;'
+                                f'background:#f8fafc;border-radius:6px">',
+                                unsafe_allow_html=True
+                            )
+                        st.markdown(
+                            f'<div style="font-size:0.78rem;font-weight:600;color:{"#3b82f6" if _is_ours else "#e2e8f0"};'
+                            f'line-height:1.3;margin-top:6px">'
+                            f'{"🔵 НАШ — " if _is_ours else ""}{_np_title}</div>',
+                            unsafe_allow_html=True
+                        )
+                        if _np_spon:
+                            st.markdown('<span style="font-size:0.65rem;color:#94a3b8;background:#1e293b;padding:1px 5px;border-radius:3px">Спонсор</span>', unsafe_allow_html=True)
+                        _info_parts = []
+                        if _np_price: _info_parts.append(f"💰 {_np_price}")
+                        if _np_rat:   _info_parts.append(f"⭐ {_np_rat}")
+                        if _np_rev:   _info_parts.append(f"({_np_rev})")
+                        if _info_parts:
+                            st.caption(" · ".join(_info_parts))
+                        if _np_asin:
+                            _btn_col1, _btn_col2 = st.columns(2)
+                            _btn_col1.markdown(
+                                f'<a href="https://www.amazon.{_niche_mp_saved}/dp/{_np_asin}" target="_blank">'
+                                f'<button style="width:100%;padding:4px;background:#334155;color:white;'
+                                f'border:none;border-radius:4px;cursor:pointer;font-size:0.7rem">↗ Amazon</button></a>',
+                                unsafe_allow_html=True
+                            )
+                            if _btn_col2.button("🔍 Анализ", key=f"niche_analyze_{_ni}_{_nj}", use_container_width=True):
+                                st.session_state["_niche_analyze_asin"] = _np_asin
+                                st.session_state["_niche_analyze_mp"]   = _niche_mp_saved
+                                st.rerun()
+
+        # ── AI Niche Intelligence ──────────────────────────────────────────
+        st.divider()
+        st.subheader("🧠 AI-анализ ниши")
+
+        if st.button("🧠 Что делают лидеры — AI-отчёт", type="primary", key="btn_niche_ai"):
+            with st.spinner("🧠 AI анализирует топ-листинги..."):
+                _niche_summary = []
+                for _np in _niche_products[:6]:
+                    _np_t = _np.get("title","")
+                    _np_r = str(_np.get("rating","") or _np.get("stars",""))
+                    _np_rv = str(_np.get("reviews","") or _np.get("number_of_reviews",""))
+                    _np_p  = _np.get("price","")
+                    if _np_t:
+                        _niche_summary.append(f"• {_np_t[:80]} | {_np_r}★ {_np_rv} отз. | {_np_p}")
+                _niche_ctx = "\n".join(_niche_summary)
+                _aud_ctx2 = st.session_state.get("target_audience","")
+                _aud_line2 = f"\nЦелевая аудитория: {_aud_ctx2}" if _aud_ctx2 else ""
+
+                _niche_ai_prompt = f"""Ты эксперт по Amazon нишевому анализу. Проанализируй топ-листинги ниши.
+
+ЗАПРОС: {st.session_state.get("_niche_query_saved","")}
+МАРКЕТПЛЕЙС: amazon.{_niche_mp_saved}{_aud_line2}
+
+ТОП ЛИСТИНГИ:
+{_niche_ctx}
+
+НАШ ТОВАР: {_our_title}
+
+Дай McKinsey-анализ:
+
+**Что объединяет топ-листинги** (3 общих паттерна в title/позиционировании)
+**Ценовой диапазон** ниши и где мы находимся
+**Топ-3 ключевых слова** которые встречаются у лидеров
+**Главное отличие лидеров** от среднего листинга
+**Что нам нужно изменить** чтобы попасть в топ-3 этой ниши (конкретно)
+**AI-вывод**: "В этой нише побеждает тот, кто [X]"
+
+Ответь {'по-русски' if st.session_state.get('analysis_lang','ru')=='ru' else 'in English'}. Будь конкретен."""
+
+                _niche_ai = ai_call("Amazon niche analyst. McKinsey-style.", _niche_ai_prompt, max_tokens=1000)
+                st.session_state["_niche_ai_report"] = _niche_ai
+
+        if st.session_state.get("_niche_ai_report"):
+            st.markdown(
+                f'<div style="background:#0f172a;border:1px solid #334155;border-radius:12px;'
+                f'padding:18px 20px;line-height:1.7">'
+                f'<div style="font-size:0.75rem;font-weight:700;color:#64748b;letter-spacing:0.08em;margin-bottom:10px">🧠 AI ОТЧЁТ ПО НИШЕ</div>'
+                f'<div style="color:#e2e8f0;font-size:0.9rem">{st.session_state["_niche_ai_report"].replace(chr(10),"<br>").replace("**","<b>").replace("**","</b>")}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+        # ── Quick analyze specific product ─────────────────────────────────
+        if st.session_state.get("_niche_analyze_asin"):
+            _an_asin = st.session_state.pop("_niche_analyze_asin")
+            _an_mp   = st.session_state.pop("_niche_analyze_mp","com")
+            with st.spinner(f"🔍 Анализирую {_an_asin}..."):
+                _an_data, _an_urls = scrapingdog_product(_an_asin, lambda m: None, domain=_an_mp)
+                if _an_data:
+                    _an_ai = analyze_text(_an_data, [], "", _an_asin, lambda m: None,
+                                          lang=st.session_state.get("analysis_lang","ru"), is_competitor=True)
+                    st.session_state[f"_niche_quick_{_an_asin}"] = {
+                        "data": _an_data, "ai": _an_ai, "asin": _an_asin
+                    }
+
+        # Show quick analysis results
+        for _k in [k for k in st.session_state if k.startswith("_niche_quick_")]:
+            _qa = st.session_state[_k]
+            _qa_overall = pct(_qa["ai"].get("overall_score",0))
+            _qa_c = "#22c55e" if _qa_overall>=75 else ("#f59e0b" if _qa_overall>=50 else "#ef4444")
+            with st.expander(f"🔍 {_qa['asin']} — Overall: {_qa_overall}%", expanded=True):
+                _qa_cols = st.columns(5)
+                for _col, (_lbl, _key) in zip(_qa_cols, [("Title","title_score"),("Bullets","bullets_score"),("Фото","images_score"),("A+","aplus_score"),("Overall","overall_score")]):
+                    _v = pct(_qa["ai"].get(_key,0))
+                    _vc = "#22c55e" if _v>=75 else ("#f59e0b" if _v>=50 else "#ef4444")
+                    _col.markdown(f'<div style="text-align:center"><div style="font-size:1.2rem;font-weight:800;color:{_vc}">{_v}%</div><div style="font-size:0.7rem;color:#64748b">{_lbl}</div></div>', unsafe_allow_html=True)
+                st.markdown(f"**Title:** {_qa['data'].get('title','')[:100]}")
+                _prio = _qa["ai"].get("priority_improvements",[])
+                if _prio:
+                    st.markdown("**Топ проблемы:**")
+                    for _p in _prio[:3]: st.caption(f"• {_p}")
 
 # ══ Workflow ══════════════════════════════════════════════════════════════════
 elif page == "📋 Workflow":
