@@ -2182,7 +2182,7 @@ page = st.session_state.get("page", "🏠 Обзор")
 if page == "📈 История": page_history(); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
 
-if "result" not in st.session_state:
+if "result" not in st.session_state and page not in ["🔥 Топ ниши", "📱 Mobile Score"]:
     st.markdown("""
 <div style="max-width:720px;margin:40px auto 0">
 <h1 style="font-size:2rem;font-weight:800;margin-bottom:4px">🔍 Amazon Listing Analyzer</h1>
@@ -2227,11 +2227,7 @@ if "result" not in st.session_state:
 <p style="text-align:center;color:#94a3b8;font-size:0.8rem">👈 Введи ссылку на листинг в форме выше и нажми «Запустить анализ»</p>
 </div>
 """, unsafe_allow_html=True)
-    # Allow standalone pages even without analysis
-    if page in ["🔥 Топ ниши", "📱 Mobile Score"]:
-        pass
-    else:
-        st.stop()
+    st.stop()
 
 r  = st.session_state.get("result", {})
 v  = st.session_state.get("vision", "")
