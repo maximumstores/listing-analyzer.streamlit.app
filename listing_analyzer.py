@@ -1457,6 +1457,7 @@ with st.sidebar:
         ("🧠", "COSMO / Rufus"),
         ("🎯", "VPC / JTBD"),
         ("🔥", "Топ ниши"),
+        ("📱", "Mobile Score"),
     ]
 
     if "result" in st.session_state:
@@ -3723,6 +3724,275 @@ elif page == "🔥 Топ ниши":
                 if _prio:
                     st.markdown("**Топ проблемы:**")
                     for _p in _prio[:3]: st.caption(f"• {_p}")
+
+# ══ Mobile Score ══════════════════════════════════════════════════════════════
+elif page == "📱 Mobile Score":
+    st.title("📱 Mobile Score")
+    st.caption("70% покупок Amazon — с мобильного. Как выглядит твой листинг на смартфоне?")
+
+    _title   = od.get("title","") if od else ""
+    _bullets = od.get("feature_bullets",[]) if od else []
+    _price   = od.get("price","") if od else ""
+    _rating  = od.get("average_rating","") if od else ""
+    _reviews = od.get("product_information",{}).get("Customer Reviews",{}).get("ratings_count","") if od else ""
+    _has_ap  = bool(od.get("aplus") if od else False)
+    _has_vid = int(od.get("number_of_videos",0) or 0) > 0 if od else False
+    _imgs    = st.session_state.get("images",[])
+    _tlen    = len(_title)
+
+    # ── Mobile scoring ────────────────────────────────────────────────────────
+    # Title: on mobile only ~80 chars visible in search, ~120 on PDP
+    _mob_title_search = min(100, int((_tlen / 80) * 100)) if _tlen <= 80 else max(0, 100 - (_tlen-80)*2)
+    _mob_title_pdp    = 100 if _tlen <= 120 else max(50, 100 - (_tlen-120)*3)
+    _mob_title_score  = int(_mob_title_search * 0.4 + _mob_title_pdp * 0.6)
+
+    # Bullets: mobile shows only first 3, collapsed
+    _mob_bullets_score = 100 if len(_bullets)>=1 else 0
+    # Are first 3 bullets strong? (have ":" format and benefit)
+    _first3 = _bullets[:3]
+    _has_format = sum(1 for b in _first3 if ":" in b)
+    _mob_bullets_score = min(100, 40 + _has_format * 20)
+
+    # Main image: most important on mobile - full screen
+    _mob_img_score = 0
+    if _imgs:
+        # Check first image from vision analysis
+        import re as _re2
+        _v_text = st.session_state.get("vision","")
+        _first_block = ""
+        if _v_text:
+            _m = _re2.search(r"PHOTO_BLOCK_1\s*(.*?)(?=PHOTO_BLOCK_2|$)", _v_text, _re2.DOTALL)
+            if _m: _first_block = _m.group(1)
+        _first_score = 0
+        if _first_block:
+            _sm = _re2.search(r"(\d+)/10", _first_block)
+            if _sm: _first_score = int(_sm.group(1)) * 10
+        _mob_img_score = _first_score if _first_score else 60
+
+    # Price visibility on mobile
+    _mob_price_score = 80 if _price else 20
+
+    # A+ on mobile: renders but below fold, less impact
+    _mob_aplus_score = 70 if _has_ap else 30
+
+    # Video: autoplays on mobile = huge conversion boost
+    _mob_video_score = 95 if _has_vid else 40
+
+    # Overall mobile score
+    _mob_overall = int(
+        _mob_title_score  * 0.25 +
+        _mob_bullets_score* 0.20 +
+        _mob_img_score    * 0.30 +
+        _mob_price_score  * 0.05 +
+        _mob_aplus_score  * 0.10 +
+        _mob_video_score  * 0.10
+    )
+    _mob_c = "#22c55e" if _mob_overall>=75 else ("#f59e0b" if _mob_overall>=50 else "#ef4444")
+    _mob_label = (
+        "🟢 Отличная мобильная конверсия" if _mob_overall>=75 else
+        "🟡 Средняя — есть потери на мобиле" if _mob_overall>=50 else
+        "🔴 Высокие потери мобильных покупателей"
+    )
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    _h1col, _h2col = st.columns([3,1])
+    with _h1col:
+        st.markdown(f"""
+<div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:14px;padding:20px 24px">
+  <div style="font-size:1rem;font-weight:700;color:{_mob_c};margin-bottom:6px">{_mob_label}</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+    {"".join([
+        f'<div style="background:#1e293b;border-radius:6px;padding:6px 12px;text-align:center;min-width:80px;border-top:2px solid {"#22c55e" if v>=75 else ("#f59e0b" if v>=50 else "#ef4444")}">' +
+        f'<div style="font-size:1rem;font-weight:800;color:{"#22c55e" if v>=75 else ("#f59e0b" if v>=50 else "#ef4444")}">{v}%</div>' +
+        f'<div style="font-size:0.62rem;color:#64748b">{l}</div></div>'
+        for l,v in [("Title",_mob_title_score),("Bullets",_mob_bullets_score),("Фото",_mob_img_score),("A+",_mob_aplus_score),("Видео",_mob_video_score)]
+    ])}
+  </div>
+</div>""", unsafe_allow_html=True)
+    with _h2col:
+        st.markdown(f"""
+<div style="background:#0f172a;border-radius:14px;padding:20px;text-align:center;height:100%">
+  <div style="font-size:3rem;font-weight:800;color:{_mob_c};line-height:1">{_mob_overall}%</div>
+  <div style="font-size:0.75rem;color:#64748b;margin-top:4px">Mobile Score</div>
+  <div style="background:rgba(255,255,255,0.08);border-radius:6px;height:6px;margin-top:10px">
+    <div style="background:{_mob_c};width:{_mob_overall}%;height:6px;border-radius:6px"></div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Mobile Mockup ─────────────────────────────────────────────────────────
+    _m1col, _m2col = st.columns([1, 1])
+
+    with _m1col:
+        st.markdown("#### 🔍 Поисковая выдача (мобиль)")
+        st.caption("Так покупатель видит твой товар в поиске Amazon")
+
+        _title_search = _title[:80] + ("…" if _tlen > 80 else "")
+        _title_search_c = "#ef4444" if _tlen > 80 else "#22c55e"
+        _main_img_html = ""
+        if _imgs:
+            try:
+                import base64 as _b64
+                _img_data = _b64.b64decode(_imgs[0]["b64"])
+                _img_b64_str = _b64.b64encode(_img_data).decode()
+                _main_img_html = f'<img src="data:image/jpeg;base64,{_img_b64_str}" style="width:100%;height:160px;object-fit:contain;background:#fff;border-radius:6px">'
+            except: _main_img_html = '<div style="width:100%;height:160px;background:#f1f5f9;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#94a3b8">нет фото</div>'
+
+        st.markdown(f"""
+<div style="background:#fff;border-radius:12px;padding:12px;border:1px solid #e2e8f0;max-width:320px">
+  {_main_img_html}
+  <div style="margin-top:8px">
+    <div style="font-size:0.78rem;color:#0f1111;line-height:1.3;font-weight:500">{_title_search}</div>
+    <div style="margin-top:4px">
+      <span style="color:{_title_search_c};font-size:0.65rem">{"⚠️ " + str(_tlen) + " симв. — обрезается" if _tlen>80 else "✅ " + str(_tlen) + " симв. — OK"}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
+      <span style="color:#f59e0b;font-size:0.8rem">{"★" * min(5,int(float(str(_rating or "0").split()[0]) + 0.5))}</span>
+      <span style="font-size:0.72rem;color:#007185">{_reviews}</span>
+    </div>
+    <div style="font-size:1rem;font-weight:700;color:#0f1111;margin-top:4px">{_price}</div>
+    <div style="background:#ffd814;border-radius:4px;padding:4px 8px;font-size:0.72rem;font-weight:700;color:#0f1111;margin-top:6px;display:inline-block">Add to Cart</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    with _m2col:
+        st.markdown("#### 📄 Страница товара (мобиль)")
+        st.caption("Первый экран без скролла — решает 80% покупок")
+
+        _title_pdp = _title[:120] + ("…" if _tlen > 120 else "")
+        _title_pdp_c = "#ef4444" if _tlen > 120 else "#22c55e"
+        _b1 = _bullets[0][:90] + "…" if _bullets and len(_bullets[0])>90 else (_bullets[0] if _bullets else "")
+        _b2 = _bullets[1][:90] + "…" if len(_bullets)>1 and len(_bullets[1])>90 else (_bullets[1] if len(_bullets)>1 else "")
+        _b3 = _bullets[2][:90] + "…" if len(_bullets)>2 and len(_bullets[2])>90 else (_bullets[2] if len(_bullets)>2 else "")
+
+        st.markdown(f"""
+<div style="background:#fff;border-radius:12px;padding:12px;border:1px solid #e2e8f0;max-width:320px">
+  {_main_img_html if _imgs else ""}
+  <div style="margin-top:8px">
+    <div style="font-size:0.75rem;color:#0f1111;line-height:1.3;font-weight:500">{_title_pdp}</div>
+    <div style="font-size:0.62rem;color:{_title_pdp_c};margin-top:2px">{"⚠️ обрезается" if _tlen>120 else "✅ полный title"}</div>
+    <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+      <span style="color:#f59e0b;font-size:0.75rem">★ {_rating}</span>
+      <span style="font-size:0.68rem;color:#007185">{_reviews} отзывов</span>
+    </div>
+    <div style="font-size:1.1rem;font-weight:700;color:#0f1111;margin-top:4px">{_price}</div>
+    <div style="background:#ffd814;border-radius:6px;padding:8px;font-size:0.78rem;font-weight:700;color:#0f1111;text-align:center;margin-top:8px">Add to Cart</div>
+    <div style="margin-top:8px;font-size:0.7rem;color:#0f1111">
+      {"".join([f"<div style='margin-bottom:3px'>• {b}</div>" for b in [_b1,_b2,_b3] if b])}
+      {"<div style='color:#007185;font-size:0.68rem'>▼ See more</div>" if len(_bullets)>3 else ""}
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Issues & Fixes ────────────────────────────────────────────────────────
+    st.subheader("⚠️ Мобильные проблемы и фиксы")
+
+    _mob_issues = []
+
+    if _tlen > 80:
+        _mob_issues.append({
+            "severity": "HIGH",
+            "icon": "🔴",
+            "title": f"Title обрезается в поиске ({_tlen} симв., лимит ~80)",
+            "impact": "Покупатель не видит ключевые слова → теряет интерес до клика",
+            "fix": f"Перенеси самые важные слова в первые 80 символов. Сейчас виден только: '{_title[:80]}...'"
+        })
+    if _tlen > 120:
+        _mob_issues.append({
+            "severity": "HIGH",
+            "icon": "🔴",
+            "title": f"Title обрезается на странице товара ({_tlen} симв., лимит ~120)",
+            "impact": "На первом экране покупатель видит неполное название",
+            "fix": "Сократи title до 120 символов — всё важное должно быть в первых 120"
+        })
+    if not _has_vid:
+        _mob_issues.append({
+            "severity": "HIGH",
+            "icon": "🔴",
+            "title": "Нет видео — упускаешь главный мобильный конверсионный элемент",
+            "impact": "Видео автоплеится на мобиле при скролле → +15-30% к конверсии",
+            "fix": "Добавь короткое видео 30-60 сек: товар в действии + ключевые features"
+        })
+    if len(_bullets) > 0:
+        _long_bullets = [i+1 for i,b in enumerate(_bullets[:3]) if len(b)>150]
+        if _long_bullets:
+            _mob_issues.append({
+                "severity": "MEDIUM",
+                "icon": "🟡",
+                "title": f"Bullets {_long_bullets} слишком длинные для мобиля",
+                "impact": "На мобиле первые 3 bullet — единственное что читают до 'See more'",
+                "fix": "Укороти первые 3 bullet до 120-150 символов. Самое важное — в начало"
+            })
+    if not _has_ap:
+        _mob_issues.append({
+            "severity": "MEDIUM",
+            "icon": "🟡",
+            "title": "Нет A+ контента — конкуренты выглядят богаче на мобиле",
+            "impact": "A+ рендерится ниже на мобиле, но создаёт brand trust",
+            "fix": "Добавь базовый A+ с comparison chart и lifestyle фото"
+        })
+    if not _bullets:
+        _mob_issues.append({
+            "severity": "HIGH",
+            "icon": "🔴",
+            "title": "Нет bullets — покупатель не получает инфо без скролла",
+            "impact": "На мобиле bullets — первое что читают после title и цены",
+            "fix": "Добавь 5 bullets с форматом 'Feature: Benefit'"
+        })
+
+    if not _mob_issues:
+        st.success("✅ Мобильных проблем не найдено — листинг хорошо адаптирован")
+    else:
+        _high = [i for i in _mob_issues if i["severity"]=="HIGH"]
+        _med  = [i for i in _mob_issues if i["severity"]=="MEDIUM"]
+        for _issues_group, _color, _label in [(_high,"#ef4444","🔴 Критичные"), (_med,"#f59e0b","🟡 Важные")]:
+            if not _issues_group: continue
+            st.markdown(f'<div style="font-size:0.8rem;font-weight:700;color:{_color};margin:12px 0 6px">{_label} — {len(_issues_group)} проблем</div>', unsafe_allow_html=True)
+            for _iss in _issues_group:
+                with st.container(border=True):
+                    st.markdown(f"**{_iss['icon']} {_iss['title']}**")
+                    st.caption(f"📉 Влияние: {_iss['impact']}")
+                    st.info(f"🛠 Фикс: {_iss['fix']}")
+
+    # ── AI Mobile Consultant ──────────────────────────────────────────────────
+    st.divider()
+    if st.button("🧠 AI-анализ мобильной конверсии", type="primary", key="btn_mobile_ai"):
+        with st.spinner("🧠 AI анализирует мобильный опыт..."):
+            _aud_mob = st.session_state.get("target_audience","")
+            _mob_prompt = f"""Ты эксперт по мобильной конверсии Amazon. Проанализируй листинг.
+
+Товар: {_title}
+Title длина: {_tlen} символов
+Bullets ({len(_bullets)}): {chr(10).join(_bullets[:3])}
+Цена: {_price} | Рейтинг: {_rating} ({_reviews} отз.)
+Видео: {"есть" if _has_vid else "нет"}
+A+: {"есть" if _has_ap else "нет"}
+{f"Аудитория: {_aud_mob}" if _aud_mob else ""}
+
+Mobile Score: {_mob_overall}%
+
+Дай конкретный анализ:
+**Первый экран мобиля** (выше фолда): что видит покупатель и что теряет
+**Главная мобильная проблема** которая убивает конверсию прямо сейчас
+**Одно изменение** которое даст максимальный прирост мобильной конверсии
+**Benchmark**: у топ-листингов этой ниши обычно есть X — у нас нет
+
+Ответь {'по-русски' if st.session_state.get('analysis_lang','ru')=='ru' else 'in English'}. Коротко и конкретно."""
+
+            _mob_ai = ai_call("Mobile conversion expert.", _mob_prompt, max_tokens=600)
+            st.session_state["_mob_ai"] = _mob_ai
+
+    if st.session_state.get("_mob_ai"):
+        st.markdown(
+            f'<div style="background:#0f172a;border:1px solid #334155;border-radius:12px;padding:18px 20px;line-height:1.7">'
+            f'<div style="font-size:0.75rem;font-weight:700;color:#64748b;letter-spacing:0.08em;margin-bottom:10px">🧠 AI МОБИЛЬНЫЙ КОНСУЛЬТАНТ</div>'
+            f'<div style="color:#e2e8f0;font-size:0.9rem">{st.session_state["_mob_ai"].replace(chr(10),"<br>")}</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
 # ══ Workflow ══════════════════════════════════════════════════════════════════
 elif page == "📋 Workflow":
