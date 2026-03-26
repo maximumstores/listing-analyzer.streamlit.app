@@ -715,7 +715,7 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
         raise Exception(f"Gemini Vision {_last_err}")
     raise Exception(f"Gemini Vision исчерпан: {_last_err}")
 
-def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=600, system=None):
+def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=500, system=None):
     if st.session_state.get("use_gemini"):
         full = f"{system}\n\n{prompt}" if system else prompt
         if image_url:
@@ -832,10 +832,13 @@ def analyze_vision(images, product_data, asin, log, lang=None):
     reviews= product_data.get("reviews_count","")
     bsr    = product_data.get("bestseller_rank","")
 
+    _target_aud = st.session_state.get("target_audience","")
+    _aud_line = f" | Target buyer: {_target_aud}" if _target_aud else ""
+
     if lang == "en":
         intro = f"""You are an Amazon photo conversion expert. Score each product photo using this RUBRIC.
 
-Product: {title} | ASIN: {asin} | Price: {price} | Rating: {rating}
+Product: {title} | ASIN: {asin} | Price: {price} | Rating: {rating}{_aud_line}
 
 SCORING RUBRIC (each photo scored 1-10):
 +2 pts — Product visibility: what % of frame is the ACTUAL sold product? If product is hidden under other clothing or <30% of frame — max 1 pt for this criterion
@@ -875,7 +878,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
     else:
         intro = f"""Ты эксперт по конверсии Amazon фотографий. Оценивай каждое фото по РУБРИКУ.
 
-Товар: {title} | ASIN: {asin} | Цена: {price} | Рейтинг: {rating}
+Товар: {title} | ASIN: {asin} | Цена: {price} | Рейтинг: {rating}{_aud_line}
 
 РУБРИК ОЦЕНКИ (каждое фото 1-10 баллов):
 +2 балла — Видимость товара: сколько % кадра занимает продаваемый товар? Если <30% — максимум 1 балл
@@ -924,7 +927,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
             else:
                 _pp = f"Ты эксперт Amazon фотографий. Оцени это фото #{_i+1} по рубрику: +2 видимость товара, +2 фон, +2 инфоценность, +2 Amazon соответствие, +1 appeal, +1 уникальность. Штрафы: -3 товар не виден, -2 лишняя одежда на главном, -2 фон не белый. Товар: {title}"
             _pp += f"\n\nОтветь СТРОГО в формате:\nPHOTO_BLOCK_{_i+1}\n{_fmt}"
-            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=700)
+            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=500)
             _m = re.search(r"PHOTO_BLOCK_\d+\s*(.*)", _br, re.DOTALL)
             _blk = _m.group(1).strip() if _m else _br.strip()
             results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
@@ -940,7 +943,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
                     photo_intro = f"Ты эксперт Amazon фотографий. Оцени фото #{i+1}: +2 чёткость, +2 фон, +2 инфоценность, +2 Amazon, +1 appeal, +1 уникальность. Товар: {title}"
             _full_prompt = photo_intro + "\n" + block_fmt.format(i=i+1)
             res = ai_vision_call(prompt=_full_prompt, image_b64=img["b64"],
-                image_url=img.get("url"), media_type=img.get("media_type","image/jpeg"), max_tokens=700)
+                image_url=img.get("url"), media_type=img.get("media_type","image/jpeg"), max_tokens=500)
             results.append("PHOTO_BLOCK_" + str(i+1) + "\n" + res)
 
     result = "\n\n".join(results)
@@ -1695,7 +1698,7 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
         )
 
     with st.expander("🎯 Фокус анализа (необязательно)", expanded=False):
-        st.caption("Помогает AI расставить приоритеты")
+        st.caption("Помогает AI расставить приоритеты и оценивать фото под нужную аудиторию")
         _fa1, _fa2, _fa3 = st.columns(3)
         with _fa1:
             goal = st.radio("🎯 Цель", [
@@ -1703,19 +1706,26 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                 "Выйти в топ поиска", "Победить конкурента",
             ], key="goal_sel")
         with _fa2:
-            audience = st.radio("👥 Аудитория", [
-                "Не указано", "Спортсмены", "Outdoor / туризм",
-                "Everyday / офис", "Business casual",
-            ], key="aud_sel")
-        with _fa3:
             positioning = st.radio("💰 Позиционирование", [
                 "Не указано", "Бюджет", "Средний сегмент", "Премиум",
             ], key="pos_sel")
+        with _fa3:
+            st.markdown('<div style="font-size:0.85rem;font-weight:600;margin-bottom:4px">👤 Целевая аудитория</div>', unsafe_allow_html=True)
+            audience_custom = st.text_input(
+                "Аудитория", key="aud_custom",
+                value=st.session_state.get("aud_custom_saved",""),
+                placeholder="Женщина, 45 лет, активный образ жизни",
+                label_visibility="collapsed"
+            )
+            st.caption("Влияет на Vision-анализ фото")
 
         _ctx_parts = [f"Analysis goal: {goal}"]
-        if audience != "Не указано":    _ctx_parts.append(f"Target audience: {audience}")
+        if audience_custom.strip():
+            _ctx_parts.append(f"Target audience: {audience_custom.strip()}")
+            st.session_state["aud_custom_saved"] = audience_custom.strip()
         if positioning != "Не указано": _ctx_parts.append(f"Brand positioning: {positioning}")
         st.session_state["ai_context"] = " | ".join(_ctx_parts)
+        st.session_state["target_audience"] = audience_custom.strip()
 
     _has_any_url = bool(our_url.strip()) or any(u.strip() for u in competitor_urls)
     _bcol1, _bcol2 = st.columns([3, 1])
@@ -2758,6 +2768,86 @@ elif page == "📸 Фото":
     blocks = [b.strip() for b in _all_blocks if b.strip() and re.search(r"\d+/10", b)]
     if not blocks: blocks = [b.strip() for b in _all_blocks if b.strip()]
 
+    # ── Сводка по всем фото ────────────────────────────────────────────────
+    if blocks:
+        _scores_sum = []
+        for _bi, _bt in enumerate(blocks):
+            _sm = re.search(r"(\d+)/10", _bt)
+            _sv = int(_sm.group(1)) if _sm else 0
+            _tm = re.search(r"(?:[Тт]ип|Type)\s*[:\-]\s*(.+)", _bt)
+            _tv = _tm.group(1).strip()[:18] if _tm else f"#{_bi+1}"
+            _scores_sum.append((_bi+1, _sv, _tv))
+        _avg = sum(s for _,s,_ in _scores_sum) / len(_scores_sum) if _scores_sum else 0
+        _avg_c = "#22c55e" if _avg>=7 else ("#f59e0b" if _avg>=5 else "#ef4444")
+        _cards_html = ""
+        for _num, _sc, _tp in _scores_sum:
+            _cc = "#22c55e" if _sc>=8 else ("#f59e0b" if _sc>=6 else "#ef4444")
+            _cards_html += (
+                f'<div style="display:flex;flex-direction:column;align-items:center;'
+                f'background:#1e293b;border-radius:8px;padding:8px 10px;min-width:68px;'
+                f'border-top:3px solid {_cc}">'
+                f'<div style="font-size:0.68rem;color:#64748b;margin-bottom:2px">#{_num}</div>'
+                f'<div style="font-size:1.5rem;font-weight:800;color:{_cc};line-height:1">{_sc}</div>'
+                f'<div style="font-size:0.6rem;color:{_cc}">/10</div>'
+                f'<div style="font-size:0.58rem;color:#64748b;margin-top:3px;text-align:center;'
+                f'max-width:62px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{_tp}</div>'
+                f'</div>'
+            )
+        st.markdown(
+            f'<div style="background:#0f172a;border-radius:12px;padding:14px 16px;margin-bottom:16px">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+            f'<div style="font-size:0.85rem;font-weight:700;color:#94a3b8">📊 Итог: {len(_scores_sum)} фото</div>'
+            f'<div style="font-size:1.1rem;font-weight:800;color:{_avg_c}">Средняя: {_avg:.1f}/10</div>'
+            f'</div>'
+            f'<div style="display:flex;gap:8px;flex-wrap:wrap">{_cards_html}</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+        st.divider()
+
+        # ── AI McKinsey-style overall gallery assessment ──────────────────
+        if st.button("🧠 AI-оценка галереи", key="btn_gallery_ai", use_container_width=False):
+            with st.spinner("🧠 Анализирую всю галерею..."):
+                _aud_ctx = st.session_state.get("target_audience","")
+                _aud_str = f"\nЦелевая аудитория: {_aud_ctx}" if _aud_ctx else ""
+                _all_vision_text = "\n\n".join([
+                    f"Фото #{_i+1}: {_bt[:400]}"
+                    for _i,_bt in enumerate(blocks)
+                ])
+                _gal_prompt = f"""Ты McKinsey-консультант по Amazon конверсии. Проанализируй всю фотогалерею листинга как единое целое.
+
+Товар: {od.get('title','')}
+{_aud_str}
+
+АНАЛИЗ ФОТО:
+{_all_vision_text[:3000]}
+
+Дай оценку в формате:
+**Общее впечатление покупателя** (1-2 предл.): что чувствует покупатель просматривая галерею целиком
+**Визуальная последовательность**: есть ли логика от главного фото к деталям, или хаос
+**Топ-2 сильных стороны** галереи
+**Топ-2 критических проблемы** которые убивают конверсию
+**McKinsey-вывод** (1 предл.): "Галерея [делает X], но [не закрывает Y], что приводит к Z"
+**Одно действие с максимальным ROI**: что изменить прямо сейчас
+
+Ответь {'по-русски' if st.session_state.get('analysis_lang','ru')=='ru' else 'in English'}."""
+                _gal_result = ai_call("Amazon photo gallery expert. Concise McKinsey-style.", _gal_prompt, max_tokens=800)
+                st.session_state["_gallery_ai"] = _gal_result
+
+        if st.session_state.get("_gallery_ai"):
+            st.markdown(
+                f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                f'padding:16px 20px;margin-bottom:12px">'
+                f'<div style="font-size:0.75rem;font-weight:700;color:#64748b;letter-spacing:0.08em;'
+                f'margin-bottom:10px">🧠 AI ОЦЕНКА ГАЛЕРЕИ</div>'
+                f'<div style="color:#e2e8f0;font-size:0.9rem;line-height:1.6">{st.session_state["_gallery_ai"].replace(chr(10),"<br>")}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        st.divider()
+
+
+
     def _render_photo_block(img_data, text, idx):
         sm = re.search(r"(\d+)/10", text)
         score = int(sm.group(1)) if sm else 0
@@ -3259,4 +3349,4 @@ elif page == "📋 Workflow":
             if st.button("💾 Сохранить",type="primary",key="wf_save"):
                 if db_update_workflow(_sel_item["id"],_new_status,_new_note):
                     st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}"); st.rerun()
-                else: st.error("Ошибка сохранения") 
+                else: st.error("Ошибка сохранения")
