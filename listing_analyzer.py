@@ -5,6 +5,14 @@ import io
 from datetime import datetime
 
 # ── PostgreSQL history ─────────────────────────────────────────────────────────
+def safe_float_rating(val):
+    """Safely convert rating string like '4.5 out of 5 stars' to float"""
+    try:
+        return float(str(val or 0).split()[0].replace(",","."))
+    except:
+        return 0.0
+
+
 def get_db():
     db_url = st.secrets.get("DATABASE_URL","")
     if not db_url:
@@ -3052,7 +3060,7 @@ elif page == "🏆 Benchmark":
 
     def auto_score(d):
         pi2=d.get("product_information",{}); title2=d.get("title",""); imgs2=d.get("images",[]); bul2=d.get("feature_bullets",[])
-        desc2=d.get("description",""); rating2=float(d.get("average_rating",0) or 0)
+        desc2=d.get("description",""); rating2=float(str(d.get("average_rating",0) or 0).split()[0]) if str(d.get("average_rating",0) or 0).split()[0].replace(".","").isdigit() else 0.0
         rev_cnt=int(str(pi2.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").strip() or 0)
         has_vid=int(d.get("number_of_videos",0) or 0)>0; has_ap=bool(d.get("aplus"))
         is_prime=bool(d.get("is_prime_exclusive") or d.get("is_prime"))
@@ -3367,7 +3375,7 @@ elif _is_competitor_page:
     if not c: st.warning("Данные конкурента не найдены"); st.stop()
     cpi=c.get("product_information",{}); casin=get_asin_from_data(c); _t2=c.get("title","")
     _i2=c.get("images",[]); _b2=c.get("feature_bullets",[]); _d2=c.get("description","")
-    _rat2=float(c.get("average_rating",0) or 0)
+    _rat2=float(str(c.get("average_rating",0) or 0).split()[0].replace(",",".")) if str(c.get("average_rating",0) or 0).split()[0].replace(".","").replace(",","").isdigit() else 0.0
     _rev2=int(str(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").strip() or 0)
     _vid2=int(c.get("number_of_videos",0) or 0)>0; _ap2=bool(c.get("aplus"))
     _pr2=bool(c.get("is_prime_exclusive") or c.get("is_prime") or "amazon" in str(c.get("ships_from","")).lower())
