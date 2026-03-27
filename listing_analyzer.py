@@ -4094,4 +4094,4 @@ elif page == "📋 Workflow":
             if st.button("💾 Сохранить",type="primary",key="wf_save"):
                 if db_update_workflow(_sel_item["id"],_new_status,_new_note):
                     st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}"); st.rerun()
-                else: st.error("Ошибка сохранения")
+                else: st.error("Ошибка сохранения") 
