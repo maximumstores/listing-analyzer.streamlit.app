@@ -3399,6 +3399,12 @@ elif _is_competitor_page:
     _h=int((_ts*0.10+_bs*0.10+_ds*0.10+_ps*0.10+_as*0.10+_rs*0.15+_bsrs*0.15+7*0.10+_vs*0.05+_prs*0.05)*10)
     ch=_h; hc="#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
 
+    # Variables needed for price line
+    _cprev   = c.get("previous_price","") or c.get("list_price","")
+    _ccoupon = c.get("coupon_text","") or ("🎟️ Купон" if c.get("is_coupon_exists") else "")
+    _cpromo  = c.get("promo_text","")
+    _cbought = c.get("number_of_people_bought","")
+
     st.title(f"🔴 Конкурент {cidx+1}")
 
     # Build price line — same as health_card
