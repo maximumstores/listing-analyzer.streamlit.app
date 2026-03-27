@@ -1309,6 +1309,54 @@ NEVER give a vague rec like "mention X somewhere" — always specify exact place
             raise ValueError("Не удалось исправить JSON")
 
 
+def db_save_competitor(casin, cdata, cai, cvision, cimgs, caplus_urls, caplus_vision, our_asin):
+    """Save competitor analysis as a separate row in listing_analysis"""
+    conn = get_db()
+    if not conn: return False
+    if not cai or not isinstance(cai, dict): return False
+    if pct(cai.get("overall_score", 0)) == 0: return False
+    try:
+        # Compress images
+        _imgs_to_save = []
+        for _img_d in (cimgs or [])[:5]:
+            try:
+                _ib = base64.b64decode(_img_d["b64"])
+                _pil = Image.open(io.BytesIO(_ib)).convert("RGB")
+                _pil.thumbnail((300, 300))
+                _tb = io.BytesIO(); _pil.save(_tb, "JPEG", quality=55); _tb.seek(0)
+                _imgs_to_save.append({"b64": base64.b64encode(_tb.read()).decode(), "media_type": "image/jpeg"})
+            except: pass
+
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO listing_analysis
+              (asin, listing_type, overall_score, title_score, bullets_score, images_score,
+               aplus_score, cosmo_score, rufus_score, result_json, vision_text,
+               our_title, our_data_json, marketplace, images_json, aplus_img_urls_json, aplus_vision_text)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            casin, 'конкурент',
+            pct(cai.get("overall_score",0)),
+            pct(cai.get("title_score",0)),
+            pct(cai.get("bullets_score",0)),
+            pct(cai.get("images_score",0)),
+            pct(cai.get("aplus_score",0)),
+            0, 0,
+            json.dumps(cai, ensure_ascii=False),
+            cvision or "",
+            cdata.get("title","")[:200],
+            json.dumps(cdata, ensure_ascii=False),
+            "com",
+            json.dumps(_imgs_to_save, ensure_ascii=False),
+            json.dumps(caplus_urls or [], ensure_ascii=False),
+            caplus_vision or ""
+        ))
+        conn.commit(); conn.close()
+        return True
+    except Exception as _e:
+        return False
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log, prog=None):
     _steps_done = []
@@ -1423,6 +1471,10 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         st.session_state[f"comp_ai_{i}"] = cai
         if cimgs_dl:
             st.session_state[f"comp_vision_{i}"] = (cimgs_dl, cvision)
+        # Save competitor to DB
+        _cap_urls_save = st.session_state.get(f"comp_aplus_urls_{i}", [])
+        _cav_save = st.session_state.get(f"comp_aplus_vision_{i}", "")
+        db_save_competitor(casin, cdata, cai, cvision, cimgs_dl, _cap_urls_save, _cav_save, asin)
 
     _prog(78, "🧠 AI финальный анализ — COSMO + Rufus + JTBD + VPC...")
     result = analyze_text(our_data, comp_data_list, vision_result, asin, log, lang=_lang)
@@ -1861,21 +1913,32 @@ def db_all_competitors():
     if not conn: return []
     try:
         cur = conn.cursor()
-        cur.execute("""SELECT asin, competitors_json, analyzed_at, our_title
-            FROM listing_analysis WHERE competitors_json IS NOT NULL AND competitors_json != '[]'
-            ORDER BY analyzed_at DESC LIMIT 50""")
+        cur.execute("""
+            SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at,
+                   result_json, our_data_json, images_json, aplus_img_urls_json, aplus_vision_text, vision_text
+            FROM listing_analysis
+            WHERE listing_type = 'конкурент'
+            ORDER BY asin, analyzed_at DESC
+        """)
         rows = cur.fetchall(); conn.close()
-        seen = {}
-        for asin, comp_json, date, our_title in rows:
-            try:
-                for c in (json.loads(comp_json) if comp_json else []):
-                    casin = c.get("asin","")
-                    if not casin or casin in seen: continue
-                    seen[casin] = {"asin":casin,"title":c.get("title",""),"score":c.get("overall",0),
-                        "price":c.get("price",""),"rating":c.get("rating",""),"reviews":c.get("reviews",""),
-                        "our_title":our_title,"date":date}
-            except: pass
-        return list(seen.values())
+        result = []
+        for r in rows:
+            _price, _rating, _reviews = "", "", ""
+            if r[5]:
+                try:
+                    _od = json.loads(r[5])
+                    _price = _od.get("price","")
+                    _rating = str(_od.get("average_rating",""))
+                    _reviews = str(_od.get("product_information",{}).get("Customer Reviews",{}).get("ratings_count","") or _od.get("reviews_count",""))
+                except: pass
+            result.append({
+                "asin": r[0], "title": r[1], "score": r[2], "date": r[3],
+                "price": _price, "rating": _rating, "reviews": _reviews,
+                "result_json": r[4], "our_data_json": r[5],
+                "images_json": r[6], "aplus_urls_json": r[7],
+                "aplus_vision": r[8], "vision_text": r[9],
+            })
+        return result
     except: return []
 
 def page_history():
@@ -1920,24 +1983,63 @@ def page_history():
         else:
             _csearch = st.text_input("🔍", placeholder="ASIN или название", key="comp_hist_search", label_visibility="collapsed")
             _fcomps = [c for c in all_comps if not _csearch or _csearch.lower() in c["asin"].lower() or _csearch.lower() in (c.get("title") or "").lower()]
-            for _ca in _fcomps:
+            for _cidx2, _ca in enumerate(_fcomps):
                 _csc = _ca.get("score",0) or 0
                 _csc_c = "#22c55e" if _csc>=75 else ("#f59e0b" if _csc>=50 else ("#ef4444" if _csc>0 else "#94a3b8"))
-                _cc1, _cc2 = st.columns([8, 2])
+                _csc_l = "Strong" if _csc>=75 else ("Needs Work" if _csc>=50 else ("Critical" if _csc>0 else "—"))
+                _cc1, _cc2, _cc3, _cc4 = st.columns([1, 6, 2, 1.5])
+                # Thumbnail
                 with _cc1:
+                    _c_img_url = ""
+                    if _ca.get("our_data_json"):
+                        try:
+                            _cod = json.loads(_ca["our_data_json"])
+                            _c_imgs = _cod.get("images_of_specified_asin", _cod.get("images",[]))
+                            if _c_imgs: _c_img_url = next((u for u in _c_imgs if isinstance(u,str) and u.startswith("http")), "")
+                        except: pass
+                    if _c_img_url:
+                        st.markdown(f'<img src="{_c_img_url}" width="56" height="56" style="object-fit:cover;border-radius:8px;border:1px solid #e2e8f0">', unsafe_allow_html=True)
+                    else:
+                        _pl = (_ca.get("title","?")[0]).upper()
+                        st.markdown(f'<div style="width:56px;height:56px;background:#fee2e2;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:800;color:#dc2626">{_pl}</div>', unsafe_allow_html=True)
+                with _cc2:
+                    _cdate = _ca["date"].strftime("%d.%m.%Y %H:%M") if _ca.get("date") else "—"
                     st.markdown(
-                        f'<div style="padding:5px 0">' +
-                        f'<div style="font-size:0.88rem;font-weight:600">{(_ca.get("title") or "")[:60]}</div>' +
-                        f'<div style="font-size:0.76rem;color:#64748b">🔴 <a href="https://www.amazon.com/dp/{_ca["asin"]}" target="_blank" style="color:#3b82f6">{_ca["asin"]} ↗</a>' +
+                        f'<div style="padding:6px 0">' +
+                        f'<div style="font-size:0.9rem;font-weight:600;color:#0f172a">{(_ca.get("title") or "")[:60]}</div>' +
+                        f'<div style="font-size:0.78rem;color:#64748b;margin-top:3px">🔴 <a href="https://www.amazon.com/dp/{_ca["asin"]}" target="_blank" style="color:#3b82f6">{_ca["asin"]} ↗</a>' +
                         (f' · 💰{_ca["price"]}' if _ca.get("price") else "") +
                         (f' · ⭐{_ca["rating"]}' if _ca.get("rating") else "") +
-                        (f' · {_ca["reviews"]}отз.' if _ca.get("reviews") else "") +
-                        f'</div><div style="font-size:0.68rem;color:#94a3b8">Из: {(_ca.get("our_title") or "")[:35]}</div></div>',
+                        (f' · ({_ca["reviews"]} отз.)' if _ca.get("reviews") else "") +
+                        f' · {_cdate}</div></div>',
                         unsafe_allow_html=True)
-                with _cc2:
+                with _cc3:
                     if _csc>0:
-                        st.markdown(f'<div style="text-align:center"><b style="color:{_csc_c};font-size:1.3rem">{_csc}%</b></div>', unsafe_allow_html=True)
-                st.markdown('<hr style="margin:2px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
+                        st.markdown(f'<div style="text-align:center;padding:8px 0"><div style="font-size:1.5rem;font-weight:800;color:{_csc_c}">{_csc}%</div><div style="font-size:0.7rem;color:{_csc_c}">{_csc_l}</div></div>', unsafe_allow_html=True)
+                with _cc4:
+                    if st.button("Open", key=f"comp_hist_open_{_cidx2}", use_container_width=True, type="primary"):
+                        # Load competitor into session
+                        if _ca.get("result_json"):
+                            try: st.session_state["comp_ai_0"] = json.loads(_ca["result_json"])
+                            except: pass
+                        if _ca.get("our_data_json"):
+                            try: st.session_state["comp_data_list"] = [json.loads(_ca["our_data_json"])]
+                            except: pass
+                        if _ca.get("images_json"):
+                            try: st.session_state["comp_vision_0"] = (json.loads(_ca["images_json"]), _ca.get("vision_text",""))
+                            except: pass
+                        if _ca.get("aplus_urls_json"):
+                            try: st.session_state["comp_aplus_urls_0"] = json.loads(_ca["aplus_urls_json"])
+                            except: pass
+                        if _ca.get("aplus_vision"):
+                            st.session_state["comp_aplus_vision_0"] = _ca["aplus_vision"]
+                        # Need result to unlock pages
+                        if "result" not in st.session_state:
+                            st.session_state["result"] = {"overall_score": 0}
+                        st.session_state["_hist_loaded"] = _ca["asin"]
+                        st.session_state["page"] = "🔴 Конкурент 1"
+                        st.rerun()
+                st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
     with _tab_our:
         st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
     import pandas as pd
