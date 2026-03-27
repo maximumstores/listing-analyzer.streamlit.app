@@ -2551,7 +2551,7 @@ def health_card():
 </div>""", unsafe_allow_html=True)
     else:
         try:
-            _rat_val = float(str(rating_h or 0).split()[0].replace(",","."))
+            _rat_val = safe_float_rating(rating_h)
         except:
             _rat_val = 0.0
         _rat_c = "#22c55e" if _rat_val >= 4.4 else ("#f59e0b" if _rat_val >= 4.3 else "#ef4444")
@@ -3060,7 +3060,7 @@ elif page == "🏆 Benchmark":
 
     def auto_score(d):
         pi2=d.get("product_information",{}); title2=d.get("title",""); imgs2=d.get("images",[]); bul2=d.get("feature_bullets",[])
-        desc2=d.get("description",""); rating2=float(str(d.get("average_rating",0) or 0).split()[0]) if str(d.get("average_rating",0) or 0).split()[0].replace(".","").isdigit() else 0.0
+        desc2=d.get("description",""); rating2=safe_float_rating(d.get("average_rating",0))
         rev_cnt=int(str(pi2.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").strip() or 0)
         has_vid=int(d.get("number_of_videos",0) or 0)>0; has_ap=bool(d.get("aplus"))
         is_prime=bool(d.get("is_prime_exclusive") or d.get("is_prime"))
@@ -3375,7 +3375,7 @@ elif _is_competitor_page:
     if not c: st.warning("Данные конкурента не найдены"); st.stop()
     cpi=c.get("product_information",{}); casin=get_asin_from_data(c); _t2=c.get("title","")
     _i2=c.get("images",[]); _b2=c.get("feature_bullets",[]); _d2=c.get("description","")
-    _rat2=float(str(c.get("average_rating",0) or 0).split()[0].replace(",",".")) if str(c.get("average_rating",0) or 0).split()[0].replace(".","").replace(",","").isdigit() else 0.0
+    _rat2=safe_float_rating(c.get("average_rating",0))
     _rev2=int(str(cpi.get("Customer Reviews",{}).get("ratings_count","0") or 0).replace(",","").strip() or 0)
     _vid2=int(c.get("number_of_videos",0) or 0)>0; _ap2=bool(c.get("aplus"))
     _pr2=bool(c.get("is_prime_exclusive") or c.get("is_prime") or "amazon" in str(c.get("ships_from","")).lower())
@@ -3400,7 +3400,53 @@ elif _is_competitor_page:
     ch=_h; hc="#22c55e" if ch>=75 else ("#f59e0b" if ch>=50 else "#ef4444")
 
     st.title(f"🔴 Конкурент {cidx+1}")
-    st.markdown(f'<div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:14px;padding:18px;color:white;margin-bottom:14px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px"><div><a href="https://www.amazon.com/dp/{casin}" target="_blank" style="font-size:0.78rem;opacity:0.6;color:#93c5fd;text-decoration:none">{cbrand} · {casin} ↗</a><div style="font-size:0.95rem;font-weight:600;max-width:500px;margin-top:3px">{_t2[:80]}{"..." if tlen>80 else ""}</div><div style="display:flex;gap:12px;margin-top:5px;font-size:0.78rem;opacity:0.8"><span>⭐ {crating} ({crev})</span><span>💰 {cprice}</span><span>{tlen} симв.</span></div></div><div style="text-align:center"><div style="font-size:2.8rem;font-weight:800;color:{hc}">{ch}%</div></div></div></div>', unsafe_allow_html=True)
+
+    # Build price line — same as health_card
+    _cprice_parts = []
+    if cprice:
+        _cps = f"💰 <b>{cprice}</b>"
+        if _cprev and _cprev != cprice:
+            _cps += f" <span style='text-decoration:line-through;opacity:0.5'>{_cprev}</span>"
+        _cprice_parts.append(_cps)
+    if _ccoupon:
+        _cprice_parts.append(f"<span style='background:#16a34a;color:white;border-radius:4px;padding:1px 6px;font-size:0.75rem'>🎟️ {_ccoupon}</span>")
+    if _cpromo:
+        _cprice_parts.append(f"<span style='background:#1d4ed8;color:white;border-radius:4px;padding:1px 6px;font-size:0.75rem'>📦 {_cpromo[:35]}</span>")
+    if _pr2:
+        _cprice_parts.append("<span style='background:#f59e0b;color:#1c1917;border-radius:4px;padding:1px 6px;font-size:0.75rem'>👑 Prime</span>")
+    if _cbought:
+        _cprice_parts.append(f"<span style='opacity:0.7;font-size:0.75rem'>🛒 {_cbought}</span>")
+    _cprice_line = "  ".join(_cprice_parts)
+
+    _cmp_saved = st.session_state.get("_marketplace","com")
+    _crat_c = "#22c55e" if _rat2>=4.4 else ("#f59e0b" if _rat2>=4.3 else "#ef4444")
+    _ctlen_c = "#fca5a5" if tlen>125 else "#86efac"
+    _cbsr_s = str(cpi.get("Best Sellers Rank",""))[:50]
+
+    st.markdown(f"""
+<div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+    <div>
+      <a href="https://www.amazon.{_cmp_saved}/dp/{casin}" target="_blank" style="font-size:0.8rem;opacity:0.6;color:#93c5fd;text-decoration:none">{cbrand} · {casin} ↗</a>
+      <div style="font-size:1rem;font-weight:600;max-width:520px;line-height:1.4;margin-top:4px">{_t2[:80]}{"..." if tlen>80 else ""}</div>
+      <div style="display:flex;gap:10px;margin-top:8px;font-size:0.82rem;flex-wrap:wrap;align-items:center">
+        {_cprice_line}
+      </div>
+      <div style="display:flex;gap:14px;margin-top:6px;font-size:0.82rem;flex-wrap:wrap">
+        <span style="color:{_crat_c};font-weight:600">⭐ {crating} ({crev} отз.)</span>
+        <span style="opacity:0.8">📊 {_cbsr_s}</span>
+        <span style="color:{_ctlen_c}">📝 Title: {tlen} симв.</span>
+      </div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:3.5rem;font-weight:800;color:{hc};line-height:1">{ch}%</div>
+      <div style="font-size:0.85rem;color:{hc};margin-top:2px">{"Отличный" if ch>=75 else ("Средний" if ch>=50 else "Слабый")}</div>
+    </div>
+  </div>
+  <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:14px">
+    <div style="background:{hc};width:{ch}%;height:10px;border-radius:8px"></div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
     _cai_key=f"comp_ai_{cidx}"; _vision_key=f"comp_vision_{cidx}"; _cai_result=st.session_state.get(_cai_key)
 
