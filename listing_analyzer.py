@@ -3387,8 +3387,15 @@ elif _is_competitor_page:
     _sz2=len(c.get("customization_options",{}).get("size",[]))
     if "one size" in str(cpi.get("Size","")).lower(): _sz2=3
     tlen=len(_t2); cprice=c.get("price",""); cbrand=c.get("brand","")
-    crating=c.get("average_rating",""); crev=cpi.get("Customer Reviews",{}).get("ratings_count","")
-    cbsr_s=str(cpi.get("Best Sellers Rank",""))[:50]
+    crating=c.get("average_rating","")
+    # reviews_count can be in multiple places
+    crev = (cpi.get("Customer Reviews",{}).get("ratings_count","") or
+            c.get("reviews_count","") or c.get("ratings_total","") or
+            c.get("number_of_reviews","") or "")
+    if crev: crev = str(crev).replace(",","").strip()
+    # BSR can be string or dict
+    _bsr_raw = cpi.get("Best Sellers Rank","") or c.get("bestseller_rank","") or c.get("bsr","")
+    cbsr_s = str(_bsr_raw)[:60] if _bsr_raw else ""
     _ts=min(10,max(0,(1.5 if tlen<=125 else 0)+(3.5 if any(k in _t2.lower() for k in ["merino","wool","tank","shirt","base layer"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",_t2) else 0)+1))
     _bs=min(10,max(0,(1.5 if len(_b2)<=5 else 0)+(2.5 if any(":"in b for b in _b2) else 1)+min(4,len(_b2))+1+1))
     _ds=0 if not _d2 else min(10,4+(3 if len(_d2)>200 else 1))
