@@ -1817,6 +1817,67 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
         except Exception as e:
             st.error(f"Ошибка: {e}")
 
+
+def db_all_competitors():
+    """Extract all unique competitors from competitors_json field"""
+    conn = get_db()
+    if not conn: return []
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT asin, competitors_json, analyzed_at, our_title
+            FROM listing_analysis
+            WHERE competitors_json IS NOT NULL AND competitors_json != '[]'
+            ORDER BY analyzed_at DESC
+            LIMIT 50
+        """)
+        rows = cur.fetchall()
+        conn.close()
+        seen = {}
+        for asin, comp_json, date, our_title in rows:
+            try:
+                comps = json.loads(comp_json) if comp_json else []
+                for c in comps:
+                    casin = c.get("asin","")
+                    if not casin or casin in seen: continue
+                    seen[casin] = {
+                        "asin": casin,
+                        "title": c.get("title",""),
+                        "score": c.get("overall",0),
+                        "price": c.get("price",""),
+                        "rating": c.get("rating",""),
+                        "reviews": c.get("reviews",""),
+                        "analyzed_with": asin,
+                        "our_title": our_title,
+                        "date": date,
+                    }
+            except: pass
+        return list(seen.values())
+    except Exception as e:
+        return []
+
+def db_all_competitors():
+    conn = get_db()
+    if not conn: return []
+    try:
+        cur = conn.cursor()
+        cur.execute("""SELECT asin, competitors_json, analyzed_at, our_title
+            FROM listing_analysis WHERE competitors_json IS NOT NULL AND competitors_json != '[]'
+            ORDER BY analyzed_at DESC LIMIT 50""")
+        rows = cur.fetchall(); conn.close()
+        seen = {}
+        for asin, comp_json, date, our_title in rows:
+            try:
+                for c in (json.loads(comp_json) if comp_json else []):
+                    casin = c.get("asin","")
+                    if not casin or casin in seen: continue
+                    seen[casin] = {"asin":casin,"title":c.get("title",""),"score":c.get("overall",0),
+                        "price":c.get("price",""),"rating":c.get("rating",""),"reviews":c.get("reviews",""),
+                        "our_title":our_title,"date":date}
+            except: pass
+        return list(seen.values())
+    except: return []
+
 def page_history():
     st.title("📈 История анализов")
 
@@ -1848,11 +1909,37 @@ def page_history():
                 st.error(f"❌ Ошибка БД: {e}")
 
     all_asins = db_all_asins()
-    if not all_asins:
+    all_comps = db_all_competitors()
+    if not all_asins and not all_comps:
         st.info("История пуста — запусти первый анализ")
         return
-
-    st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
+    _tab_our, _tab_comp = st.tabs([f"🔵 Наши ({len(all_asins)})", f"🔴 Конкуренты ({len(all_comps)})"])
+    with _tab_comp:
+        if not all_comps:
+            st.info("Конкуренты появятся после анализа с конкурентами")
+        else:
+            _csearch = st.text_input("🔍", placeholder="ASIN или название", key="comp_hist_search", label_visibility="collapsed")
+            _fcomps = [c for c in all_comps if not _csearch or _csearch.lower() in c["asin"].lower() or _csearch.lower() in (c.get("title") or "").lower()]
+            for _ca in _fcomps:
+                _csc = _ca.get("score",0) or 0
+                _csc_c = "#22c55e" if _csc>=75 else ("#f59e0b" if _csc>=50 else ("#ef4444" if _csc>0 else "#94a3b8"))
+                _cc1, _cc2 = st.columns([8, 2])
+                with _cc1:
+                    st.markdown(
+                        f'<div style="padding:5px 0">' +
+                        f'<div style="font-size:0.88rem;font-weight:600">{(_ca.get("title") or "")[:60]}</div>' +
+                        f'<div style="font-size:0.76rem;color:#64748b">🔴 <a href="https://www.amazon.com/dp/{_ca["asin"]}" target="_blank" style="color:#3b82f6">{_ca["asin"]} ↗</a>' +
+                        (f' · 💰{_ca["price"]}' if _ca.get("price") else "") +
+                        (f' · ⭐{_ca["rating"]}' if _ca.get("rating") else "") +
+                        (f' · {_ca["reviews"]}отз.' if _ca.get("reviews") else "") +
+                        f'</div><div style="font-size:0.68rem;color:#94a3b8">Из: {(_ca.get("our_title") or "")[:35]}</div></div>',
+                        unsafe_allow_html=True)
+                with _cc2:
+                    if _csc>0:
+                        st.markdown(f'<div style="text-align:center"><b style="color:{_csc_c};font-size:1.3rem">{_csc}%</b></div>', unsafe_allow_html=True)
+                st.markdown('<hr style="margin:2px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
+    with _tab_our:
+        st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
     import pandas as pd
 
     _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
