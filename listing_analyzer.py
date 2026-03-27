@@ -1767,6 +1767,9 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                 st.session_state["c3_saved"] = comp4
                 st.session_state["c4_saved"] = comp5
                 st.session_state["ai_context_saved"] = st.session_state.get("ai_context","")
+                # Auto-navigate: if no OUR listing but competitors exist → go to first competitor
+                if not our_url.strip() and any(u.strip() for u in competitor_urls):
+                    st.session_state["page"] = "🔴 Конкурент 1"
                 try:
                     _od = st.session_state.get("our_data", {})
                     _saved = db_save(get_asin_from_data(_od), result,
@@ -3859,7 +3862,7 @@ elif page == "📱 Mobile Score":
       <span style="color:{_title_search_c};font-size:0.65rem">{"⚠️ " + str(_tlen) + " симв. — обрезается" if _tlen>80 else "✅ " + str(_tlen) + " симв. — OK"}</span>
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-      <span style="color:#f59e0b;font-size:0.8rem">{"★" * min(5,int(float(str(_rating or "0").split()[0]) + 0.5))}</span>
+      <span style="color:#f59e0b;font-size:0.8rem">{("★" * min(5,int(float(str(_rating or "0").split()[0]) + 0.5))) if str(_rating or "0").split()[0].replace(".","").isdigit() else "★★★★"}</span>
       <span style="font-size:0.72rem;color:#007185">{_reviews}</span>
     </div>
     <div style="font-size:1rem;font-weight:700;color:#0f1111;margin-top:4px">{_price}</div>
