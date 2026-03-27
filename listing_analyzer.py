@@ -3434,32 +3434,30 @@ elif _is_competitor_page:
     _cmp_saved = st.session_state.get("_marketplace","com")
     _crat_c = "#22c55e" if _rat2>=4.4 else ("#f59e0b" if _rat2>=4.3 else "#ef4444")
     _ctlen_c = "#fca5a5" if tlen>125 else "#86efac"
-    _cbsr_s = str(cpi.get("Best Sellers Rank",""))[:50]
+    _cbsr_s2 = str(cpi.get("Best Sellers Rank","") or c.get("bestseller_rank","") or "")[:50]
+    _cmp_saved = st.session_state.get("_marketplace","com")
 
-    st.markdown(f"""
-<div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
-    <div>
-      <a href="https://www.amazon.{_cmp_saved}/dp/{casin}" target="_blank" style="font-size:0.8rem;opacity:0.6;color:#93c5fd;text-decoration:none">{cbrand} · {casin} ↗</a>
-      <div style="font-size:1rem;font-weight:600;max-width:520px;line-height:1.4;margin-top:4px">{_t2[:80]}{"..." if tlen>80 else ""}</div>
-      <div style="display:flex;gap:10px;margin-top:8px;font-size:0.82rem;flex-wrap:wrap;align-items:center">
-        {_cprice_line}
-      </div>
-      <div style="display:flex;gap:14px;margin-top:6px;font-size:0.82rem;flex-wrap:wrap">
-        <span style="color:{_crat_c};font-weight:600">⭐ {crating} ({crev} отз.)</span>
-        <span style="opacity:0.8">📊 {_cbsr_s}</span>
-        <span style="color:{_ctlen_c}">📝 Title: {tlen} симв.</span>
-      </div>
-    </div>
-    <div style="text-align:center">
-      <div style="font-size:3.5rem;font-weight:800;color:{hc};line-height:1">{ch}%</div>
-      <div style="font-size:0.85rem;color:{hc};margin-top:2px">{"Отличный" if ch>=75 else ("Средний" if ch>=50 else "Слабый")}</div>
-    </div>
-  </div>
-  <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:10px;margin-top:14px">
-    <div style="background:{hc};width:{ch}%;height:10px;border-radius:8px"></div>
-  </div>
-</div>""", unsafe_allow_html=True)
+    # Header card — split into small chunks to avoid HTML rendering issues
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#3b1e1e,#5c2626);border-radius:16px;padding:20px 24px;color:white;margin-bottom:16px">' +
+        f'<a href="https://www.amazon.{_cmp_saved}/dp/{casin}" target="_blank" style="font-size:0.78rem;opacity:0.6;color:#93c5fd;text-decoration:none">{cbrand} · {casin} ↗</a>' +
+        f'<div style="font-size:1rem;font-weight:600;max-width:520px;line-height:1.4;margin-top:4px">{_t2[:80]}{"..." if tlen>80 else ""}</div>' +
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:12px">' +
+        f'<div>' +
+        f'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">{_cprice_line}</div>' +
+        f'<div style="display:flex;gap:14px;font-size:0.82rem;flex-wrap:wrap">' +
+        f'<span style="color:{_crat_c};font-weight:600">⭐ {crating} ({crev} отз.)</span>' +
+        (f'<span style="opacity:0.8">📊 {_cbsr_s2}</span>' if _cbsr_s2 else '') +
+        f'<span style="color:{_ctlen_c}">📝 {tlen} симв.</span>' +
+        f'</div></div>' +
+        f'<div style="text-align:center">' +
+        f'<div style="font-size:3rem;font-weight:800;color:{hc};line-height:1">{ch}%</div>' +
+        f'<div style="font-size:0.8rem;color:{hc};margin-top:2px">{"Отличный" if ch>=75 else ("Средний" if ch>=50 else "Слабый")}</div>' +
+        f'</div></div>' +
+        f'<div style="background:rgba(255,255,255,0.12);border-radius:6px;height:8px;margin-top:12px">' +
+        f'<div style="background:{hc};width:{ch}%;height:8px;border-radius:6px"></div></div></div>',
+        unsafe_allow_html=True
+    )
 
     _cai_key=f"comp_ai_{cidx}"; _vision_key=f"comp_vision_{cidx}"; _cai_result=st.session_state.get(_cai_key)
 
