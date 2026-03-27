@@ -2586,6 +2586,21 @@ def health_card():
 # ── Pages dispatch ────────────────────────────────────────────────────────────
 if page == "🏠 Обзор":
     st.title("🏠 Обзор листинга")
+    if not od or not od.get("title"):
+        st.info("ℹ️ НАШ листинг не анализировался — показаны только конкуренты.")
+        _cd_ov = st.session_state.get("comp_data_list",[])
+        for _i, _c in enumerate(_cd_ov):
+            _cai = st.session_state.get(f"comp_ai_{_i}",{})
+            _cov = pct(_cai.get("overall_score",0)) if _cai else 0
+            _cc = "#22c55e" if _cov>=75 else ("#f59e0b" if _cov>=50 else "#ef4444")
+            st.markdown(f"""<div style="background:#1e293b;border-radius:10px;padding:14px;margin-bottom:8px;border-left:4px solid {_cc}">
+<div style="font-weight:700;color:#e2e8f0">{get_asin_from_data(_c)} — {_c.get('title','')[:60]}</div>
+<div style="font-size:1.5rem;font-weight:800;color:{_cc}">{_cov}%</div>
+</div>""", unsafe_allow_html=True)
+            if st.button(f"→ Перейти к конкуренту {_i+1}", key=f"ov_comp_{_i}"):
+                st.session_state["page"] = f"🔴 Конкурент {_i+1}"
+                st.rerun()
+        st.stop()
     health_card()
 
     if od.get("is_frequently_returned"):
@@ -2780,6 +2795,9 @@ Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else '
 # ══ Фото ══════════════════════════════════════════════════════════════════════
 elif page == "📸 Фото":
     st.title("📸 Vision анализ фотографий")
+    if not od or not od.get("title"):
+        st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
+        st.stop()
     _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v) if v else []
     blocks = [b.strip() for b in _all_blocks if b.strip() and re.search(r"\d+/10", b)]
     if not blocks: blocks = [b.strip() for b in _all_blocks if b.strip()]
@@ -2912,6 +2930,9 @@ elif page == "📸 Фото":
 # ══ A+ Контент ════════════════════════════════════════════════════════════════
 elif page == "🎨 A+ Контент":
     st.title("🎨 A+ Контент")
+    if not od or not od.get("title"):
+        st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
+        st.stop()
     _av = st.session_state.get("aplus_vision","")
     _av_urls = st.session_state.get("aplus_img_urls", [])
     if not _av_urls:
@@ -2967,6 +2988,9 @@ elif page == "🎨 A+ Контент":
 # ══ Контент ════════════════════════════════════════════════════════════════════
 elif page == "📝 Контент":
     st.title("📝 Анализ контента")
+    if not od or not od.get("title"):
+        st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
+        st.stop()
     our_title   = od.get("title","")
     our_bullets = od.get("feature_bullets",[])
     our_desc    = od.get("description","")
@@ -3084,6 +3108,9 @@ elif page == "🏆 Benchmark":
 # ══ COSMO / Rufus ════════════════════════════════════════════════════════════
 elif page == "🧠 COSMO / Rufus":
     st.title("🧠 COSMO / Rufus Анализ")
+    if not od or not od.get("title"):
+        st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
+        st.stop()
     _ca=r.get("cosmo_analysis",{}); cosmo=pct(_ca.get("score",r.get("cosmo_score",0)))
     _ra=r.get("rufus_analysis",{}); rufus_s=pct(_ra.get("score",0))
     cc="#22c55e" if cosmo>=75 else ("#f59e0b" if cosmo>=50 else "#ef4444")
@@ -3286,6 +3313,9 @@ Respond in {'Russian' if st.session_state.get("analysis_lang","ru")=="ru" else "
 # ══ VPC / JTBD ════════════════════════════════════════════════════════════════
 elif page == "🎯 VPC / JTBD":
     st.title("🎯 Value Proposition Canvas + JTBD")
+    if not od or not od.get("title"):
+        st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
+        st.stop()
     _vpc=r.get("vpc_analysis",{}); _jtbd=r.get("jtbd_analysis",{})
     if not _vpc and not _jtbd: st.info("Данные VPC/JTBD появятся после следующего анализа"); st.stop()
     _fit=pct(_vpc.get("fit_score",_jtbd.get("alignment_score",0))); _jfit=pct(_jtbd.get("alignment_score",0))
@@ -3742,6 +3772,9 @@ elif page == "🔥 Топ ниши":
 # ══ Mobile Score ══════════════════════════════════════════════════════════════
 elif page == "📱 Mobile Score":
     st.title("📱 Mobile Score")
+    if not od or not od.get("title"):
+        st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
+        st.stop()
     st.caption("70% покупок Amazon — с мобильного. Как выглядит твой листинг на смартфоне?")
 
     _title   = od.get("title","") if od else ""
@@ -4094,4 +4127,4 @@ elif page == "📋 Workflow":
             if st.button("💾 Сохранить",type="primary",key="wf_save"):
                 if db_update_workflow(_sel_item["id"],_new_status,_new_note):
                     st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}"); st.rerun()
-                else: st.error("Ошибка сохранения") 
+                else: st.error("Ошибка сохранения")
