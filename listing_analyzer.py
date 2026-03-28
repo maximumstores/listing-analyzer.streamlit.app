@@ -1915,6 +1915,7 @@ def db_all_competitors():
     if not conn: return []
     try:
         cur = conn.cursor()
+        # New-style: saved as listing_type='конкурент'
         cur.execute("""
             SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at,
                    result_json, our_data_json, images_json, aplus_img_urls_json, aplus_vision_text, vision_text,
@@ -1923,8 +1924,9 @@ def db_all_competitors():
             WHERE listing_type = 'конкурент'
             ORDER BY asin, analyzed_at DESC
         """)
-        rows = cur.fetchall(); conn.close()
+        rows = cur.fetchall()
         result = []
+        seen_asins = set()
         for r in rows:
             _price, _rating, _reviews = "", "", ""
             if r[5]:
@@ -1934,6 +1936,7 @@ def db_all_competitors():
                     _rating = str(_od.get("average_rating",""))
                     _reviews = str(_od.get("product_information",{}).get("Customer Reviews",{}).get("ratings_count","") or _od.get("reviews_count",""))
                 except: pass
+            seen_asins.add(r[0])
             result.append({
                 "asin": r[0], "title": r[1], "score": r[2], "date": r[3],
                 "price": _price, "rating": _rating, "reviews": _reviews,
@@ -1942,6 +1945,30 @@ def db_all_competitors():
                 "aplus_vision": r[8], "vision_text": r[9],
                 "marketplace": r[10] if len(r) > 10 else "com",
             })
+        # Old-style: from competitors_json field
+        cur.execute("""
+            SELECT asin, competitors_json, analyzed_at, our_title
+            FROM listing_analysis
+            WHERE competitors_json IS NOT NULL AND competitors_json != '[]'
+            ORDER BY analyzed_at DESC LIMIT 100
+        """)
+        old_rows = cur.fetchall()
+        conn.close()
+        for _asin, comp_json, date, our_title in old_rows:
+            try:
+                for c in (json.loads(comp_json) if comp_json else []):
+                    casin = c.get("asin","")
+                    if not casin or casin in seen_asins: continue
+                    seen_asins.add(casin)
+                    result.append({
+                        "asin": casin, "title": c.get("title",""), "score": c.get("overall",0),
+                        "date": date, "price": c.get("price",""), "rating": c.get("rating",""),
+                        "reviews": c.get("reviews",""), "our_title": our_title,
+                        "result_json": None, "our_data_json": None,
+                        "images_json": None, "aplus_urls_json": None,
+                        "aplus_vision": None, "vision_text": None, "marketplace": "com",
+                    })
+            except: pass
         return result
     except: return []
 
@@ -1991,7 +2018,7 @@ def page_history():
                 _csc = _ca.get("score",0) or 0
                 _csc_c = "#22c55e" if _csc>=75 else ("#f59e0b" if _csc>=50 else ("#ef4444" if _csc>0 else "#94a3b8"))
                 _csc_l = "Strong" if _csc>=75 else ("Needs Work" if _csc>=50 else ("Critical" if _csc>0 else "—"))
-                _cc1, _cc2, _cc3, _cc4 = st.columns([1, 6, 2, 1.5])
+                _cc1, _cc2, _cc3, _cc4, _cc5 = st.columns([1, 6, 2, 1.5, 0.8])
                 # Thumbnail
                 with _cc1:
                     _c_img_url = ""
@@ -2045,6 +2072,16 @@ def page_history():
                         st.session_state["_hist_loaded"] = _ca["asin"]
                         st.session_state["page"] = "🔴 Конкурент 1"
                         st.rerun()
+                with _cc5:
+                    if st.button("🗑️", key=f"comp_hist_del_{_cidx2}", use_container_width=True, help="Удалить"):
+                        _conn_del = get_db()
+                        if _conn_del:
+                            try:
+                                _cur_del = _conn_del.cursor()
+                                _cur_del.execute("DELETE FROM listing_analysis WHERE asin=%s AND listing_type='конкурент'", (_ca["asin"],))
+                                _conn_del.commit(); _conn_del.close()
+                                st.rerun()
+                            except Exception as _de: st.error(f"{_de}")
                 st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
     with _tab_our:
         st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
