@@ -82,6 +82,8 @@ def db_save(asin, result, vision_text, our_title):
     conn = get_db()
     if not conn: return False
     if not result or not isinstance(result, dict): return False
+    if not asin or asin == "unknown" or not our_title:
+        return False  # no real our listing
     if pct(result.get("overall_score", 0)) == 0:
         return False
     try:
@@ -1915,7 +1917,8 @@ def db_all_competitors():
         cur = conn.cursor()
         cur.execute("""
             SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at,
-                   result_json, our_data_json, images_json, aplus_img_urls_json, aplus_vision_text, vision_text
+                   result_json, our_data_json, images_json, aplus_img_urls_json, aplus_vision_text, vision_text,
+                   COALESCE(marketplace,'com') as marketplace
             FROM listing_analysis
             WHERE listing_type = 'конкурент'
             ORDER BY asin, analyzed_at DESC
@@ -1937,6 +1940,7 @@ def db_all_competitors():
                 "result_json": r[4], "our_data_json": r[5],
                 "images_json": r[6], "aplus_urls_json": r[7],
                 "aplus_vision": r[8], "vision_text": r[9],
+                "marketplace": r[10] if len(r) > 10 else "com",
             })
         return result
     except: return []
@@ -2007,7 +2011,9 @@ def page_history():
                     st.markdown(
                         f'<div style="padding:6px 0">' +
                         f'<div style="font-size:0.9rem;font-weight:600;color:#0f172a">{(_ca.get("title") or "")[:60]}</div>' +
-                        f'<div style="font-size:0.78rem;color:#64748b;margin-top:3px">🔴 <a href="https://www.amazon.com/dp/{_ca["asin"]}" target="_blank" style="color:#3b82f6">{_ca["asin"]} ↗</a>' +
+                        f'<div style="font-size:0.78rem;color:#64748b;margin-top:3px">' +
+                        f'{ {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱","com.be":"🇧🇪","com.mx":"🇲🇽","com.au":"🇦🇺"}.get(_ca.get("marketplace","com"),"🌍") }' +
+                        f' &nbsp;·&nbsp; <a href="https://www.amazon.{_ca.get("marketplace","com")}/dp/{_ca["asin"]}" target="_blank" style="color:#3b82f6">{_ca["asin"]} ↗</a>' +
                         (f' · 💰{_ca["price"]}' if _ca.get("price") else "") +
                         (f' · ⭐{_ca["rating"]}' if _ca.get("rating") else "") +
                         (f' · ({_ca["reviews"]} отз.)' if _ca.get("reviews") else "") +
