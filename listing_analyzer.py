@@ -1311,7 +1311,7 @@ NEVER give a vague rec like "mention X somewhere" — always specify exact place
             raise ValueError("Не удалось исправить JSON")
 
 
-def db_save_competitor(casin, cdata, cai, cvision, cimgs, caplus_urls, caplus_vision, our_asin):
+def db_save_competitor(casin, cdata, cai, cvision, cimgs, caplus_urls, caplus_vision, our_asin, marketplace="com"):
     """Save competitor analysis as a separate row in listing_analysis"""
     conn = get_db()
     if not conn: return False
@@ -1348,7 +1348,7 @@ def db_save_competitor(casin, cdata, cai, cvision, cimgs, caplus_urls, caplus_vi
             cvision or "",
             cdata.get("title","")[:200],
             json.dumps(cdata, ensure_ascii=False),
-            "com",
+            marketplace,
             json.dumps(_imgs_to_save, ensure_ascii=False),
             json.dumps(caplus_urls or [], ensure_ascii=False),
             caplus_vision or ""
@@ -1476,7 +1476,7 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
         # Save competitor to DB
         _cap_urls_save = st.session_state.get(f"comp_aplus_urls_{i}", [])
         _cav_save = st.session_state.get(f"comp_aplus_vision_{i}", "")
-        db_save_competitor(casin, cdata, cai, cvision, cimgs_dl, _cap_urls_save, _cav_save, asin)
+        db_save_competitor(casin, cdata, cai, cvision, cimgs_dl, _cap_urls_save, _cav_save, asin, marketplace=_comp_mp)
 
     _prog(78, "🧠 AI финальный анализ — COSMO + Rufus + JTBD + VPC...")
     result = analyze_text(our_data, comp_data_list, vision_result, asin, log, lang=_lang)
