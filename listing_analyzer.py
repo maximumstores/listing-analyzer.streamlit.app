@@ -1073,7 +1073,17 @@ FACTUAL STATS (do NOT contradict these):
 - A+ present: {'YES' if our_data.get('aplus_content') or our_data.get('aplus') else 'NO'}
 - IMPORTANT: If A+ is present AND description is empty → description_score = "0%" is acceptable (A+ replaces description for buyers, but description still matters for SEO indexing)
 """
-    our_text = _facts + "\n" + fmt(our_data)[:2500]
+    _qa_list = our_data.get("questions_and_answers", our_data.get("qa", our_data.get("customer_questions", [])))
+    _qa_text = ""
+    if _qa_list and isinstance(_qa_list, list):
+        _qa_items = []
+        for _qai in _qa_list[:8]:
+            _q = _qai.get("question","") or _qai.get("q","") or ""
+            _a = _qai.get("answer","") or _qai.get("a","") or "NO ANSWER"
+            if _q: _qa_items.append(f"Q: {_q[:150]}\nA: {_a[:150]}")
+        if _qa_items:
+            _qa_text = "\n\nREAL CUSTOMER Q&A FROM AMAZON:\n" + "\n".join(_qa_items)
+    our_text = _facts + "\n" + fmt(our_data)[:2500] + _qa_text
     def fmt_comp(d):
         pi = d.get("product_information", {})
         buls = d.get("feature_bullets", [])
@@ -3547,6 +3557,144 @@ Respond in {'Russian' if st.session_state.get("analysis_lang","ru")=="ru" else "
         if st.button("🗑️ Очистить историю", key="clear_rufus"):
             st.session_state.pop("rufus_history", None)
             st.rerun()
+
+    # ══ RUFUS PLAN OF ACTION ══════════════════════════════════════════════════
+    st.divider()
+    st.subheader("📋 Rufus — Plan of Action")
+    st.caption("Реальные вопросы покупателей с Amazon + симулятор → AI генерирует план улучшений")
+
+    # ── Загрузить реальные Q&A из ScrapingDog ────────────────────────────────
+    _real_qa = od.get("questions_and_answers", od.get("qa", od.get("customer_questions", [])))
+    if _real_qa and isinstance(_real_qa, list):
+        with st.expander(f"📥 Реальные вопросы покупателей с Amazon ({len(_real_qa)} шт.)", expanded=False):
+            st.caption("Это реальные вопросы которые покупатели задавали на странице товара")
+            for _rq in _real_qa[:10]:
+                _q_text = _rq.get("question","") or _rq.get("q","") or str(_rq)
+                _a_text = _rq.get("answer","") or _rq.get("a","") or ""
+                if not _q_text: continue
+                _has_answer = bool(_a_text)
+                st.markdown(
+                    f'<div style="background:#0f172a;border-left:3px solid {"#22c55e" if _has_answer else "#ef4444"};border-radius:6px;padding:8px 12px;margin-bottom:4px">' +
+                    f'<div style="font-size:0.8rem;font-weight:700;color:#3b82f6">❓ {_q_text[:200]}</div>' +
+                    (f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:3px">💬 {_a_text[:200]}</div>' if _has_answer else
+                     '<div style="font-size:0.72rem;color:#ef4444;margin-top:2px">⚠️ Нет ответа от продавца — Gap для Rufus</div>') +
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+            if st.button("📥 Загрузить все в Plan of Action", key="load_real_qa"):
+                if "rufus_qa_saved" not in st.session_state:
+                    st.session_state["rufus_qa_saved"] = []
+                _loaded = 0
+                for _rq in _real_qa[:10]:
+                    _q_text = _rq.get("question","") or _rq.get("q","") or ""
+                    _a_text = _rq.get("answer","") or _rq.get("a","") or "⚠️ Gap: нет ответа от продавца в листинге"
+                    if _q_text:
+                        st.session_state["rufus_qa_saved"].append({"q": _q_text, "a": _a_text, "saved": True, "source": "amazon_real"})
+                        _loaded += 1
+                st.success(f"✅ Загружено {_loaded} реальных вопросов")
+                st.rerun()
+    elif od.get("title"):
+        st.caption("ℹ️ ScrapingDog не вернул Q&A для этого листинга — используй симулятор выше")
+
+    # Save Q&A button on each history item
+    if st.session_state.get("rufus_history"):
+        _unsaved = [h for h in st.session_state["rufus_history"] if not h.get("saved")]
+        if _unsaved:
+            if st.button("💾 Сохранить все Q&A в план", key="save_rufus_qa", type="secondary"):
+                if "rufus_qa_saved" not in st.session_state:
+                    st.session_state["rufus_qa_saved"] = []
+                for _h in _unsaved:
+                    _h["saved"] = True
+                    st.session_state["rufus_qa_saved"].append(_h)
+                st.success(f"✅ Сохранено {len(_unsaved)} Q&A")
+                st.rerun()
+
+    # Manual text input for Q&A
+    st.markdown("**✏️ Добавить вопрос/ответ вручную:**")
+    _qa_col1, _qa_col2 = st.columns([3,1])
+    with _qa_col1:
+        _manual_q = st.text_input("Вопрос покупателя", key="manual_rufus_q", placeholder="Is this suitable for hiking?", label_visibility="collapsed")
+        _manual_a = st.text_area("Ответ / Gap", key="manual_rufus_a", placeholder="Rufus ответил: ... ⚠️ Gap: в листинге нет информации о...", height=80, label_visibility="collapsed")
+    with _qa_col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("➕ Добавить", key="add_manual_qa", use_container_width=True):
+            if _manual_q.strip():
+                if "rufus_qa_saved" not in st.session_state:
+                    st.session_state["rufus_qa_saved"] = []
+                st.session_state["rufus_qa_saved"].append({
+                    "q": _manual_q.strip(),
+                    "a": _manual_a.strip(),
+                    "saved": True
+                })
+                st.rerun()
+
+    # Show saved Q&A
+    _saved_qa = st.session_state.get("rufus_qa_saved", [])
+    if _saved_qa:
+        st.markdown(f"**📝 Сохранено Q&A: {len(_saved_qa)}**")
+        for _qi, _qh in enumerate(_saved_qa):
+            _gap_in_a = "⚠️" in _qh.get("a","") or "Gap" in _qh.get("a","")
+            _q_color = "#ef4444" if _gap_in_a else "#3b82f6"
+            _del_col, _text_col = st.columns([0.5, 9.5])
+            with _del_col:
+                if st.button("×", key=f"del_qa_{_qi}", help="Удалить"):
+                    st.session_state["rufus_qa_saved"].pop(_qi)
+                    st.rerun()
+            with _text_col:
+                st.markdown(
+                    f'<div style="background:#0f172a;border-left:3px solid {_q_color};border-radius:6px;padding:8px 12px;margin-bottom:4px">' +
+                    f'<div style="font-size:0.78rem;font-weight:700;color:{_q_color}">❓ {_qh["q"]}</div>' +
+                    (f'<div style="font-size:0.8rem;color:#94a3b8;margin-top:4px">{_qh["a"][:200]}</div>' if _qh.get("a") else "") +
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+        st.divider()
+        # Generate Plan of Action from Q&A
+        if st.button("🧠 Сгенерировать Plan of Action", type="primary", key="btn_rufus_plan"):
+            with st.spinner("🧠 AI генерирует план на основе Rufus Q&A..."):
+                _qa_text = "\n".join([
+                    f"Q: {_h['q']}\nA: {_h.get('a','')}"
+                    for _h in _saved_qa
+                ])
+                _plan_prompt = f"""Ты Amazon листинг-оптимизатор. На основе Q&A из симулятора Rufus создай конкретный план улучшений листинга.
+
+ТОВАР: {od.get("title","")}
+ASIN: {od.get("parent_asin","")}
+
+RUFUS Q&A (реальные вопросы покупателей и что Rufus нашёл/не нашёл в листинге):
+{_qa_text}
+
+Создай PLAN OF ACTION:
+
+**Что добавить в Title** (если Rufus не находит ключевые характеристики)
+**Что добавить в Bullet #1-5** (конкретно какой bullet и что написать)
+**Что добавить в A+ / Description** (сценарии использования которых нет)
+**Backend keywords** (что индексировать чтобы Rufus находил)
+**Приоритет** каждого действия: HIGH / MEDIUM / LOW
+
+Формат: конкретные действия, не общие советы. Каждое действие = одна строка начинающаяся с ✅ HIGH / 🟡 MEDIUM / ⚪ LOW
+
+Ответь {'по-русски' if st.session_state.get('analysis_lang','ru')=='ru' else 'in English'}."""
+
+                _plan = ai_call("Amazon listing optimizer. Actionable plan only.", _plan_prompt, max_tokens=1200)
+                st.session_state["rufus_plan"] = _plan
+
+        if st.session_state.get("rufus_plan"):
+            st.markdown(
+                '<div style="background:#0f172a;border:1px solid #334155;border-radius:12px;padding:18px 20px">' +
+                '<div style="font-size:0.75rem;font-weight:700;color:#64748b;letter-spacing:0.08em;margin-bottom:12px">🎯 RUFUS PLAN OF ACTION</div>' +
+                '<div style="color:#e2e8f0;font-size:0.9rem;line-height:1.8">' +
+                st.session_state["rufus_plan"].replace("\n","<br>") +
+                '</div></div>',
+                unsafe_allow_html=True
+            )
+            if st.button("🗑️ Очистить план", key="clear_plan"):
+                st.session_state.pop("rufus_plan", None)
+                st.session_state.pop("rufus_qa_saved", None)
+                st.rerun()
+    else:
+        st.info("💡 Задай вопросы в симуляторе выше → нажми 'Сохранить все Q&A' → получи план улучшений")
 
     with st.expander("🔧 Raw JSON"): st.json(r)
 
