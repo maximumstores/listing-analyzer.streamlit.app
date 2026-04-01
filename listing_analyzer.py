@@ -1369,6 +1369,31 @@ def db_save_competitor(casin, cdata, cai, cvision, cimgs, caplus_urls, caplus_vi
         return False
 
 
+def fetch_offers(asin, domain="com", log=None):
+    """Fetch all sellers/offers for an ASIN via ScrapingDog Offers API"""
+    sd_key = st.secrets.get("SCRAPINGDOG_API_KEY","")
+    if not sd_key: return None
+    _log = log or (lambda m: None)
+    _country_map = {"com":"us","co.uk":"gb","ca":"ca","de":"de","es":"es",
+                    "fr":"fr","it":"it","nl":"nl","se":"se","pl":"pl","com.au":"au"}
+    try:
+        _log(f"💰 Offers API: {asin} [{domain}]...")
+        r = requests.get("https://api.scrapingdog.com/amazon/offers",
+            params={"api_key": sd_key, "asin": asin, "domain": domain,
+                    "country": _country_map.get(domain,"us")},
+            timeout=30)
+        if r.ok:
+            data = r.json()
+            _log(f"✅ Offers: {len(data.get('offers',[]))} продавцов")
+            return data
+        else:
+            _log(f"⚠️ Offers API: {r.status_code}")
+            return None
+    except Exception as e:
+        _log(f"⚠️ Offers: {e}")
+        return None
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log, prog=None):
     _steps_done = []
@@ -2889,6 +2914,83 @@ if page == "🏠 Обзор":
             cnt = st.session_state.get("_return_reviews_count",0)
             with st.expander(f"📊 Анализ возвратов {src} — {cnt} записей", expanded=True):
                 st.markdown(st.session_state["_return_analysis"])
+
+    st.divider()
+
+    # ── BuyBox / Sellers ─────────────────────────────────────────────────────
+    _our_asin_bb = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
+    _mp_bb = st.session_state.get("_marketplace","com")
+    _bb_col1, _bb_col2 = st.columns([2,5])
+    with _bb_col1:
+        if st.button("👥 BuyBox & Sellers", key="btn_buybox", use_container_width=True):
+            with st.spinner("💰 Загружаю данные продавцов..."):
+                _offers_data = fetch_offers(_our_asin_bb, domain=_mp_bb)
+                if _offers_data:
+                    st.session_state["_offers_data"] = _offers_data
+                else:
+                    st.warning("Данные не получены")
+    with _bb_col2:
+        st.caption("Кто выигрывает BuyBox, все продавцы и их цены")
+
+    if st.session_state.get("_offers_data"):
+        _od_bb = st.session_state["_offers_data"]
+        _offers = _od_bb.get("offers", [])
+        if _offers:
+            _bb_winner = next((o for o in _offers if o.get("buybox_winner")), None)
+            _bb_seller = _bb_winner.get("seller",{}).get("name","") if _bb_winner else "—"
+            _bb_price  = _bb_winner.get("price",{}).get("raw","—") if _bb_winner else "—"
+            _seller_id = st.secrets.get("SELLER_ID","")
+            _bb_is_us  = bool(_seller_id and _bb_winner and _seller_id in _bb_winner.get("seller",{}).get("link",""))
+            _bb_color  = "#22c55e" if _bb_is_us else "#ef4444"
+            _bb_label  = "✅ ВЫ" if _bb_is_us else f"❌ {_bb_seller}"
+
+            # Min price safe
+            _min_price = "—"
+            try:
+                _price_vals = []
+                for _o in _offers:
+                    _raw = _o.get("price",{}).get("raw","")
+                    if _raw:
+                        _v = _raw.replace("$","").replace("€","").replace("£","").replace(",","").strip()
+                        try: _price_vals.append((float(_v), _raw))
+                        except: pass
+                if _price_vals:
+                    _min_price = min(_price_vals, key=lambda x: x[0])[1]
+            except: pass
+
+            _fba_count = sum(1 for o in _offers if o.get("delivery",{}).get("fulfilled_by_amazon"))
+
+            st.markdown(
+                f'<div style="background:#0f172a;border-radius:10px;padding:14px 16px;margin-bottom:12px">'
+                f'<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center">'
+                f'<div><div style="font-size:0.68rem;color:#64748b;margin-bottom:3px">🏆 BUYBOX</div>'
+                f'<div style="font-size:1.1rem;font-weight:800;color:{_bb_color}">{_bb_label}</div>'
+                f'<div style="font-size:0.8rem;color:#64748b">{_bb_price}</div></div>'
+                f'<div><div style="font-size:0.68rem;color:#64748b;margin-bottom:3px">👥 ПРОДАВЦОВ</div>'
+                f'<div style="font-size:1.1rem;font-weight:800;color:#3b82f6">{len(_offers)}</div></div>'
+                f'<div><div style="font-size:0.68rem;color:#64748b;margin-bottom:3px">💰 МИН. ЦЕНА</div>'
+                f'<div style="font-size:1.1rem;font-weight:800;color:#f59e0b">{_min_price}</div></div>'
+                f'<div><div style="font-size:0.68rem;color:#64748b;margin-bottom:3px">🚀 FBA</div>'
+                f'<div style="font-size:1.1rem;font-weight:800;color:#8b5cf6">{_fba_count}</div></div>'
+                f'</div></div>',
+                unsafe_allow_html=True)
+
+            with st.expander(f"📋 Все продавцы ({len(_offers)})", expanded=False):
+                for _o in _offers[:10]:
+                    _s = _o.get("seller",{}); _p = _o.get("price",{}); _d = _o.get("delivery",{})
+                    _is_bb = _o.get("buybox_winner",False); _is_fba = _d.get("fulfilled_by_amazon",False)
+                    st.markdown(
+                        f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                        f'padding:8px 12px;border-radius:6px;margin-bottom:4px;'
+                        f'background:{"#1a2a0a" if _is_bb else "#0f172a"};'
+                        f'border-left:3px solid {"#f59e0b" if _is_bb else "#334155"}">'
+                        f'<div><span style="font-size:0.85rem;font-weight:600;color:#e2e8f0">{_s.get("name","—")}</span>'
+                        f'{"  🏆 BuyBox" if _is_bb else ""}{"  🚀 FBA" if _is_fba else "  📦 FBM"}</div>'
+                        f'<div style="text-align:right">'
+                        f'<div style="font-size:0.9rem;font-weight:700;color:#22c55e">{_p.get("raw","—")}</div>'
+                        f'<div style="font-size:0.68rem;color:#64748b">⭐{_s.get("ratings_percentage_positive","")}%</div>'
+                        f'</div></div>',
+                        unsafe_allow_html=True)
 
     st.divider()
     _cosmo = r.get("cosmo_analysis",{})
