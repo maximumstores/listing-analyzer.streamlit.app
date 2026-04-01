@@ -4057,14 +4057,17 @@ elif page == "🔥 Топ ниши":
             st.rerun()
 
     # Quick search buttons
-    _niche_quick_queries = [
-        "merino wool base layer men",
-        "outdoor hiking socks merino",
-        "merino wool t-shirt women",
-        "thermal underwear set men",
-        "wool beanie hat outdoor",
-        "base layer women hiking",
-    ]
+    _niche_quick_by_mp = {
+        "com": ["merino wool base layer men","outdoor hiking socks","merino wool t-shirt women","thermal underwear set","wool beanie hat outdoor","base layer women hiking"],
+        "de":  ["merino wolle funktionsunterwäsche","merino unterhemd herren","outdoor socken wolle","thermounterwäsche herren set","wollmütze outdoor","merino baselayer damen"],
+        "fr":  ["sous-vêtement merino homme","chaussettes randonnée laine","t-shirt merino femme","sous-couche thermique","bonnet laine outdoor","collants thermiques homme"],
+        "it":  ["intimo merino uomo","calzini trekking lana","maglietta merino donna","intimo termico set","berretto lana outdoor","base layer donna"],
+        "es":  ["ropa interior merino hombre","calcetines senderismo lana","camiseta merino mujer","ropa interior termica","gorro lana outdoor","base layer mujer"],
+        "co.uk":["merino wool base layer men","hiking socks merino wool","merino t-shirt women","thermal underwear set","wool hat outdoor","base layer women"],
+        "ca":  ["merino wool base layer men","hiking socks wool","merino t-shirt women","thermal underwear set","wool beanie outdoor","base layer women hiking"],
+        "nl":  ["merino wol basislaag heren","wandelsokken wol","merino shirt dames","thermisch ondergoed set","wollen muts outdoor","basislaag dames"],
+    }
+    _niche_quick_queries = _niche_quick_by_mp.get(_niche_mp, _niche_quick_by_mp["com"])
     st.markdown('<div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">⚡ Быстрый поиск:</div>', unsafe_allow_html=True)
     _qbtn_cols = st.columns(len(_niche_quick_queries))
     for _qbi, (_qbc, _qbq) in enumerate(zip(_qbtn_cols, _niche_quick_queries)):
@@ -4102,20 +4105,26 @@ elif page == "🔥 Топ ниши":
         else:
             with st.spinner(f"🔍 Ищу топ листинги: '{_niche_q}'..."):
                 try:
+                    # Country codes per ScrapingDog docs
+                    _country_map = {
+                        "com":"us","co.uk":"gb","ca":"ca","de":"de","es":"es",
+                        "fr":"fr","it":"it","co.jp":"jp","in":"in","cn":"cn",
+                        "com.sg":"sg","com.mx":"mx","com.br":"br","nl":"nl",
+                        "com.au":"au","com.tr":"tr","se":"se","pl":"pl",
+                    }
+                    _lang_map = {
+                        "de":"de","fr":"fr","it":"it","es":"es","nl":"nl",
+                        "se":"sv","pl":"pl","co.jp":"ja","in":"en","co.uk":"en",
+                    }
                     _search_params = {
                         "api_key": sd_key,
                         "query": _niche_q,
                         "domain": _niche_mp,
                         "page": "1",
-                        "premium": "false",
+                        "country": _country_map.get(_niche_mp, "us"),
                     }
-                    # For non-US marketplaces need country param
-                    _country_map = {
-                        "de":"de","fr":"fr","it":"it","es":"es","co.uk":"uk",
-                        "ca":"ca","nl":"nl","se":"se","pl":"pl","com.be":"be",
-                        "com.mx":"mx","com.au":"au","com":"us"
-                    }
-                    _search_params["country"] = _country_map.get(_niche_mp, "us")
+                    if _niche_mp in _lang_map:
+                        _search_params["language"] = _lang_map[_niche_mp]
                     _search_r = requests.get(
                         "https://api.scrapingdog.com/amazon/search",
                         params=_search_params,
