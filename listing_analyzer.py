@@ -4039,7 +4039,7 @@ elif page == "🔥 Топ ниши":
     _mp_niche  = st.session_state.get("_marketplace","com")
 
     # Search query input
-    _nc1, _nc2 = st.columns([4,1])
+    _nc1, _nc2, _nc3 = st.columns([4,1,0.7])
     with _nc1:
         _niche_q = st.text_input(
             "🔍 Ниша / поисковый запрос",
@@ -4050,6 +4050,11 @@ elif page == "🔥 Топ ниши":
         )
     with _nc2:
         _run_niche = st.button("🔍 Найти топ", type="primary", use_container_width=True, key="btn_niche_search")
+    with _nc3:
+        if st.button("🗑️", use_container_width=True, key="btn_niche_clear", help="Сбросить результаты"):
+            for _k in ["_niche_results","_niche_mp","_niche_query_saved","_niche_ai_report","_niche_mp_display"]:
+                st.session_state.pop(_k, None)
+            st.rerun()
 
     # Quick search buttons
     _niche_quick_queries = [
@@ -4070,9 +4075,13 @@ elif page == "🔥 Топ ниши":
 
     _niche_mp_col1, _niche_mp_col2 = st.columns([2,4])
     with _niche_mp_col1:
-        _niche_mp = st.selectbox("Маркетплейс", ["com","de","fr","it","es","co.uk","ca","nl"], 
+        _niche_mp = st.selectbox("Маркетплейс", ["com","de","fr","it","es","co.uk","ca","nl"],
                                   index=["com","de","fr","it","es","co.uk","ca","nl"].index(_mp_niche) if _mp_niche in ["com","de","fr","it","es","co.uk","ca","nl"] else 0,
                                   key="niche_mp_sel")
+    # Auto-clear results if marketplace changed
+    if st.session_state.get("_niche_mp") and st.session_state.get("_niche_mp") != _niche_mp:
+        for _k in ["_niche_results","_niche_ai_report"]:
+            st.session_state.pop(_k, None)
 
     if st.session_state.pop("_niche_run_now", False):
         _run_niche = True
