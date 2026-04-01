@@ -4139,7 +4139,7 @@ elif page == "🔥 Топ ниши":
     if st.session_state.get("_niche_results"):
         _niche_products = st.session_state["_niche_results"]
         # Always use current selectbox value for display
-        _niche_mp_saved = st.session_state.get("_niche_mp", "com")
+        _niche_mp_saved = _niche_mp  # use current selectbox value directly
         _mp_flags = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
 
         # ── Canvas-style metrics ──────────────────────────────────────────────
@@ -4336,7 +4336,7 @@ elif page == "🔥 Топ ниши":
         # Opportunity scatter insight
         if _chart_data:
             _low_rev = [d for d in _chart_data if 0 < d["Отзывы"] < 300 and d["Цена"] > 0]
-            _high_price_low_comp = [d for d in _low_rev if d["Цена"] >= (_avg_price.replace("$","").replace("€","") if _avg_price != "—" else "0") and d["Рейтинг"] < 4.5]
+            _high_price_low_comp = []  # simplified
             if _low_rev:
                 _opp_titles = ", ".join([d["Товар"][:20] for d in _low_rev[:3]])
                 st.success(f"💡 **Opportunity:** {len(_low_rev)} товаров с <300 отзывами — лёгкий вход: {_opp_titles}")
