@@ -4095,9 +4095,23 @@ elif page == "🔥 Топ ниши":
         else:
             with st.spinner(f"🔍 Ищу топ листинги: '{_niche_q}'..."):
                 try:
+                    _search_params = {
+                        "api_key": sd_key,
+                        "query": _niche_q,
+                        "domain": _niche_mp,
+                        "page": "1",
+                        "premium": "false",
+                    }
+                    # For non-US marketplaces need country param
+                    _country_map = {
+                        "de":"de","fr":"fr","it":"it","es":"es","co.uk":"uk",
+                        "ca":"ca","nl":"nl","se":"se","pl":"pl","com.be":"be",
+                        "com.mx":"mx","com.au":"au","com":"us"
+                    }
+                    _search_params["country"] = _country_map.get(_niche_mp, "us")
                     _search_r = requests.get(
                         "https://api.scrapingdog.com/amazon/search",
-                        params={"api_key": sd_key, "query": _niche_q, "domain": _niche_mp, "page": "1"},
+                        params=_search_params,
                         timeout=60
                     )
                     if _search_r.ok:
