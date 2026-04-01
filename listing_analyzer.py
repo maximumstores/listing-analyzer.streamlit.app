@@ -4071,6 +4071,9 @@ elif page == "🔥 Топ ниши":
         if _qbc.button(_qbq[:22]+"…" if len(_qbq)>22 else _qbq, key=f"niche_quick_{_qbi}", use_container_width=True):
             st.session_state["_niche_query_saved"] = _qbq
             st.session_state["_niche_run_now"] = True
+            # Clear old results so new search runs fresh
+            st.session_state.pop("_niche_results", None)
+            st.session_state.pop("_niche_ai_report", None)
             st.rerun()
 
     _niche_mp_col1, _niche_mp_col2 = st.columns([2,4])
@@ -4078,10 +4081,12 @@ elif page == "🔥 Топ ниши":
         _niche_mp = st.selectbox("Маркетплейс", ["com","de","fr","it","es","co.uk","ca","nl"],
                                   index=["com","de","fr","it","es","co.uk","ca","nl"].index(_mp_niche) if _mp_niche in ["com","de","fr","it","es","co.uk","ca","nl"] else 0,
                                   key="niche_mp_sel")
-    # Auto-clear results if marketplace changed
-    if st.session_state.get("_niche_mp") and st.session_state.get("_niche_mp") != _niche_mp:
+    # Auto-clear results if marketplace changed since last search
+    _last_searched_mp = st.session_state.get("_niche_mp", "com")
+    if st.session_state.get("_niche_results") and _last_searched_mp != _niche_mp:
         for _k in ["_niche_results","_niche_ai_report"]:
             st.session_state.pop(_k, None)
+        st.info(f"🔄 Маркетплейс изменён на {_niche_mp} — нажми 🔍 Найти топ")
 
     if st.session_state.pop("_niche_run_now", False):
         _run_niche = True
@@ -4131,9 +4136,8 @@ elif page == "🔥 Топ ниши":
 
     if st.session_state.get("_niche_results"):
         _niche_products = st.session_state["_niche_results"]
-        _niche_mp_saved = st.session_state.get("_niche_mp","com")
-        # Sync with current selectbox selection
-        if st.session_state.get("niche_mp_sel"): _niche_mp_saved = st.session_state.get("niche_mp_sel", _niche_mp_saved)
+        # Always use current selectbox value for display
+        _niche_mp_saved = _niche_mp  # _niche_mp comes from selectbox directly
         _mp_flags = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
 
         # ── Canvas-style metrics ──────────────────────────────────────────────
