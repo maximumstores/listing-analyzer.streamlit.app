@@ -4197,6 +4197,10 @@ elif page == "🔥 Топ ниши":
                 _np_colors= len(_np.get("colors",[])) 
                 _is_ours  = (_np_asin == _our_asin)
                 _np_pos   = _np.get("absolute_position", _np.get("organic_position", _ni + _nj + 1))
+                # Extract brand - first 1-2 words of title usually
+                _np_brand = _np.get("brand","")
+                if not _np_brand and _np_title:
+                    _np_brand = _np_title.split()[0] if _np_title else ""
 
                 # Estimate opportunity: lower reviews = easier to enter
                 try: _np_rev_int = int(str(_np_rev).replace(",","").replace("K","000").replace("k","000").split()[0])
@@ -4219,7 +4223,8 @@ elif page == "🔥 Топ ниши":
                                 f'<img src="{_np_img}" style="width:100%;height:130px;object-fit:contain;background:#f8fafc;border-radius:6px">',
                                 unsafe_allow_html=True)
                         st.markdown(
-                            f'<div style="font-size:0.82rem;font-weight:700;color:{"#3b82f6" if _is_ours else "#0f172a"};line-height:1.4;margin-top:6px">{_np_title}</div>',
+                            (f'<div style="font-size:0.68rem;font-weight:700;color:#6366f1;letter-spacing:0.06em;margin-top:6px;margin-bottom:2px">{_np_brand.upper()}</div>' if _np_brand else "") +
+                            f'<div style="font-size:0.82rem;font-weight:700;color:{"#3b82f6" if _is_ours else "#0f172a"};line-height:1.4">{_np_title}</div>',
                             unsafe_allow_html=True)
                         # Badges row
                         _badge_parts = []
@@ -4239,7 +4244,11 @@ elif page == "🔥 Топ ниши":
                         if _np_bought: _info_parts.append(f"🛒 {_np_bought}")
                         if _np_colors > 1: _info_parts.append(f"🎨 {_np_colors} цв.")
                         if _info_parts:
-                            st.caption(" · ".join(_info_parts))
+                            st.markdown(
+                                f'<div style="font-size:0.78rem;color:#1e293b;font-weight:500;margin-top:4px;line-height:1.6">' +
+                                " · ".join(_info_parts) +
+                                '</div>',
+                                unsafe_allow_html=True)
                         # Opportunity badge
                         st.markdown(
                             f'<div style="font-size:0.65rem;margin-top:3px">{_opp}</div>',
