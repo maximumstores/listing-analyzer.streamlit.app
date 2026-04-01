@@ -1856,10 +1856,18 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                         casin = get_asin(url)
                         if casin:
                             log(f"➕ Новый конкурент {i+1}: {casin}...")
-                            cdata, _ = scrapingdog_product(casin, log)
+                            _add_mp = "com"
+                            for _dm in ["co.uk","de","fr","it","es","nl","se","pl","com.be","ca","com"]:
+                                if f"amazon.{_dm}" in url:
+                                    _add_mp = _dm; break
+                            cdata, cimg_urls = scrapingdog_product(casin, log, domain=_add_mp)
+                            cimgs_add = download_images(cimg_urls[:5], log) if cimg_urls else []
                             if i < len(existing): existing[i] = cdata
                             else: existing.append(cdata)
                             st.session_state[f"c{i}_saved"] = url.strip()
+                            # Save to DB
+                            _cai_add = st.session_state.get(f"comp_ai_{i}", {})
+                            db_save_competitor(casin, cdata, _cai_add, "", cimgs_add, [], "", "", marketplace=_add_mp)
                 st.session_state["comp_data_list"] = existing
                 log("🧠 Обновляю сравнительный анализ...")
                 od_s = st.session_state.get("our_data", {})
@@ -4572,4 +4580,5 @@ elif page == "📋 Workflow":
             if st.button("💾 Сохранить",type="primary",key="wf_save"):
                 if db_update_workflow(_sel_item["id"],_new_status,_new_note):
                     st.success(f"✅ {_sel_asin} → {workflow_label(_new_status)}"); st.rerun()
+                else: st.error("Ошибка сохранения")
                 else: st.error("Ошибка сохранения")
