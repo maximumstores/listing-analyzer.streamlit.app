@@ -4097,6 +4097,7 @@ elif page == "🔥 Топ ниши":
                         if _products:
                             st.session_state["_niche_results"] = _products[:12]
                             st.session_state["_niche_mp"] = _niche_mp
+                            st.session_state["_niche_mp_display"] = _niche_mp
                             st.success(f"✅ Найдено {len(_products[:12])} товаров")
                         else:
                             st.warning("Результаты не найдены — попробуй другой запрос")
@@ -4108,6 +4109,8 @@ elif page == "🔥 Топ ниши":
     if st.session_state.get("_niche_results"):
         _niche_products = st.session_state["_niche_results"]
         _niche_mp_saved = st.session_state.get("_niche_mp","com")
+        # Sync with current selectbox selection
+        if st.session_state.get("niche_mp_sel"): _niche_mp_saved = st.session_state.get("niche_mp_sel", _niche_mp_saved)
         _mp_flags = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
 
         # ── Canvas-style metrics ──────────────────────────────────────────────
