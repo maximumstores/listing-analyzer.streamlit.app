@@ -4073,7 +4073,7 @@ elif page == "🔥 Топ ниши":
     _qbtn_cols = st.columns(len(_niche_quick_queries))
     for _qbi, (_qbc, _qbq) in enumerate(zip(_qbtn_cols, _niche_quick_queries)):
         _is_active = (_current_query == _qbq)
-        _btn_label = ("✓ " if _is_active else "") + (_qbq[:20]+"…" if len(_qbq)>20 else _qbq)
+        _btn_label = ("✓ " if _is_active else "") + _qbq
         if _qbc.button(_btn_label, key=f"niche_quick_{_qbi}", use_container_width=True,
                        type="primary" if _is_active else "secondary"):
             st.session_state["_niche_query_saved"] = _qbq
