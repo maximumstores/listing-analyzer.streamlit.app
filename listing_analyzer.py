@@ -4219,7 +4219,7 @@ elif page == "🔥 Топ ниши":
                                 f'<img src="{_np_img}" style="width:100%;height:130px;object-fit:contain;background:#f8fafc;border-radius:6px">',
                                 unsafe_allow_html=True)
                         st.markdown(
-                            f'<div style="font-size:0.76rem;font-weight:600;color:{"#3b82f6" if _is_ours else "#e2e8f0"};line-height:1.3;margin-top:6px">{_np_title}</div>',
+                            f'<div style="font-size:0.82rem;font-weight:700;color:{"#3b82f6" if _is_ours else "#0f172a"};line-height:1.4;margin-top:6px">{_np_title}</div>',
                             unsafe_allow_html=True)
                         # Badges row
                         _badge_parts = []
