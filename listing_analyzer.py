@@ -1584,7 +1584,7 @@ with st.sidebar:
         cur_no_result = st.session_state.get("page","")
         for icon, label in NAV_ITEMS:
             full = f"{icon} {label}"
-            _always = label in ["Топ ниши", "Mobile Score"]
+            _always = label in ["Топ ниши", "Mobile Score", "О инструменте", "Документация"]
             if _always:
                 is_active = (cur_no_result == full)
                 if st.button(f"{icon}  {label}", key=f"nav_pre_{label}", use_container_width=True,
