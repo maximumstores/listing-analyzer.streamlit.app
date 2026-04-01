@@ -4067,7 +4067,7 @@ elif page == "🔥 Топ ниши":
         "ca":  ["merino wool base layer men","hiking socks wool","merino t-shirt women","thermal underwear set","wool beanie outdoor","base layer women hiking"],
         "nl":  ["merino wol basislaag heren","wandelsokken wol","merino shirt dames","thermisch ondergoed set","wollen muts outdoor","basislaag dames"],
     }
-    _niche_quick_queries = _niche_quick_by_mp.get(_niche_mp, _niche_quick_by_mp["com"])
+    _niche_quick_queries = _niche_quick_by_mp.get(st.session_state.get("niche_mp_sel", st.session_state.get("_niche_mp","com")), _niche_quick_by_mp["com"])
     st.markdown('<div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">⚡ Быстрый поиск:</div>', unsafe_allow_html=True)
     _qbtn_cols = st.columns(len(_niche_quick_queries))
     for _qbi, (_qbc, _qbq) in enumerate(zip(_qbtn_cols, _niche_quick_queries)):
