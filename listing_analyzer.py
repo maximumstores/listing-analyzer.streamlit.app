@@ -4130,8 +4130,8 @@ elif page == "🔥 Топ ниши":
         _revs = []
         for _p in _niche_products:
             try:
-                _rv = str(_p.get("reviews","") or _p.get("reviews_count","") or _p.get("number_of_reviews","") or 0)
-                _rv = _rv.replace(",","").replace(".","").strip().split()[0]
+                _rv = str(_p.get("total_reviews","") or _p.get("reviews","") or _p.get("reviews_count","") or 0)
+                _rv = _rv.replace(",","").replace("K","000").replace("k","000").strip().split()[0]
                 _revs.append(int(_rv))
             except: pass
 
@@ -4184,16 +4184,22 @@ elif page == "🔥 Топ ниши":
                 if not _np: continue
                 _np_asin  = _np.get("asin","")
                 _np_title = _np.get("title","")[:60]
-                _np_price = _np.get("price","") or _np.get("current_price","")
-                _np_rat   = str(_np.get("rating","") or _np.get("stars",""))
-                _np_rev   = str(_np.get("reviews","") or _np.get("reviews_count","") or _np.get("number_of_reviews",""))
+                _np_price = _np.get("price","") or _np.get("price_string","") or _np.get("current_price","")
+                _np_rat   = str(_np.get("stars","") or _np.get("rating",""))
+                _np_rev   = str(_np.get("total_reviews","") or _np.get("reviews","") or _np.get("reviews_count","") or _np.get("number_of_reviews",""))
                 _np_img   = _np.get("image","") or _np.get("thumbnail","") or _np.get("img","")
                 _np_spon  = _np.get("sponsored", False)
+                _np_prime = _np.get("has_prime", False)
+                _np_bs    = _np.get("is_best_seller", False)
+                _np_ac    = _np.get("is_amazon_choice", False)
+                _np_bought= _np.get("number_of_people_bought","")
+                _np_coupon= _np.get("coupon_text","")
+                _np_colors= len(_np.get("colors",[])) 
                 _is_ours  = (_np_asin == _our_asin)
-                _np_pos   = _ni + _nj + 1  # position in search results
+                _np_pos   = _np.get("absolute_position", _np.get("organic_position", _ni + _nj + 1))
 
                 # Estimate opportunity: lower reviews = easier to enter
-                try: _np_rev_int = int(str(_np_rev).replace(",","").split()[0])
+                try: _np_rev_int = int(str(_np_rev).replace(",","").replace("K","000").replace("k","000").split()[0])
                 except: _np_rev_int = 0
                 _opp = "🟢 Вход лёгкий" if _np_rev_int < 200 else ("🟡 Средний" if _np_rev_int < 1000 else "🔴 Высокий порог")
 
@@ -4215,11 +4221,23 @@ elif page == "🔥 Топ ниши":
                         st.markdown(
                             f'<div style="font-size:0.76rem;font-weight:600;color:{"#3b82f6" if _is_ours else "#e2e8f0"};line-height:1.3;margin-top:6px">{_np_title}</div>',
                             unsafe_allow_html=True)
+                        # Badges row
+                        _badge_parts = []
+                        if _np_bs:  _badge_parts.append("🏆 Best Seller")
+                        if _np_ac:  _badge_parts.append("✅ Amazon's Choice")
+                        if _np_prime: _badge_parts.append("👑 Prime")
+                        if _badge_parts:
+                            st.markdown(
+                                " ".join([f'<span style="background:#1e3a5f;color:#93c5fd;border-radius:3px;padding:1px 5px;font-size:0.62rem">{b}</span>' for b in _badge_parts]),
+                                unsafe_allow_html=True)
                         # Metrics row
                         _info_parts = []
                         if _np_price: _info_parts.append(f"💰 {_np_price}")
+                        if _np_coupon: _info_parts.append(f"🎟️ {_np_coupon}")
                         if _np_rat:   _info_parts.append(f"⭐ {_np_rat}")
-                        if _np_rev:   _info_parts.append(f"({_np_rev} отз.)")
+                        if _np_rev:   _info_parts.append(f"({_np_rev})")
+                        if _np_bought: _info_parts.append(f"🛒 {_np_bought}")
+                        if _np_colors > 1: _info_parts.append(f"🎨 {_np_colors} цв.")
                         if _info_parts:
                             st.caption(" · ".join(_info_parts))
                         # Opportunity badge
@@ -4248,11 +4266,11 @@ elif page == "🔥 Топ ниши":
             _chart_data = []
             for _idx_c, _p in enumerate(_niche_products[:10]):
                 _t = (_p.get("title","") or "")[:25] + "..."
-                _pr_str = str(_p.get("price","") or _p.get("current_price","") or "0")
+                _pr_str = str(_p.get("price","") or _p.get("price_string","") or _p.get("current_price","") or "0")
                 try:
                     _pr_v = float(_pr_str.replace("$","").replace("€","").replace("£","").replace(",",".").strip().split()[0])
                 except: _pr_v = 0
-                _rv_str = str(_p.get("reviews","") or _p.get("reviews_count","") or "0")
+                _rv_str = str(_p.get("total_reviews","") or _p.get("reviews","") or _p.get("reviews_count","") or "0").replace("K","000").replace("k","000")
                 try:
                     _rv_v = int(_rv_str.replace(",","").strip().split()[0])
                 except: _rv_v = 0
