@@ -1782,7 +1782,7 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
             unsafe_allow_html=True
         )
 
-    with st.expander("🎯 Фокус анализа (необязательно)", expanded=False):
+    with st.expander("🎯 Фокус анализа (Дополнительно)", expanded=False):
         st.caption("Помогает AI расставить приоритеты и оценивать фото под нужную аудиторию")
         _fa1, _fa2, _fa3 = st.columns(3)
         with _fa1:
