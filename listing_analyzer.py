@@ -4078,8 +4078,10 @@ elif page == "🔥 Топ ниши":
 
     _niche_mp_col1, _niche_mp_col2 = st.columns([2,4])
     with _niche_mp_col1:
-        _niche_mp = st.selectbox("Маркетплейс", ["com","de","fr","it","es","co.uk","ca","nl"],
-                                  index=["com","de","fr","it","es","co.uk","ca","nl"].index(_mp_niche) if _mp_niche in ["com","de","fr","it","es","co.uk","ca","nl"] else 0,
+        _mp_list = ["com","de","fr","it","es","co.uk","ca","nl"]
+        _mp_default = st.session_state.get("_niche_mp", _mp_niche)
+        _niche_mp = st.selectbox("Маркетплейс", _mp_list,
+                                  index=_mp_list.index(_mp_default) if _mp_default in _mp_list else 0,
                                   key="niche_mp_sel")
     # Auto-clear results if marketplace changed since last search
     _last_searched_mp = st.session_state.get("_niche_mp", "com")
@@ -4137,7 +4139,7 @@ elif page == "🔥 Топ ниши":
     if st.session_state.get("_niche_results"):
         _niche_products = st.session_state["_niche_results"]
         # Always use current selectbox value for display
-        _niche_mp_saved = _niche_mp  # _niche_mp comes from selectbox directly
+        _niche_mp_saved = st.session_state.get("_niche_mp", "com")
         _mp_flags = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
 
         # ── Canvas-style metrics ──────────────────────────────────────────────
