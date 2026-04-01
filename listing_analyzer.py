@@ -4068,16 +4068,25 @@ elif page == "🔥 Топ ниши":
         "nl":  ["merino wol basislaag heren","wandelsokken wol","merino shirt dames","thermisch ondergoed set","wollen muts outdoor","basislaag dames"],
     }
     _niche_quick_queries = _niche_quick_by_mp.get(st.session_state.get("niche_mp_sel", st.session_state.get("_niche_mp","com")), _niche_quick_by_mp["com"])
+    _current_query = st.session_state.get("_niche_query_saved","")
     st.markdown('<div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">⚡ Быстрый поиск:</div>', unsafe_allow_html=True)
     _qbtn_cols = st.columns(len(_niche_quick_queries))
     for _qbi, (_qbc, _qbq) in enumerate(zip(_qbtn_cols, _niche_quick_queries)):
-        if _qbc.button(_qbq[:22]+"…" if len(_qbq)>22 else _qbq, key=f"niche_quick_{_qbi}", use_container_width=True):
+        _is_active = (_current_query == _qbq)
+        _btn_label = ("✓ " if _is_active else "") + (_qbq[:20]+"…" if len(_qbq)>20 else _qbq)
+        if _qbc.button(_btn_label, key=f"niche_quick_{_qbi}", use_container_width=True,
+                       type="primary" if _is_active else "secondary"):
             st.session_state["_niche_query_saved"] = _qbq
             st.session_state["_niche_run_now"] = True
-            # Clear old results so new search runs fresh
             st.session_state.pop("_niche_results", None)
             st.session_state.pop("_niche_ai_report", None)
             st.rerun()
+    # Show active query badge
+    if _current_query:
+        st.markdown(
+            f'<div style="font-size:0.75rem;margin-top:4px;color:#64748b">'
+            f'🔍 Текущий запрос: <b style="color:#0f172a">{_current_query}</b></div>',
+            unsafe_allow_html=True)
 
     _niche_mp_col1, _niche_mp_col2 = st.columns([2,4])
     with _niche_mp_col1:
