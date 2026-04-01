@@ -4088,7 +4088,73 @@ elif page == "🔥 Топ ниши":
         _niche_mp_saved = st.session_state.get("_niche_mp","com")
         _mp_flags = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
 
+        # ── Canvas-style metrics ──────────────────────────────────────────────
+        _total_products = len(_niche_products)
+        _sponsored_count = sum(1 for p in _niche_products if p.get("sponsored"))
+        _organic_count = _total_products - _sponsored_count
+        # Price stats
+        _prices = []
+        for _p in _niche_products:
+            try:
+                _pv = str(_p.get("price","") or _p.get("current_price","") or "")
+                _pv = _pv.replace("$","").replace("€","").replace("£","").replace(",",".").strip().split()[0]
+                _prices.append(float(_pv))
+            except: pass
+        # Ratings stats
+        _ratings = []
+        for _p in _niche_products:
+            try: _ratings.append(float(str(_p.get("rating","") or _p.get("stars","") or 0).split()[0]))
+            except: pass
+        # Reviews stats
+        _revs = []
+        for _p in _niche_products:
+            try:
+                _rv = str(_p.get("reviews","") or _p.get("reviews_count","") or _p.get("number_of_reviews","") or 0)
+                _rv = _rv.replace(",","").replace(".","").strip().split()[0]
+                _revs.append(int(_rv))
+            except: pass
+
+        _avg_price = f"${sum(_prices)/len(_prices):.2f}" if _prices else "—"
+        _price_range = f"${min(_prices):.0f}–${max(_prices):.0f}" if len(_prices)>=2 else _avg_price
+        _avg_rat = f"{sum(_ratings)/len(_ratings):.1f}★" if _ratings else "—"
+        _avg_rev = f"{int(sum(_revs)/len(_revs)):,}" if _revs else "—"
+        _competition = "🔴 Высокая" if _organic_count > 8 else ("🟡 Средняя" if _organic_count > 4 else "🟢 Низкая")
+
         st.subheader(f"📋 Топ листинги {_mp_flags.get(_niche_mp_saved,'')} amazon.{_niche_mp_saved}")
+
+        # Canvas-style metric cards
+        _m1, _m2, _m3, _m4, _m5 = st.columns(5)
+        _m1.markdown(
+            f'<div style="background:#1e293b;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #3b82f6">'
+            f'<div style="font-size:0.65rem;color:#64748b;margin-bottom:4px">📦 КОНКУРЕНТОВ</div>'
+            f'<div style="font-size:1.6rem;font-weight:800;color:#3b82f6">{_organic_count}</div>'
+            f'<div style="font-size:0.62rem;color:#64748b">{_competition}</div></div>',
+            unsafe_allow_html=True)
+        _m2.markdown(
+            f'<div style="background:#1e293b;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #f59e0b">'
+            f'<div style="font-size:0.65rem;color:#64748b;margin-bottom:4px">💰 СРЕДНЯЯ ЦЕНА</div>'
+            f'<div style="font-size:1.6rem;font-weight:800;color:#f59e0b">{_avg_price}</div>'
+            f'<div style="font-size:0.62rem;color:#64748b">диапазон {_price_range}</div></div>',
+            unsafe_allow_html=True)
+        _m3.markdown(
+            f'<div style="background:#1e293b;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #22c55e">'
+            f'<div style="font-size:0.65rem;color:#64748b;margin-bottom:4px">⭐ СР. РЕЙТИНГ</div>'
+            f'<div style="font-size:1.6rem;font-weight:800;color:#22c55e">{_avg_rat}</div>'
+            f'<div style="font-size:0.62rem;color:#64748b">топ листингов</div></div>',
+            unsafe_allow_html=True)
+        _m4.markdown(
+            f'<div style="background:#1e293b;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #8b5cf6">'
+            f'<div style="font-size:0.65rem;color:#64748b;margin-bottom:4px">💬 СР. ОТЗЫВОВ</div>'
+            f'<div style="font-size:1.6rem;font-weight:800;color:#8b5cf6">{_avg_rev}</div>'
+            f'<div style="font-size:0.62rem;color:#64748b">соц. доказательство</div></div>',
+            unsafe_allow_html=True)
+        _m5.markdown(
+            f'<div style="background:#1e293b;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #ef4444">'
+            f'<div style="font-size:0.65rem;color:#64748b;margin-bottom:4px">🎯 SPONSORED</div>'
+            f'<div style="font-size:1.6rem;font-weight:800;color:#ef4444">{_sponsored_count}</div>'
+            f'<div style="font-size:0.62rem;color:#64748b">из {_total_products} мест</div></div>',
+            unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
         # Display grid of results
         for _ni in range(0, len(_niche_products), 3):
@@ -4103,42 +4169,96 @@ elif page == "🔥 Топ ниши":
                 _np_img   = _np.get("image","") or _np.get("thumbnail","") or _np.get("img","")
                 _np_spon  = _np.get("sponsored", False)
                 _is_ours  = (_np_asin == _our_asin)
-                _border   = "#3b82f6" if _is_ours else ("#94a3b8" if _np_spon else "#334155")
+                _np_pos   = _ni + _nj + 1  # position in search results
+
+                # Estimate opportunity: lower reviews = easier to enter
+                try: _np_rev_int = int(str(_np_rev).replace(",","").split()[0])
+                except: _np_rev_int = 0
+                _opp = "🟢 Вход лёгкий" if _np_rev_int < 200 else ("🟡 Средний" if _np_rev_int < 1000 else "🔴 Высокий порог")
 
                 with _nc:
                     with st.container(border=True):
+                        # Position badge
+                        _pos_color = "#f59e0b" if _np_pos <= 3 else "#64748b"
+                        st.markdown(
+                            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+                            f'<span style="background:{_pos_color};color:white;border-radius:4px;padding:1px 7px;font-size:0.68rem;font-weight:700">#{_np_pos}</span>'
+                            f'{"<span style=\'font-size:0.65rem;color:#94a3b8;background:#1e293b;padding:1px 5px;border-radius:3px\'>Sponsored</span>" if _np_spon else ""}'
+                            f'{"<span style=\'font-size:0.65rem;color:#3b82f6;background:#1e3a5f;padding:1px 5px;border-radius:3px\'>🔵 НАШ</span>" if _is_ours else ""}'
+                            f'</div>',
+                            unsafe_allow_html=True)
                         if _np_img:
                             st.markdown(
-                                f'<img src="{_np_img}" style="width:100%;height:140px;object-fit:contain;'
-                                f'background:#f8fafc;border-radius:6px">',
-                                unsafe_allow_html=True
-                            )
+                                f'<img src="{_np_img}" style="width:100%;height:130px;object-fit:contain;background:#f8fafc;border-radius:6px">',
+                                unsafe_allow_html=True)
                         st.markdown(
-                            f'<div style="font-size:0.78rem;font-weight:600;color:{"#3b82f6" if _is_ours else "#e2e8f0"};'
-                            f'line-height:1.3;margin-top:6px">'
-                            f'{"🔵 НАШ — " if _is_ours else ""}{_np_title}</div>',
-                            unsafe_allow_html=True
-                        )
-                        if _np_spon:
-                            st.markdown('<span style="font-size:0.65rem;color:#94a3b8;background:#1e293b;padding:1px 5px;border-radius:3px">Спонсор</span>', unsafe_allow_html=True)
+                            f'<div style="font-size:0.76rem;font-weight:600;color:{"#3b82f6" if _is_ours else "#e2e8f0"};line-height:1.3;margin-top:6px">{_np_title}</div>',
+                            unsafe_allow_html=True)
+                        # Metrics row
                         _info_parts = []
                         if _np_price: _info_parts.append(f"💰 {_np_price}")
                         if _np_rat:   _info_parts.append(f"⭐ {_np_rat}")
-                        if _np_rev:   _info_parts.append(f"({_np_rev})")
+                        if _np_rev:   _info_parts.append(f"({_np_rev} отз.)")
                         if _info_parts:
                             st.caption(" · ".join(_info_parts))
+                        # Opportunity badge
+                        st.markdown(
+                            f'<div style="font-size:0.65rem;margin-top:3px">{_opp}</div>',
+                            unsafe_allow_html=True)
                         if _np_asin:
                             _btn_col1, _btn_col2 = st.columns(2)
                             _btn_col1.markdown(
                                 f'<a href="https://www.amazon.{_niche_mp_saved}/dp/{_np_asin}" target="_blank">'
-                                f'<button style="width:100%;padding:4px;background:#334155;color:white;'
-                                f'border:none;border-radius:4px;cursor:pointer;font-size:0.7rem">↗ Amazon</button></a>',
-                                unsafe_allow_html=True
-                            )
+                                f'<button style="width:100%;padding:4px;background:#334155;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.7rem">↗ Amazon</button></a>',
+                                unsafe_allow_html=True)
                             if _btn_col2.button("🔍 Анализ", key=f"niche_analyze_{_ni}_{_nj}", use_container_width=True):
                                 st.session_state["_niche_analyze_asin"] = _np_asin
                                 st.session_state["_niche_analyze_mp"]   = _niche_mp_saved
                                 st.rerun()
+
+        # ── Canvas-style Charts ───────────────────────────────────────────
+        st.divider()
+        st.markdown("#### 📊 Карта ниши")
+        _ch1, _ch2 = st.columns(2)
+
+        with _ch1:
+            # Price distribution bar chart
+            import pandas as pd
+            _chart_data = []
+            for _idx_c, _p in enumerate(_niche_products[:10]):
+                _t = (_p.get("title","") or "")[:25] + "..."
+                _pr_str = str(_p.get("price","") or _p.get("current_price","") or "0")
+                try:
+                    _pr_v = float(_pr_str.replace("$","").replace("€","").replace("£","").replace(",",".").strip().split()[0])
+                except: _pr_v = 0
+                _rv_str = str(_p.get("reviews","") or _p.get("reviews_count","") or "0")
+                try:
+                    _rv_v = int(_rv_str.replace(",","").strip().split()[0])
+                except: _rv_v = 0
+                _chart_data.append({"Товар": f"#{_idx_c+1} {_t}", "Цена": _pr_v, "Отзывы": _rv_v,
+                    "Рейтинг": float(str(_p.get("rating","") or _p.get("stars","") or 0).split()[0]) if str(_p.get("rating","") or 0) else 0})
+
+            if _chart_data:
+                _df = pd.DataFrame(_chart_data)
+                _df_prices = _df[_df["Цена"] > 0][["Товар","Цена"]].set_index("Товар")
+                if not _df_prices.empty:
+                    st.caption("💰 Ценовое распределение")
+                    st.bar_chart(_df_prices, color="#f59e0b", height=200)
+
+        with _ch2:
+            if _chart_data:
+                _df_revs = _df[_df["Отзывы"] > 0][["Товар","Отзывы"]].set_index("Товар")
+                if not _df_revs.empty:
+                    st.caption("💬 Отзывы — барьер входа")
+                    st.bar_chart(_df_revs, color="#8b5cf6", height=200)
+
+        # Opportunity scatter insight
+        if _chart_data:
+            _low_rev = [d for d in _chart_data if 0 < d["Отзывы"] < 300 and d["Цена"] > 0]
+            _high_price_low_comp = [d for d in _low_rev if d["Цена"] >= (_avg_price.replace("$","").replace("€","") if _avg_price != "—" else "0") and d["Рейтинг"] < 4.5]
+            if _low_rev:
+                _opp_titles = ", ".join([d["Товар"][:20] for d in _low_rev[:3]])
+                st.success(f"💡 **Opportunity:** {len(_low_rev)} товаров с <300 отзывами — лёгкий вход: {_opp_titles}")
 
         # ── AI Niche Intelligence ──────────────────────────────────────────
         st.divider()
