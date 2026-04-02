@@ -1418,16 +1418,30 @@ def db_lookup_asin(asin):
     if not conn: return []
     try:
         cur = conn.cursor()
+        # Search by main asin column AND inside our_data_json (handles parent/child ASIN differences)
         cur.execute("""
             SELECT asin, our_title, overall_score, analyzed_at, listing_type,
                    COALESCE(marketplace,'com') as marketplace
             FROM listing_analysis
             WHERE asin = %s
+               OR our_data_json::text ILIKE %s
             ORDER BY analyzed_at DESC LIMIT 5
-        """, (asin,))
-        rows = cur.fetchall(); conn.close()
+        """, (asin, f'%"_input_asin": "{asin}"%'))
+        rows = cur.fetchall()
+        if not rows:
+            # Also try searching in our_title for ASIN
+            cur.execute("""
+                SELECT asin, our_title, overall_score, analyzed_at, listing_type,
+                       COALESCE(marketplace,'com') as marketplace
+                FROM listing_analysis
+                WHERE our_data_json::text ILIKE %s
+                ORDER BY analyzed_at DESC LIMIT 5
+            """, (f'%{asin}%',))
+            rows = cur.fetchall()
+        conn.close()
         return [{"asin":r[0],"title":r[1],"score":r[2],"date":r[3],"type":r[4],"marketplace":r[5]} for r in rows]
-    except: return []
+    except Exception as e:
+        return []
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -1974,7 +1988,10 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     st.session_state["page"] = "🔴 Конкурент 1"
                 try:
                     _od = st.session_state.get("our_data", {})
-                    _saved = db_save(get_asin_from_data(_od), result,
+                    # Save input ASIN from URL for better lookup later
+                    _input_asin_save = get_asin(our_url) or get_asin_from_data(_od)
+                    if _input_asin_save: _od["_input_asin"] = _input_asin_save
+                    _saved = db_save(get_asin_from_data(_od) or _input_asin_save, result,
                             st.session_state.get("vision",""), _od.get("title",""))
                     log("💾 Сохранено в историю" if _saved else f"⚠️ БД ошибка: {st.session_state.get('_db_save_err','?')}")
                 except Exception as _dbe:
@@ -2008,7 +2025,10 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                 st.session_state["result"] = result
                 try:
                     _od = st.session_state.get("our_data", {})
-                    _saved = db_save(get_asin_from_data(_od), result,
+                    # Save input ASIN from URL for better lookup later
+                    _input_asin_save = get_asin(our_url) or get_asin_from_data(_od)
+                    if _input_asin_save: _od["_input_asin"] = _input_asin_save
+                    _saved = db_save(get_asin_from_data(_od) or _input_asin_save, result,
                             st.session_state.get("vision",""), _od.get("title",""))
                     log("💾 Сохранено в историю" if _saved else f"⚠️ БД ошибка")
                 except Exception as _dbe:
