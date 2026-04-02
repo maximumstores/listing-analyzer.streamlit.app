@@ -1394,6 +1394,42 @@ def fetch_offers(asin, domain="com", log=None):
         return None
 
 
+def fetch_autocomplete(prefix, domain="com", language="en"):
+    """Fetch Amazon search autocomplete suggestions via ScrapingDog"""
+    sd_key = st.secrets.get("SCRAPINGDOG_API_KEY","")
+    if not sd_key or not prefix or len(prefix) < 2: return []
+    _lang_map = {"de":"de","fr":"fr","it":"it","es":"es","nl":"nl","co.uk":"en","ca":"en","com":"en"}
+    try:
+        r = requests.get("https://api.scrapingdog.com/amazon/autocomplete",
+            params={"api_key": sd_key, "prefix": prefix, "domain": domain,
+                    "language": _lang_map.get(domain, language)},
+            timeout=10)
+        if r.ok:
+            data = r.json()
+            if isinstance(data, list):
+                return [item.get("keyword","") for item in data if item.get("keyword")]
+        return []
+    except: return []
+
+
+def db_lookup_asin(asin):
+    """Check if ASIN exists in our DB - as our listing or competitor"""
+    conn = get_db()
+    if not conn: return []
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT asin, our_title, overall_score, analyzed_at, listing_type,
+                   COALESCE(marketplace,'com') as marketplace
+            FROM listing_analysis
+            WHERE asin = %s
+            ORDER BY analyzed_at DESC LIMIT 5
+        """, (asin,))
+        rows = cur.fetchall(); conn.close()
+        return [{"asin":r[0],"title":r[1],"score":r[2],"date":r[3],"type":r[4],"marketplace":r[5]} for r in rows]
+    except: return []
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log, prog=None):
     _steps_done = []
@@ -1725,6 +1761,50 @@ with st.sidebar:
 
 # ── Input always visible at top ───────────────────────────────────────────────
 with st.expander("📎 Листинги", expanded=("result" not in st.session_state)):
+    # ── ASIN Quick Lookup ────────────────────────────────────────────────────
+    _lk_col1, _lk_col2 = st.columns([3,1])
+    with _lk_col1:
+        _lookup_asin = st.text_input(
+            "🔎 Быстрый поиск по ASIN",
+            placeholder="B09C4VW4YP — проверить есть ли в истории...",
+            key="asin_lookup_input",
+            label_visibility="collapsed"
+        )
+    with _lk_col2:
+        _do_lookup = st.button("🔎 Найти", key="btn_asin_lookup", use_container_width=True)
+
+    if _do_lookup and _lookup_asin.strip():
+        _asin_clean = _lookup_asin.strip().upper()
+        # Also extract from URL if pasted
+        import re as _re2
+        _m = _re2.search(r'/dp/([A-Z0-9]{10})', _asin_clean)
+        if _m: _asin_clean = _m.group(1)
+        _found = db_lookup_asin(_asin_clean)
+        if _found:
+            _mp_flags2 = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
+            for _f in _found:
+                _fc = "#3b82f6" if _f["type"]=="наш" else "#ef4444"
+                _ft = "🔵 НАШ" if _f["type"]=="наш" else "🔴 Конкурент"
+                _fs = _f.get("score",0) or 0
+                _fsc = "#22c55e" if _fs>=75 else ("#f59e0b" if _fs>=50 else "#ef4444")
+                _fdate = _f["date"].strftime("%d.%m.%Y %H:%M") if _f.get("date") else "—"
+                _fmp = _mp_flags2.get(_f.get("marketplace","com"),"🌍")
+                st.markdown(
+                    f'<div style="background:#0f172a;border-left:4px solid {_fc};border-radius:8px;'
+                    f'padding:10px 14px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">'
+                    f'<div>'
+                    f'<span style="font-size:0.8rem;font-weight:700;color:{_fc}">{_ft}</span>'
+                    f'<span style="font-size:0.75rem;color:#64748b;margin-left:8px">{_fmp} {_f["asin"]} · {_fdate}</span>'
+                    f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:2px">{(_f.get("title") or "")[:60]}</div>'
+                    f'</div>'
+                    f'<div style="text-align:center;min-width:60px">'
+                    f'<div style="font-size:1.3rem;font-weight:800;color:{_fsc}">{_fs}%</div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True)
+        else:
+            st.info(f"🔍 ASIN **{_asin_clean}** не найден в истории — ещё не анализировался")
+
+    st.divider()
     our_url = st.text_input("🔵 НАШ листинг", value=st.session_state.get("our_url_saved",""), placeholder="https://www.amazon.com/dp/...")
     c1, c2, c3, c4, c5 = st.columns(5)
     comp1 = c1.text_input("Конкурент 1", key="c0", value=st.session_state.get("c0_saved",""), placeholder="https://www.amazon.com/dp/...")
@@ -2870,6 +2950,17 @@ def health_card():
 # ── Pages dispatch ────────────────────────────────────────────────────────────
 if page == "🏠 Обзор":
     st.title("🏠 Обзор листинга")
+    with st.expander("ℹ️ Как читать эту страницу", expanded=False):
+        st.markdown("""
+**Health Score** — итоговая оценка листинга. 🟢 75%+ = сильный, 🟡 50-74% = есть проблемы, 🔴 <50% = критично.
+
+**Что делать:**
+1. Смотри **Приоритетные действия** → красные (HIGH) делаешь первыми
+2. Нажми **✍️ Переписать листинг** если низкий Title/Bullets score
+3. Нажми **🔍 Анализ возвратов** чтобы понять почему покупатели жалуются
+4. Нажми **👥 BuyBox** чтобы проверить не перехватил ли конкурент твои продажи
+""")
+
     if not od or not od.get("title"):
         st.info("ℹ️ НАШ листинг не анализировался — показаны только конкуренты.")
         _cd_ov = st.session_state.get("comp_data_list",[])
@@ -2894,7 +2985,7 @@ if page == "🏠 Обзор":
     if _our_asin_ret:
         _ret_col1, _ret_col2 = st.columns([2, 5])
         with _ret_col1:
-            if st.button("🔍 Анализ возвратов (1★+2★+3★)", key="btn_return_analysis", use_container_width=True):
+            if st.button("🔍 Анализ возвратов (1★+2★+3★)", key="btn_return_analysis", use_container_width=True, help="Загружает 1-3★ отзывы → AI находит топ причины возвратов и что исправить в листинге."):
                 _ret_lines = []
                 with st.spinner("📥 Загружаю отзывы через Apify..."):
                     _ret_reviews = fetch_1star_reviews(_our_asin_ret, domain="com", max_pages=1, log=lambda m: _ret_lines.append(m))
@@ -2922,7 +3013,7 @@ if page == "🏠 Обзор":
     _mp_bb = st.session_state.get("_marketplace","com")
     _bb_col1, _bb_col2 = st.columns([2,5])
     with _bb_col1:
-        if st.button("👥 BuyBox & Sellers", key="btn_buybox", use_container_width=True):
+        if st.button("👥 BuyBox & Sellers", key="btn_buybox", use_container_width=True, help="Показывает кто выигрывает BuyBox на этом ASIN и всех продавцов с ценами. Стоит 5 кредитов ScrapingDog."):
             with st.spinner("💰 Загружаю данные продавцов..."):
                 _offers_data = fetch_offers(_our_asin_bb, domain=_mp_bb)
                 if _offers_data:
@@ -3051,7 +3142,7 @@ if page == "🏠 Обзор":
     _tool_cols = st.columns(5)
 
     with _tool_cols[0]:
-        if st.button("✍️ Переписать листинг", use_container_width=True, key="btn_rewriter"):
+        if st.button("✍️ Переписать листинг", use_container_width=True, key="btn_rewriter", help="AI перепишет Title + 5 Bullets с учётом COSMO, JTBD и VPC gaps. ~10 сек."):
             with st.spinner("✍️ AI пишет title + 5 буллетов..."):
                 _rw_prompt = f"""Rewrite this Amazon listing. Product: {od.get('title','')}
 VPC gaps: {r.get('vpc_analysis',{}).get('pain_relievers_missing',[])}
@@ -3063,7 +3154,7 @@ NO stop words. Respond in {'Russian' if st.session_state.get('analysis_lang','ru
                 st.session_state["_ai_rewrite"] = ai_call("Amazon listing copywriter.", _rw_prompt, max_tokens=1500)
 
     with _tool_cols[1]:
-        if st.button("🔑 Keyword Gap", use_container_width=True, key="btn_kwgap"):
+        if st.button("🔑 Keyword Gap", use_container_width=True, key="btn_kwgap", help="Находит ключевые слова конкурентов которых нет в нашем листинге. Добавь в Title/Bullets."):
             with st.spinner("🔑 Анализирую keyword gaps..."):
                 _comps = st.session_state.get("comp_data_list", [])
                 _comp_all = " ".join([_cd.get("title","") + " " + " ".join(_cd.get("feature_bullets",[])) for _cd in _comps]).lower()
@@ -3089,7 +3180,7 @@ Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else '
                     except: pass
 
     with _tool_cols[3]:
-        if st.button("💬 Mining отзывов", use_container_width=True, key="btn_review_mine"):
+        if st.button("💬 Mining отзывов", use_container_width=True, key="btn_review_mine", help="Извлекает язык покупателей из 4-5★ отзывов — используй эти слова в Bullets и A+."):
             _mine_asin = od.get("parent_asin","") or od.get("product_information",{}).get("ASIN","")
             if _mine_asin:
                 with st.spinner("📥 Загружаю отзывы..."):
@@ -3138,7 +3229,7 @@ Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else '
     st.subheader("📥 Скачать PDF отчёт")
     _pdf_col1, _pdf_col2 = st.columns([2,4])
     with _pdf_col1:
-        if st.button("📄 Сгенерировать PDF", type="primary", use_container_width=True):
+        if st.button("📄 Сгенерировать PDF", type="primary", use_container_width=True, help="Профессиональный отчёт с фото, Vision анализом, COSMO/Rufus/VPC данными. Для клиентов и команды."):
             with st.spinner("Генерирую PDF отчёт..."):
                 try:
                     _pdf_bytes = generate_pdf_report(result=r, our_data=od, vision_text=st.session_state.get("vision",""), images=st.session_state.get("images",[]), asin=od.get("parent_asin","") or od.get("asin",""), comp_data=st.session_state.get("comp_data_list",[]))
@@ -3156,6 +3247,18 @@ Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else '
 # ══ Фото ══════════════════════════════════════════════════════════════════════
 elif page == "📸 Фото":
     st.title("📸 Vision анализ фотографий")
+    with st.expander("ℹ️ Как читать Vision анализ", expanded=False):
+        st.markdown("""
+**Оценки фото (1-10):** 9-10 = отлично, 7-8 = хорошо, 5-6 = улучшить, 1-4 = заменить.
+
+**Эмоции покупателя:** Доверие 💚 = хорошо | Сомнение 🔴 = плохо | Безразличие ⚪ = заменить фото.
+
+**Что делать:**
+- Фото с оценкой <6 → читай "Что делать" и передай дизайнеру
+- Главное фото (#1) <7 → приоритет HIGH, влияет на CTR в поиске
+- Нажми **🧠 AI-оценка галереи** для общего McKinsey-вывода
+""")
+
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
@@ -3201,7 +3304,7 @@ elif page == "📸 Фото":
         st.divider()
 
         # ── AI McKinsey-style overall gallery assessment ──────────────────
-        if st.button("🧠 AI-оценка галереи", key="btn_gallery_ai", use_container_width=False):
+        if st.button("🧠 AI-оценка галереи", key="btn_gallery_ai", use_container_width=False, help="McKinsey-вывод по всей галерее: что видит покупатель, главные проблемы и одно действие с максимальным ROI."):
             with st.spinner("🧠 Анализирую всю галерею..."):
                 _aud_ctx = st.session_state.get("target_audience","")
                 _aud_str = f"\nЦелевая аудитория: {_aud_ctx}" if _aud_ctx else ""
@@ -3349,6 +3452,22 @@ elif page == "🎨 A+ Контент":
 # ══ Контент ════════════════════════════════════════════════════════════════════
 elif page == "📝 Контент":
     st.title("📝 Анализ контента")
+    with st.expander("ℹ️ Как работать с контентом", expanded=False):
+        st.markdown("""
+**Stop Words** (вверху) — 🚫 красные = мгновенная suppression листинга Amazon. Убирай немедленно!
+
+**Title:** ≤125 символов. Формат: [Материал][Гендер][Тип][Фича][Использование]
+
+**Bullets:** 5 штук, ≤250 байт каждый. Формат: "Фича: Польза. Контекст."
+
+**Keyword Ideas:** введи seed-слово → получи реальные поисковые запросы Amazon → ✅/❌ показывает есть ли они в листинге.
+
+**Что делать:**
+1. Убери все 🚫 Stop Words
+2. Исправь Title если >125 симв.
+3. Добавь ❌ ключевые слова из Keyword Ideas
+""")
+
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
@@ -3383,6 +3502,33 @@ elif page == "📝 Контент":
             with st.expander(f"⚠️ ({len(_real_gaps)})"):
                 for g in _real_gaps: st.markdown(f"- {g}")
         if rec: st.info(f"💡 {rec}")
+
+    # ── Keyword Ideas (Autocomplete) ─────────────────────────────────────────
+    _ki_col1, _ki_col2 = st.columns([3,1])
+    with _ki_col1:
+        _ki_seed = st.text_input("💡 Keyword Ideas — введи seed:", 
+            placeholder="merino wool, base layer, outdoor...",
+            key="ki_seed_input", label_visibility="collapsed")
+    with _ki_col2:
+        _ki_run = st.button("🔍 Идеи", key="btn_ki", use_container_width=True)
+    if _ki_run and _ki_seed.strip():
+        _ki_mp = st.session_state.get("_marketplace","com")
+        _ki_results = fetch_autocomplete(_ki_seed.strip(), domain=_ki_mp)
+        if _ki_results:
+            st.session_state["_ki_results"] = _ki_results
+            st.session_state["_ki_seed"] = _ki_seed.strip()
+    if st.session_state.get("_ki_results"):
+        st.markdown(f'<div style="font-size:0.8rem;font-weight:700;color:#3b82f6;margin-bottom:6px">💡 Amazon подсказки для "{st.session_state.get("_ki_seed","")}":</div>', unsafe_allow_html=True)
+        _ki_grid = ""
+        for _kw in st.session_state["_ki_results"][:10]:
+            _in_title = _kw.lower() in (our_title or "").lower()
+            _in_bullets = any(_kw.lower() in b.lower() for b in (our_bullets or []))
+            _status = "✅" if (_in_title or _in_bullets) else "❌"
+            _bg = "#1a3a1a" if (_in_title or _in_bullets) else "#1e293b"
+            _ki_grid += f'<div style="background:{_bg};border-radius:6px;padding:5px 10px;display:inline-block;margin:2px;font-size:0.8rem;color:#e2e8f0">{_status} {_kw}</div>'
+        st.markdown(f'<div style="line-height:2">{_ki_grid}</div>', unsafe_allow_html=True)
+        st.caption("✅ = уже есть в Title/Bullets | ❌ = отсутствует — добавить!")
+    st.divider()
 
     _sec("Title", "title_score", raw_text=our_title, char_limit=125)
     st.divider()
@@ -3469,6 +3615,18 @@ elif page == "🏆 Benchmark":
 # ══ COSMO / Rufus ════════════════════════════════════════════════════════════
 elif page == "🧠 COSMO / Rufus":
     st.title("🧠 COSMO / Rufus Анализ")
+    with st.expander("ℹ️ Что такое COSMO и Rufus", expanded=False):
+        st.markdown("""
+**COSMO** — алгоритм Amazon который решает что показывать покупателям. Если сигнал ❌ отсутствует → Amazon не понимает твой товар → не показывает нужной аудитории.
+
+**Rufus** — AI-ассистент Amazon. Покупатель спрашивает Rufus → Rufus читает твой листинг → отвечает. Низкий score = Rufus не найдёт ответ = не порекомендует товар.
+
+**Что делать:**
+1. Смотри ❌ Отсутствующие сигналы COSMO → добавь эти слова в листинг
+2. Используй **Rufus Симулятор** → задай 3-5 вопросов покупателя → нажми "Сохранить Q&A"
+3. Нажми **🧠 Plan of Action** → получи конкретный план что добавить
+""")
+
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
@@ -3594,8 +3752,18 @@ elif page == "🧠 COSMO / Rufus":
             key="rufus_sim_input",
             label_visibility="collapsed"
         )
+    # Show autocomplete for Rufus input
+    if _rufus_q and len(_rufus_q) >= 3:
+        _rmp = st.session_state.get("_marketplace","com")
+        _rac = fetch_autocomplete(_rufus_q, domain=_rmp)
+        if _rac:
+            _rac_cols = st.columns(min(4, len(_rac)))
+            for _ri, (_rc2, _rq) in enumerate(zip(_rac_cols, _rac[:4])):
+                if _rc2.button(_rq[:25]+"…" if len(_rq)>25 else _rq, key=f"rufus_ac_{_ri}", use_container_width=True):
+                    st.session_state["_rufus_quick_q"] = _rq
+                    st.rerun()
     with _rfcol2:
-        _run_rufus = st.button("▶ Спросить Rufus", key="btn_rufus_sim", type="primary", use_container_width=True)
+        _run_rufus = st.button("▶ Спросить Rufus", key="btn_rufus_sim", type="primary", use_container_width=True, help="AI отвечает как Amazon Rufus используя данные твоего листинга → показывает ⚠️ Gap что не нашёл.")
 
     # Suggested questions
     _title_for_rufus = od.get("title","")
@@ -3762,7 +3930,7 @@ Respond in {'Russian' if st.session_state.get("analysis_lang","ru")=="ru" else "
 
         st.divider()
         # Generate Plan of Action from Q&A
-        if st.button("🧠 Сгенерировать Plan of Action", type="primary", key="btn_rufus_plan"):
+        if st.button("🧠 Сгенерировать Plan of Action", type="primary", key="btn_rufus_plan", help="AI читает все Q&A и генерирует конкретный план: что добавить в Title/Bullets/A+ для улучшения Rufus Score."):
             with st.spinner("🧠 AI генерирует план на основе Rufus Q&A..."):
                 _qa_text = "\n".join([
                     f"Q: {_h['q']}\nA: {_h.get('a','')}"
@@ -3812,6 +3980,22 @@ RUFUS Q&A (реальные вопросы покупателей и что Rufu
 # ══ VPC / JTBD ════════════════════════════════════════════════════════════════
 elif page == "🎯 VPC / JTBD":
     st.title("🎯 Value Proposition Canvas + JTBD")
+    with st.expander("ℹ️ Что такое VPC и JTBD", expanded=False):
+        st.markdown("""
+**Главная идея:** Покупатель не покупает продукт — он **нанимает** его для работы.
+
+**JTBD Alignment Score** — насколько листинг говорит языком покупателя:
+- 90%+ = листинг обращается к ситуации покупателя
+- <70% = листинг описывает продукт, не работу
+
+**VPC Fit Score** — % болей и выгод покупателя которые листинг закрывает.
+
+**Что делать:**
+1. Читай **Job Story** — это и есть ключевое сообщение листинга
+2. Смотри ❌ Pain Relievers Missing → это Gap в коммуникации
+3. Перепиши Bullet #1 чтобы начинался со сценария из Job Story
+""")
+
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
@@ -4150,6 +4334,19 @@ elif page == "🔥 Топ ниши":
             key="niche_query_input",
             label_visibility="collapsed"
         )
+    # Autocomplete suggestions
+    _cur_mp_ac = st.session_state.get("niche_mp_sel", st.session_state.get("_niche_mp","com"))
+    if _niche_q and len(_niche_q) >= 3:
+        _ac_suggestions = fetch_autocomplete(_niche_q, domain=_cur_mp_ac)
+        if _ac_suggestions:
+            st.markdown('<div style="font-size:0.72rem;color:#64748b;margin-bottom:3px">💡 Amazon подсказывает:</div>', unsafe_allow_html=True)
+            _ac_cols = st.columns(min(5, len(_ac_suggestions)))
+            for _aci, (_acc, _acq) in enumerate(zip(_ac_cols, _ac_suggestions[:5])):
+                if _acc.button(_acq[:28]+"…" if len(_acq)>28 else _acq, key=f"ac_{_aci}", use_container_width=True):
+                    st.session_state["_niche_query_saved"] = _acq
+                    st.session_state["_niche_run_now"] = True
+                    st.session_state.pop("_niche_results", None)
+                    st.rerun()
     with _nc2:
         _run_niche = st.button("🔍 Найти топ", type="primary", use_container_width=True, key="btn_niche_search")
     with _nc3:
@@ -4465,7 +4662,7 @@ elif page == "🔥 Топ ниши":
         st.divider()
         st.subheader("🧠 AI-анализ ниши")
 
-        if st.button("🧠 Что делают лидеры — AI-отчёт", type="primary", key="btn_niche_ai"):
+        if st.button("🧠 Что делают лидеры — AI-отчёт", type="primary", key="btn_niche_ai", help="AI анализирует топ-6 листингов ниши: паттерны лидеров, топ keywords, что менять чтобы попасть в топ-3."):
             with st.spinner("🧠 AI анализирует топ-листинги..."):
                 _niche_summary = []
                 for _np in _niche_products[:6]:
@@ -4780,7 +4977,7 @@ elif page == "📱 Mobile Score":
 
     # ── AI Mobile Consultant ──────────────────────────────────────────────────
     st.divider()
-    if st.button("🧠 AI-анализ мобильной конверсии", type="primary", key="btn_mobile_ai"):
+    if st.button("🧠 AI-анализ мобильной конверсии", type="primary", key="btn_mobile_ai", help="Анализирует первый экран мобиля → главная проблема → одно изменение с максимальным приростом конверсии."):
         with st.spinner("🧠 AI анализирует мобильный опыт..."):
             _aud_mob = st.session_state.get("target_audience","")
             _mob_prompt = f"""Ты эксперт по мобильной конверсии Amazon. Проанализируй листинг.
