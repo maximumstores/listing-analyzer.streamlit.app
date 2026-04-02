@@ -1774,11 +1774,10 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
         _do_lookup = st.button("🔎 Найти", key="btn_asin_lookup", use_container_width=True)
 
     if _do_lookup and _lookup_asin.strip():
-        _asin_clean = _lookup_asin.strip().upper()
-        # Also extract from URL if pasted
-        import re as _re2
-        _m = _re2.search(r'/dp/([A-Z0-9]{10})', _asin_clean)
-        if _m: _asin_clean = _m.group(1)
+        _raw_input = _lookup_asin.strip()
+        # Extract ASIN from URL if pasted
+        _m = re.search(r'/dp/([A-Z0-9]{10})', _raw_input, re.IGNORECASE)
+        _asin_clean = _m.group(1).upper() if _m else _raw_input.upper().strip()
         _found = db_lookup_asin(_asin_clean)
         if _found:
             _mp_flags2 = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
@@ -2137,7 +2136,13 @@ def page_history():
             st.info("Конкуренты появятся после анализа с конкурентами")
         else:
             _csearch = st.text_input("🔍", placeholder="ASIN или название", key="comp_hist_search", label_visibility="collapsed")
-            _fcomps = [c for c in all_comps if not _csearch or _csearch.lower() in c["asin"].lower() or _csearch.lower() in (c.get("title") or "").lower()]
+            _csearch_asin = _csearch
+            if _csearch and "/dp/" in _csearch:
+                _csm = re.search(r'/dp/([A-Z0-9]{10})', _csearch, re.IGNORECASE)
+                if _csm: _csearch_asin = _csm.group(1)
+            _fcomps = [c for c in all_comps if not _csearch or
+                _csearch_asin.upper() in c["asin"].upper() or
+                _csearch.lower() in (c.get("title") or "").lower()]
             for _cidx2, _ca in enumerate(_fcomps):
                 _csc = _ca.get("score",0) or 0
                 _csc_c = "#22c55e" if _csc>=75 else ("#f59e0b" if _csc>=50 else ("#ef4444" if _csc>0 else "#94a3b8"))
@@ -2213,8 +2218,13 @@ def page_history():
 
     _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
 
+    # Extract ASIN from URL if pasted in search
+    _search_asin = _search
+    if _search and "/dp/" in _search:
+        _sm2 = re.search(r'/dp/([A-Z0-9]{10})', _search, re.IGNORECASE)
+        if _sm2: _search_asin = _sm2.group(1)
     _filtered_asins = [a for a in all_asins if not _search or
-        _search.lower() in a["asin"].lower() or
+        _search_asin.upper() in a["asin"].upper() or
         _search.lower() in (a.get("title") or "").lower()]
 
     if st.session_state.get("_hist_select_asin"):
