@@ -1805,12 +1805,59 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
 
     st.divider()
     our_url = st.text_input("🔵 НАШ листинг", value=st.session_state.get("our_url_saved",""), placeholder="https://www.amazon.com/dp/...")
+
+    # Auto-check history when URL/ASIN entered
+    if our_url and our_url.strip():
+        _auto_m = re.search(r'/dp/([A-Z0-9]{10})', our_url, re.IGNORECASE)
+        _auto_asin = _auto_m.group(1).upper() if _auto_m else (our_url.strip().upper() if len(our_url.strip()) == 10 else "")
+        if _auto_asin and len(_auto_asin) == 10:
+            _auto_found = db_lookup_asin(_auto_asin)
+            if _auto_found:
+                _mp_flags3 = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
+                for _af in _auto_found[:1]:
+                    _afc = "#3b82f6" if _af["type"]=="наш" else "#ef4444"
+                    _aft = "🔵 УЖЕ В ИСТОРИИ (НАШ)" if _af["type"]=="наш" else "🔴 УЖЕ В ИСТОРИИ (Конкурент)"
+                    _afs = _af.get("score",0) or 0
+                    _afsc = "#22c55e" if _afs>=75 else ("#f59e0b" if _afs>=50 else "#ef4444")
+                    _afdate = _af["date"].strftime("%d.%m.%Y %H:%M") if _af.get("date") else "—"
+                    st.markdown(
+                        f'<div style="background:#f0f9ff;border-left:4px solid {_afc};border-radius:6px;'
+                        f'padding:8px 12px;display:flex;justify-content:space-between;align-items:center">'
+                        f'<div style="font-size:0.8rem">'
+                        f'<b style="color:{_afc}">{_aft}</b> · {_mp_flags3.get(_af.get("marketplace","com"),"🌍")} {_auto_asin} · {_afdate}<br>'
+                        f'<span style="color:#475569">{(_af.get("title") or "")[:60]}</span></div>'
+                        f'<div style="font-size:1.2rem;font-weight:800;color:{_afsc}">{_afs}%</div>'
+                        f'</div>',
+                        unsafe_allow_html=True)
+            else:
+                st.caption(f"✨ {_auto_asin} — новый, ещё не анализировался")
+
     c1, c2, c3, c4, c5 = st.columns(5)
-    comp1 = c1.text_input("Конкурент 1", key="c0", value=st.session_state.get("c0_saved",""), placeholder="https://www.amazon.com/dp/...")
-    comp2 = c2.text_input("Конкурент 2", key="c1", value=st.session_state.get("c1_saved",""), placeholder="https://www.amazon.com/dp/...")
-    comp3 = c3.text_input("Конкурент 3", key="c2", value=st.session_state.get("c2_saved",""), placeholder="https://www.amazon.com/dp/...")
-    comp4 = c4.text_input("Конкурент 4", key="c3", value=st.session_state.get("c3_saved",""), placeholder="https://www.amazon.com/dp/...")
-    comp5 = c5.text_input("Конкурент 5", key="c4", value=st.session_state.get("c4_saved",""), placeholder="https://www.amazon.com/dp/...")
+    _comp_vals = []
+    _mp_flags_c = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱"}
+    for _ci2, (_cc2, _clbl) in enumerate(zip([c1,c2,c3,c4,c5], ["Конкурент 1","Конкурент 2","Конкурент 3","Конкурент 4","Конкурент 5"])):
+        with _cc2:
+            _cv2 = st.text_input(_clbl, key=f"c{_ci2}", value=st.session_state.get(f"c{_ci2}_saved",""), placeholder="https://www.amazon.com/dp/...")
+            _comp_vals.append(_cv2)
+            if _cv2.strip() and len(_cv2.strip()) > 10:
+                _cm2 = re.search(r'/dp/([A-Z0-9]{10})', _cv2, re.IGNORECASE)
+                if _cm2:
+                    _casin2 = _cm2.group(1).upper()
+                    _cfound2 = db_lookup_asin(_casin2)
+                    if _cfound2:
+                        _cf2 = _cfound2[0]
+                        _cfc2 = "#22c55e" if _cf2["score"]>=75 else ("#f59e0b" if _cf2["score"]>=50 else "#ef4444")
+                        _cft2 = "🔵 НАШ" if _cf2["type"]=="наш" else "🔴 Конкурент"
+                        _cfmp2 = _mp_flags_c.get(_cf2.get("marketplace","com"),"🌍")
+                        st.markdown(
+                            (f'<div style="background:#0f172a;border-radius:6px;padding:5px 8px;margin-top:2px">' +
+                            f'<div style="font-size:0.68rem"><span style="color:{_cfc2}">{_cft2} {_cfmp2}</span>' +
+                            f'<b style="color:{_cfc2};margin-left:6px">{_cf2["score"]}%</b></div>' +
+                            f'<div style="font-size:0.65rem;color:#94a3b8">{str(_cf2.get("title") or "")[:28]}...</div></div>'),
+                            unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div style="font-size:0.68rem;color:#64748b;margin-top:2px">🆕 Новый — не анализировался</div>', unsafe_allow_html=True)
+    comp1,comp2,comp3,comp4,comp5 = _comp_vals
     competitor_urls = [comp1, comp2, comp3, comp4, comp5]
 
     prev_url  = st.session_state.get("our_url_saved","")
