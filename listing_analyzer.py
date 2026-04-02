@@ -1761,50 +1761,28 @@ with st.sidebar:
 
 # ── Input always visible at top ───────────────────────────────────────────────
 with st.expander("📎 Листинги", expanded=("result" not in st.session_state)):
-    # ── ASIN Quick Lookup ────────────────────────────────────────────────────
-    _lk_col1, _lk_col2 = st.columns([3,1])
-    with _lk_col1:
-        _lookup_asin = st.text_input(
-            "🔎 Быстрый поиск по ASIN",
-            placeholder="B09C4VW4YP — проверить есть ли в истории...",
-            key="asin_lookup_input",
-            label_visibility="collapsed"
-        )
-    with _lk_col2:
-        _do_lookup = st.button("🔎 Найти", key="btn_asin_lookup", use_container_width=True)
 
-    if _do_lookup and _lookup_asin.strip():
-        _raw_input = _lookup_asin.strip()
-        # Extract ASIN from URL if pasted
-        _m = re.search(r'/dp/([A-Z0-9]{10})', _raw_input, re.IGNORECASE)
-        _asin_clean = _m.group(1).upper() if _m else _raw_input.upper().strip()
-        _found = db_lookup_asin(_asin_clean)
-        if _found:
-            _mp_flags2 = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}
-            for _f in _found:
-                _fc = "#3b82f6" if _f["type"]=="наш" else "#ef4444"
-                _ft = "🔵 НАШ" if _f["type"]=="наш" else "🔴 Конкурент"
-                _fs = _f.get("score",0) or 0
-                _fsc = "#22c55e" if _fs>=75 else ("#f59e0b" if _fs>=50 else "#ef4444")
-                _fdate = _f["date"].strftime("%d.%m.%Y %H:%M") if _f.get("date") else "—"
-                _fmp = _mp_flags2.get(_f.get("marketplace","com"),"🌍")
-                st.markdown(
-                    f'<div style="background:#0f172a;border-left:4px solid {_fc};border-radius:8px;'
-                    f'padding:10px 14px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">'
-                    f'<div>'
-                    f'<span style="font-size:0.8rem;font-weight:700;color:{_fc}">{_ft}</span>'
-                    f'<span style="font-size:0.75rem;color:#64748b;margin-left:8px">{_fmp} {_f["asin"]} · {_fdate}</span>'
-                    f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:2px">{(_f.get("title") or "")[:60]}</div>'
-                    f'</div>'
-                    f'<div style="text-align:center;min-width:60px">'
-                    f'<div style="font-size:1.3rem;font-weight:800;color:{_fsc}">{_fs}%</div>'
-                    f'</div></div>',
-                    unsafe_allow_html=True)
-        else:
-            st.info(f"🔍 ASIN **{_asin_clean}** не найден в истории — ещё не анализировался")
-
-    st.divider()
     our_url = st.text_input("🔵 НАШ листинг", value=st.session_state.get("our_url_saved",""), placeholder="https://www.amazon.com/dp/...")
+    if our_url.strip() and len(our_url.strip()) > 10:
+        _om = re.search(r'/dp/([A-Z0-9]{10})', our_url, re.IGNORECASE)
+        if _om:
+            _oasin = _om.group(1).upper()
+            _ofound = db_lookup_asin(_oasin)
+            if _ofound:
+                _of = _ofound[0]
+                _ofc = "#22c55e" if _of["score"]>=75 else ("#f59e0b" if _of["score"]>=50 else "#ef4444")
+                _oft = "🔵 НАШ" if _of["type"]=="наш" else "🔴 Конкурент"
+                _ofmp = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}.get(_of.get("marketplace","com"),"🌍")
+                _ofdate = _of["date"].strftime("%d.%m.%Y") if _of.get("date") else "—"
+                st.markdown(
+                    f'<div style="background:#0f172a;border-left:3px solid {_ofc};border-radius:6px;padding:7px 12px;margin-top:3px;display:flex;justify-content:space-between;align-items:center">' +
+                    f'<div><span style="font-size:0.75rem;font-weight:700;color:{_ofc}">{_oft} {_ofmp}</span>' +
+                    f'<span style="font-size:0.7rem;color:#64748b;margin-left:8px">{_ofdate}</span>' +
+                    f'<div style="font-size:0.75rem;color:#94a3b8">{str(_of.get("title") or "")[:50]}</div></div>' +
+                    f'<div style="font-size:1.2rem;font-weight:800;color:{_ofc}">{_of["score"]}%</div></div>',
+                    unsafe_allow_html=True)
+            else:
+                st.markdown('<div style="font-size:0.72rem;color:#64748b;margin-top:2px">🆕 Новый листинг — ещё не анализировался</div>', unsafe_allow_html=True)
 
     # Auto-check history when URL/ASIN entered
     if our_url and our_url.strip():
