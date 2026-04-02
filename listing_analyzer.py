@@ -2561,50 +2561,54 @@ if page == "📈 История": page_history(); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
 
 if "result" not in st.session_state and page not in ["🔥 Топ ниши", "📱 Mobile Score", "ℹ️ О инструменте", "📖 Документация"]:
+    # ── Onboarding для новых пользователей ──────────────────────────────────
     st.markdown("""
-<div style="max-width:720px;margin:40px auto 0">
-<h1 style="font-size:2rem;font-weight:800;margin-bottom:4px">🔍 Amazon Listing Analyzer</h1>
-<p style="color:#64748b;font-size:1rem;margin-bottom:32px">Listing 3.0 — AI-анализ на основе COSMO + Rufus + Vision</p>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px">
-<div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #3b82f6">
-<div style="font-weight:700;margin-bottom:8px">⚡ Что делает инструмент</div>
-<div style="font-size:0.88rem;color:#475569;line-height:1.6">
-• Загружает данные листинга через ScrapingDog API<br>
-• Анализирует <b>17 метрик</b> по рубрику Listing 3.0<br>
-• Vision AI оценивает каждое фото по 6 критериям<br>
-• Проверяет как Cosmo и Rufus понимают товар<br>
-• Сравнивает до 5 конкурентов
-</div></div>
-<div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #10b981">
-<div style="font-weight:700;margin-bottom:8px">🚀 Как запустить</div>
-<div style="font-size:0.88rem;color:#475569;line-height:1.6">
-1. Вставь ссылку на <b>наш листинг</b> (Amazon URL)<br>
-2. Добавь ссылки на <b>конкурентов</b> (до 5 штук)<br>
-3. Выбери язык и фокус анализа<br>
-4. Нажми <b>🚀 Запустить анализ</b><br>
-5. Подожди ~2-3 мин
-</div></div>
-<div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #f59e0b">
-<div style="font-weight:700;margin-bottom:8px">📊 Что получишь</div>
-<div style="font-size:0.88rem;color:#475569;line-height:1.6">
-• <b>Overall Score</b> — итоговый балл листинга<br>
-• <b>Vision анализ</b> — оценка каждого фото 1-10<br>
-• <b>Benchmark</b> — подиум vs конкуренты<br>
-• <b>COSMO / Rufus</b> — AI-видимость товара<br>
-• <b>Приоритетные действия</b> — что улучшить
-</div></div>
-<div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #8b5cf6">
-<div style="font-weight:700;margin-bottom:8px">💡 Советы</div>
-<div style="font-size:0.88rem;color:#475569;line-height:1.6">
-• Используй <b>⚡ Оптимизацию токенов</b> для быстрых ретестов<br>
-• Отключи Vision — анализ ускорится в 3-4х<br>
-• <b>English</b> — для листингов на .com рынке<br>
-• Кнопка <b>🗑️ Сброс</b> — полная очистка данных
-</div></div>
-</div>
-<p style="text-align:center;color:#94a3b8;font-size:0.8rem">👈 Введи ссылку на листинг в форме выше и нажми «Запустить анализ»</p>
-</div>
-""", unsafe_allow_html=True)
+<div style="text-align:center;padding:20px 0 10px">
+<h1 style="font-size:2.2rem;font-weight:800;color:#0f172a">🔍 Amazon Listing Analyzer</h1>
+<p style="color:#64748b;font-size:1.05rem">Listing 3.0 — AI-анализ на основе COSMO + Rufus + Vision</p>
+</div>""", unsafe_allow_html=True)
+
+    # 3 шага
+    _s1, _s2, _s3 = st.columns(3)
+    with _s1:
+        st.markdown('''<div style="background:#eff6ff;border-radius:14px;padding:20px;border-top:4px solid #3b82f6;min-height:170px">
+<div style="font-size:2rem">1️⃣</div>
+<div style="font-weight:700;color:#1e293b;font-size:1rem;margin:8px 0 6px">Вставь URL листинга</div>
+<div style="font-size:0.82rem;color:#475569;line-height:1.5">Скопируй ссылку с Amazon.com / .de / .fr / .it — любой маркетплейс. Можно добавить до 5 конкурентов.</div>
+</div>''', unsafe_allow_html=True)
+    with _s2:
+        st.markdown('''<div style="background:#f0fdf4;border-radius:14px;padding:20px;border-top:4px solid #22c55e;min-height:170px">
+<div style="font-size:2rem">2️⃣</div>
+<div style="font-weight:700;color:#1e293b;font-size:1rem;margin:8px 0 6px">Нажми Запустить анализ</div>
+<div style="font-size:0.82rem;color:#475569;line-height:1.5">AI проанализирует фото, текст, BSR, A+ и конкурентов. Полный анализ — 2-3 минуты.</div>
+</div>''', unsafe_allow_html=True)
+    with _s3:
+        st.markdown('''<div style="background:#fdf4ff;border-radius:14px;padding:20px;border-top:4px solid #a855f7;min-height:170px">
+<div style="font-size:2rem">3️⃣</div>
+<div style="font-weight:700;color:#1e293b;font-size:1rem;margin:8px 0 6px">Читай результаты</div>
+<div style="font-size:0.82rem;color:#475569;line-height:1.5">Обзор → Health Score. Фото → Vision. COSMO/Rufus → AI-видимость. Топ ниши → рынок.</div>
+</div>''', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Tips row
+    _t1, _t2, _t3, _t4 = st.columns(4)
+    _t1.info("💡 Заполни **Целевую аудиторию** — Vision AI учтёт кто покупатель")
+    _t2.info("💡 **EU:** Вставь amazon.de или .fr — маркетплейс определится авто")
+    _t3.info("💡 **История:** все анализы сохраняются — следи за динамикой Score")
+    _t4.info("💡 **Топ ниши** работает без URL — просто введи запрос покупателя")
+
+    st.divider()
+
+    # What you get
+    st.markdown("#### 📊 Что получишь после анализа")
+    _f1,_f2,_f3,_f4,_f5 = st.columns(5)
+    _feat_names = ["Overall Score\n17 метрик","Vision AI\nФото 1-10","COSMO/Rufus\nAI-видимость","VPC/JTBD\nЯзык покупателя","Mobile Score\nМоб. конверсия"]
+    for _fcol, _ficon, _fname in zip([_f1,_f2,_f3,_f4,_f5], ["🏆","📸","🧠","🎯","📱"], _feat_names):
+        _fcol.markdown(f'''<div style="text-align:center;background:#f8fafc;border-radius:10px;padding:12px;font-size:0.78rem">
+<div style="font-size:1.5rem">{_ficon}</div>
+<div style="font-weight:600;color:#1e293b;margin-top:4px;white-space:pre-line">{_fname}</div>
+</div>''', unsafe_allow_html=True)
     st.stop()
 
 r  = st.session_state.get("result", {})
