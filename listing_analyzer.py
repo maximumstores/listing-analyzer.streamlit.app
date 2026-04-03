@@ -1450,18 +1450,25 @@ def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="i
     if not claid_key: return None, "CLAID_API_KEY не найден в Secrets"
     try:
         import base64 as _b64
-        # Upload image to Claid storage first
+        import io as _io
+        # Decode b64 to bytes
+        _img_bytes = _b64.b64decode(image_b64)
+        _ext = "jpg" if "jpeg" in media_type else "png"
+
+        # Upload via multipart/form-data
         _upload_r = requests.post(
             "https://api.claid.ai/v1-beta1/image/upload",
             headers={"Authorization": f"Bearer {claid_key}"},
-            json={"image": {"data": image_b64, "type": media_type}},
+            files={"file": (f"product.{_ext}", _io.BytesIO(_img_bytes), media_type)},
             timeout=30
         )
         if not _upload_r.ok:
-            return None, f"Upload error: {_upload_r.status_code} {_upload_r.text[:200]}"
-        _image_id = _upload_r.json().get("id") or _upload_r.json().get("data",{}).get("id","")
+            return None, f"Upload error: {_upload_r.status_code} {_upload_r.text[:300]}"
+        _resp = _upload_r.json()
+        _image_id = (_resp.get("id") or _resp.get("data",{}).get("id","") or
+                     _resp.get("asset",{}).get("id","") or _resp.get("asset_id",""))
         if not _image_id:
-            return None, f"No image ID returned: {_upload_r.text[:200]}"
+            return None, f"No image ID: {_upload_r.text[:300]}"
 
         # Generate lifestyle photo
         _gen_r = requests.post(
@@ -1469,23 +1476,25 @@ def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="i
             headers={"Authorization": f"Bearer {claid_key}", "Content-Type": "application/json"},
             json={
                 "input": {"id": _image_id},
-                "output": {
-                    "settings": {
-                        "description": scene,
-                        "num_samples": 2
-                    }
-                }
+                "output": {"settings": {"description": scene, "num_samples": 2}}
             },
-            timeout=60
+            timeout=90
         )
         if not _gen_r.ok:
             return None, f"Generate error: {_gen_r.status_code} {_gen_r.text[:300]}"
         _result = _gen_r.json()
+        # Extract URLs from various response formats
         _urls = []
-        for _item in _result.get("data", _result.get("outputs", [])):
-            _url = _item.get("url") or _item.get("image",{}).get("url","")
-            if _url: _urls.append(_url)
-        return _urls, None
+        for _key in ["data","outputs","results","images"]:
+            for _item in _result.get(_key, []):
+                _url = (_item.get("url") or _item.get("image",{}).get("url","") or
+                        _item.get("output",{}).get("url",""))
+                if _url: _urls.append(_url)
+        if not _urls and isinstance(_result, dict):
+            # Try direct url
+            _u = _result.get("url") or _result.get("image_url","")
+            if _u: _urls.append(_u)
+        return (_urls if _urls else None), (None if _urls else f"No URLs in response: {str(_result)[:300]}")
     except Exception as e:
         return None, str(e)
 
