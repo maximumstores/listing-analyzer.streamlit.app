@@ -3410,6 +3410,95 @@ elif page == "📸 Фото":
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
 
+    # ── Audience Score ────────────────────────────────────────────────────────
+    with st.expander("👥 AI Audience Score — оценка фото для вашей ЦА", expanded=False):
+        st.caption("AI оценивает каждое фото с точки зрения вашей целевой аудитории")
+        _aud_col1, _aud_col2 = st.columns(2)
+        with _aud_col1:
+            _aud_age = st.text_input("👤 Возраст и пол", placeholder="Мужчина 30-45 лет", key="aud_age")
+            _aud_lifestyle = st.text_input("🏃 Образ жизни", placeholder="Активный, outdoor, hiking, путешествия", key="aud_lifestyle")
+        with _aud_col2:
+            _aud_income = st.selectbox("💰 Доход", ["Средний", "Выше среднего", "Высокий", "Любой"], key="aud_income")
+            _aud_geo = st.text_input("🌍 География", placeholder="Германия, EU", key="aud_geo")
+        _aud_extra = st.text_area("💬 Доп. инфо о ЦА", placeholder="Ценит качество, экологичность, покупает онлайн, читает отзывы...", height=68, key="aud_extra")
+
+        _imgs_for_aud = st.session_state.get("images", [])
+        if not _imgs_for_aud:
+            st.info("Запусти анализ чтобы загрузить фото листинга")
+        elif st.button("👥 Оценить все фото для ЦА", type="primary", key="btn_audience_score"):
+            if not (_aud_age or _aud_lifestyle):
+                st.warning("Заполни хотя бы возраст/пол и образ жизни")
+            else:
+                _aud_profile = f"""
+ЦЕЛЕВАЯ АУДИТОРИЯ:
+- Возраст/пол: {_aud_age}
+- Образ жизни: {_aud_lifestyle}
+- Доход: {_aud_income}
+- География: {_aud_geo}
+- Дополнительно: {_aud_extra}
+""".strip()
+                _aud_results = []
+                _vprog = st.progress(0, "👥 Оцениваю фото для ЦА...")
+                for _ai_idx, _aimg in enumerate(_imgs_for_aud[:6]):
+                    _vprog.progress(int((_ai_idx+1)/min(len(_imgs_for_aud),6)*100), f"Фото {_ai_idx+1}...")
+                    try:
+                        _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
+                        _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
+
+{_aud_profile}
+
+ПРОДУКТ: {od.get('title','')}
+
+Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+
+Ответь строго в формате:
+SCORE: [0-100]%
+ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
+СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
+НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
+РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+                        _ar = anthropic_client().messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=400,
+                            messages=[{"role":"user","content":[
+                                {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
+                                {"type":"text","text":_aprompt}
+                            ]}]
+                        )
+                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                    except Exception as _ae:
+                        _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
+                _vprog.progress(100, "✅ Готово!")
+                st.session_state["_aud_results"] = _aud_results
+
+        # Show results
+        if st.session_state.get("_aud_results"):
+            st.markdown("---")
+            for _ar in st.session_state["_aud_results"]:
+                _arc1, _arc2 = st.columns([1, 3])
+                with _arc1:
+                    if _ar.get("b64"):
+                        st.image(f"data:{_ar['mt']};base64,{_ar['b64']}", use_container_width=True)
+                    st.caption(f"Фото #{_ar['idx']}")
+                with _arc2:
+                    _txt = _ar["text"]
+                    # Extract score for color
+                    import re as _re2
+                    _sm = _re2.search(r'SCORE:\s*(\d+)%', _txt)
+                    _sc = int(_sm.group(1)) if _sm else 0
+                    _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else "#ef4444")
+                    _sc_l = "✅ Отлично для ЦА" if _sc>=75 else ("🟡 Средне" if _sc>=50 else "🔴 Слабо для ЦА")
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-left:4px solid {_sc_c};border-radius:8px;padding:12px 14px">' +
+                        f'<div style="font-size:1.4rem;font-weight:800;color:{_sc_c}">{_sc}% <span style="font-size:0.8rem">{_sc_l}</span></div>' +
+                        f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
+                        f'</div>',
+                        unsafe_allow_html=True)
+            if st.button("🗑️ Очистить", key="clear_aud"):
+                st.session_state.pop("_aud_results", None)
+                st.rerun()
+
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
     _claid_key = st.secrets.get("CLAID_API_KEY","")
     if _claid_key:
@@ -3632,6 +3721,95 @@ elif page == "🎨 A+ Контент":
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
 
+    # ── Audience Score ────────────────────────────────────────────────────────
+    with st.expander("👥 AI Audience Score — оценка фото для вашей ЦА", expanded=False):
+        st.caption("AI оценивает каждое фото с точки зрения вашей целевой аудитории")
+        _aud_col1, _aud_col2 = st.columns(2)
+        with _aud_col1:
+            _aud_age = st.text_input("👤 Возраст и пол", placeholder="Мужчина 30-45 лет", key="aud_age")
+            _aud_lifestyle = st.text_input("🏃 Образ жизни", placeholder="Активный, outdoor, hiking, путешествия", key="aud_lifestyle")
+        with _aud_col2:
+            _aud_income = st.selectbox("💰 Доход", ["Средний", "Выше среднего", "Высокий", "Любой"], key="aud_income")
+            _aud_geo = st.text_input("🌍 География", placeholder="Германия, EU", key="aud_geo")
+        _aud_extra = st.text_area("💬 Доп. инфо о ЦА", placeholder="Ценит качество, экологичность, покупает онлайн, читает отзывы...", height=68, key="aud_extra")
+
+        _imgs_for_aud = st.session_state.get("images", [])
+        if not _imgs_for_aud:
+            st.info("Запусти анализ чтобы загрузить фото листинга")
+        elif st.button("👥 Оценить все фото для ЦА", type="primary", key="btn_audience_score"):
+            if not (_aud_age or _aud_lifestyle):
+                st.warning("Заполни хотя бы возраст/пол и образ жизни")
+            else:
+                _aud_profile = f"""
+ЦЕЛЕВАЯ АУДИТОРИЯ:
+- Возраст/пол: {_aud_age}
+- Образ жизни: {_aud_lifestyle}
+- Доход: {_aud_income}
+- География: {_aud_geo}
+- Дополнительно: {_aud_extra}
+""".strip()
+                _aud_results = []
+                _vprog = st.progress(0, "👥 Оцениваю фото для ЦА...")
+                for _ai_idx, _aimg in enumerate(_imgs_for_aud[:6]):
+                    _vprog.progress(int((_ai_idx+1)/min(len(_imgs_for_aud),6)*100), f"Фото {_ai_idx+1}...")
+                    try:
+                        _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
+                        _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
+
+{_aud_profile}
+
+ПРОДУКТ: {od.get('title','')}
+
+Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+
+Ответь строго в формате:
+SCORE: [0-100]%
+ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
+СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
+НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
+РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+                        _ar = anthropic_client().messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=400,
+                            messages=[{"role":"user","content":[
+                                {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
+                                {"type":"text","text":_aprompt}
+                            ]}]
+                        )
+                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                    except Exception as _ae:
+                        _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
+                _vprog.progress(100, "✅ Готово!")
+                st.session_state["_aud_results"] = _aud_results
+
+        # Show results
+        if st.session_state.get("_aud_results"):
+            st.markdown("---")
+            for _ar in st.session_state["_aud_results"]:
+                _arc1, _arc2 = st.columns([1, 3])
+                with _arc1:
+                    if _ar.get("b64"):
+                        st.image(f"data:{_ar['mt']};base64,{_ar['b64']}", use_container_width=True)
+                    st.caption(f"Фото #{_ar['idx']}")
+                with _arc2:
+                    _txt = _ar["text"]
+                    # Extract score for color
+                    import re as _re2
+                    _sm = _re2.search(r'SCORE:\s*(\d+)%', _txt)
+                    _sc = int(_sm.group(1)) if _sm else 0
+                    _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else "#ef4444")
+                    _sc_l = "✅ Отлично для ЦА" if _sc>=75 else ("🟡 Средне" if _sc>=50 else "🔴 Слабо для ЦА")
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-left:4px solid {_sc_c};border-radius:8px;padding:12px 14px">' +
+                        f'<div style="font-size:1.4rem;font-weight:800;color:{_sc_c}">{_sc}% <span style="font-size:0.8rem">{_sc_l}</span></div>' +
+                        f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
+                        f'</div>',
+                        unsafe_allow_html=True)
+            if st.button("🗑️ Очистить", key="clear_aud"):
+                st.session_state.pop("_aud_results", None)
+                st.rerun()
+
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
     _claid_key = st.secrets.get("CLAID_API_KEY","")
     if _claid_key:
@@ -3792,6 +3970,95 @@ elif page == "📝 Контент":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Audience Score ────────────────────────────────────────────────────────
+    with st.expander("👥 AI Audience Score — оценка фото для вашей ЦА", expanded=False):
+        st.caption("AI оценивает каждое фото с точки зрения вашей целевой аудитории")
+        _aud_col1, _aud_col2 = st.columns(2)
+        with _aud_col1:
+            _aud_age = st.text_input("👤 Возраст и пол", placeholder="Мужчина 30-45 лет", key="aud_age")
+            _aud_lifestyle = st.text_input("🏃 Образ жизни", placeholder="Активный, outdoor, hiking, путешествия", key="aud_lifestyle")
+        with _aud_col2:
+            _aud_income = st.selectbox("💰 Доход", ["Средний", "Выше среднего", "Высокий", "Любой"], key="aud_income")
+            _aud_geo = st.text_input("🌍 География", placeholder="Германия, EU", key="aud_geo")
+        _aud_extra = st.text_area("💬 Доп. инфо о ЦА", placeholder="Ценит качество, экологичность, покупает онлайн, читает отзывы...", height=68, key="aud_extra")
+
+        _imgs_for_aud = st.session_state.get("images", [])
+        if not _imgs_for_aud:
+            st.info("Запусти анализ чтобы загрузить фото листинга")
+        elif st.button("👥 Оценить все фото для ЦА", type="primary", key="btn_audience_score"):
+            if not (_aud_age or _aud_lifestyle):
+                st.warning("Заполни хотя бы возраст/пол и образ жизни")
+            else:
+                _aud_profile = f"""
+ЦЕЛЕВАЯ АУДИТОРИЯ:
+- Возраст/пол: {_aud_age}
+- Образ жизни: {_aud_lifestyle}
+- Доход: {_aud_income}
+- География: {_aud_geo}
+- Дополнительно: {_aud_extra}
+""".strip()
+                _aud_results = []
+                _vprog = st.progress(0, "👥 Оцениваю фото для ЦА...")
+                for _ai_idx, _aimg in enumerate(_imgs_for_aud[:6]):
+                    _vprog.progress(int((_ai_idx+1)/min(len(_imgs_for_aud),6)*100), f"Фото {_ai_idx+1}...")
+                    try:
+                        _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
+                        _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
+
+{_aud_profile}
+
+ПРОДУКТ: {od.get('title','')}
+
+Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+
+Ответь строго в формате:
+SCORE: [0-100]%
+ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
+СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
+НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
+РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+                        _ar = anthropic_client().messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=400,
+                            messages=[{"role":"user","content":[
+                                {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
+                                {"type":"text","text":_aprompt}
+                            ]}]
+                        )
+                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                    except Exception as _ae:
+                        _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
+                _vprog.progress(100, "✅ Готово!")
+                st.session_state["_aud_results"] = _aud_results
+
+        # Show results
+        if st.session_state.get("_aud_results"):
+            st.markdown("---")
+            for _ar in st.session_state["_aud_results"]:
+                _arc1, _arc2 = st.columns([1, 3])
+                with _arc1:
+                    if _ar.get("b64"):
+                        st.image(f"data:{_ar['mt']};base64,{_ar['b64']}", use_container_width=True)
+                    st.caption(f"Фото #{_ar['idx']}")
+                with _arc2:
+                    _txt = _ar["text"]
+                    # Extract score for color
+                    import re as _re2
+                    _sm = _re2.search(r'SCORE:\s*(\d+)%', _txt)
+                    _sc = int(_sm.group(1)) if _sm else 0
+                    _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else "#ef4444")
+                    _sc_l = "✅ Отлично для ЦА" if _sc>=75 else ("🟡 Средне" if _sc>=50 else "🔴 Слабо для ЦА")
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-left:4px solid {_sc_c};border-radius:8px;padding:12px 14px">' +
+                        f'<div style="font-size:1.4rem;font-weight:800;color:{_sc_c}">{_sc}% <span style="font-size:0.8rem">{_sc_l}</span></div>' +
+                        f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
+                        f'</div>',
+                        unsafe_allow_html=True)
+            if st.button("🗑️ Очистить", key="clear_aud"):
+                st.session_state.pop("_aud_results", None)
+                st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
     _claid_key = st.secrets.get("CLAID_API_KEY","")
@@ -4038,6 +4305,95 @@ elif page == "🧠 COSMO / Rufus":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Audience Score ────────────────────────────────────────────────────────
+    with st.expander("👥 AI Audience Score — оценка фото для вашей ЦА", expanded=False):
+        st.caption("AI оценивает каждое фото с точки зрения вашей целевой аудитории")
+        _aud_col1, _aud_col2 = st.columns(2)
+        with _aud_col1:
+            _aud_age = st.text_input("👤 Возраст и пол", placeholder="Мужчина 30-45 лет", key="aud_age")
+            _aud_lifestyle = st.text_input("🏃 Образ жизни", placeholder="Активный, outdoor, hiking, путешествия", key="aud_lifestyle")
+        with _aud_col2:
+            _aud_income = st.selectbox("💰 Доход", ["Средний", "Выше среднего", "Высокий", "Любой"], key="aud_income")
+            _aud_geo = st.text_input("🌍 География", placeholder="Германия, EU", key="aud_geo")
+        _aud_extra = st.text_area("💬 Доп. инфо о ЦА", placeholder="Ценит качество, экологичность, покупает онлайн, читает отзывы...", height=68, key="aud_extra")
+
+        _imgs_for_aud = st.session_state.get("images", [])
+        if not _imgs_for_aud:
+            st.info("Запусти анализ чтобы загрузить фото листинга")
+        elif st.button("👥 Оценить все фото для ЦА", type="primary", key="btn_audience_score"):
+            if not (_aud_age or _aud_lifestyle):
+                st.warning("Заполни хотя бы возраст/пол и образ жизни")
+            else:
+                _aud_profile = f"""
+ЦЕЛЕВАЯ АУДИТОРИЯ:
+- Возраст/пол: {_aud_age}
+- Образ жизни: {_aud_lifestyle}
+- Доход: {_aud_income}
+- География: {_aud_geo}
+- Дополнительно: {_aud_extra}
+""".strip()
+                _aud_results = []
+                _vprog = st.progress(0, "👥 Оцениваю фото для ЦА...")
+                for _ai_idx, _aimg in enumerate(_imgs_for_aud[:6]):
+                    _vprog.progress(int((_ai_idx+1)/min(len(_imgs_for_aud),6)*100), f"Фото {_ai_idx+1}...")
+                    try:
+                        _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
+                        _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
+
+{_aud_profile}
+
+ПРОДУКТ: {od.get('title','')}
+
+Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+
+Ответь строго в формате:
+SCORE: [0-100]%
+ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
+СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
+НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
+РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+                        _ar = anthropic_client().messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=400,
+                            messages=[{"role":"user","content":[
+                                {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
+                                {"type":"text","text":_aprompt}
+                            ]}]
+                        )
+                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                    except Exception as _ae:
+                        _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
+                _vprog.progress(100, "✅ Готово!")
+                st.session_state["_aud_results"] = _aud_results
+
+        # Show results
+        if st.session_state.get("_aud_results"):
+            st.markdown("---")
+            for _ar in st.session_state["_aud_results"]:
+                _arc1, _arc2 = st.columns([1, 3])
+                with _arc1:
+                    if _ar.get("b64"):
+                        st.image(f"data:{_ar['mt']};base64,{_ar['b64']}", use_container_width=True)
+                    st.caption(f"Фото #{_ar['idx']}")
+                with _arc2:
+                    _txt = _ar["text"]
+                    # Extract score for color
+                    import re as _re2
+                    _sm = _re2.search(r'SCORE:\s*(\d+)%', _txt)
+                    _sc = int(_sm.group(1)) if _sm else 0
+                    _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else "#ef4444")
+                    _sc_l = "✅ Отлично для ЦА" if _sc>=75 else ("🟡 Средне" if _sc>=50 else "🔴 Слабо для ЦА")
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-left:4px solid {_sc_c};border-radius:8px;padding:12px 14px">' +
+                        f'<div style="font-size:1.4rem;font-weight:800;color:{_sc_c}">{_sc}% <span style="font-size:0.8rem">{_sc_l}</span></div>' +
+                        f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
+                        f'</div>',
+                        unsafe_allow_html=True)
+            if st.button("🗑️ Очистить", key="clear_aud"):
+                st.session_state.pop("_aud_results", None)
+                st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
     _claid_key = st.secrets.get("CLAID_API_KEY","")
@@ -4494,6 +4850,95 @@ elif page == "🎯 VPC / JTBD":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Audience Score ────────────────────────────────────────────────────────
+    with st.expander("👥 AI Audience Score — оценка фото для вашей ЦА", expanded=False):
+        st.caption("AI оценивает каждое фото с точки зрения вашей целевой аудитории")
+        _aud_col1, _aud_col2 = st.columns(2)
+        with _aud_col1:
+            _aud_age = st.text_input("👤 Возраст и пол", placeholder="Мужчина 30-45 лет", key="aud_age")
+            _aud_lifestyle = st.text_input("🏃 Образ жизни", placeholder="Активный, outdoor, hiking, путешествия", key="aud_lifestyle")
+        with _aud_col2:
+            _aud_income = st.selectbox("💰 Доход", ["Средний", "Выше среднего", "Высокий", "Любой"], key="aud_income")
+            _aud_geo = st.text_input("🌍 География", placeholder="Германия, EU", key="aud_geo")
+        _aud_extra = st.text_area("💬 Доп. инфо о ЦА", placeholder="Ценит качество, экологичность, покупает онлайн, читает отзывы...", height=68, key="aud_extra")
+
+        _imgs_for_aud = st.session_state.get("images", [])
+        if not _imgs_for_aud:
+            st.info("Запусти анализ чтобы загрузить фото листинга")
+        elif st.button("👥 Оценить все фото для ЦА", type="primary", key="btn_audience_score"):
+            if not (_aud_age or _aud_lifestyle):
+                st.warning("Заполни хотя бы возраст/пол и образ жизни")
+            else:
+                _aud_profile = f"""
+ЦЕЛЕВАЯ АУДИТОРИЯ:
+- Возраст/пол: {_aud_age}
+- Образ жизни: {_aud_lifestyle}
+- Доход: {_aud_income}
+- География: {_aud_geo}
+- Дополнительно: {_aud_extra}
+""".strip()
+                _aud_results = []
+                _vprog = st.progress(0, "👥 Оцениваю фото для ЦА...")
+                for _ai_idx, _aimg in enumerate(_imgs_for_aud[:6]):
+                    _vprog.progress(int((_ai_idx+1)/min(len(_imgs_for_aud),6)*100), f"Фото {_ai_idx+1}...")
+                    try:
+                        _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
+                        _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
+
+{_aud_profile}
+
+ПРОДУКТ: {od.get('title','')}
+
+Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+
+Ответь строго в формате:
+SCORE: [0-100]%
+ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
+СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
+НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
+РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+                        _ar = anthropic_client().messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=400,
+                            messages=[{"role":"user","content":[
+                                {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
+                                {"type":"text","text":_aprompt}
+                            ]}]
+                        )
+                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                    except Exception as _ae:
+                        _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
+                _vprog.progress(100, "✅ Готово!")
+                st.session_state["_aud_results"] = _aud_results
+
+        # Show results
+        if st.session_state.get("_aud_results"):
+            st.markdown("---")
+            for _ar in st.session_state["_aud_results"]:
+                _arc1, _arc2 = st.columns([1, 3])
+                with _arc1:
+                    if _ar.get("b64"):
+                        st.image(f"data:{_ar['mt']};base64,{_ar['b64']}", use_container_width=True)
+                    st.caption(f"Фото #{_ar['idx']}")
+                with _arc2:
+                    _txt = _ar["text"]
+                    # Extract score for color
+                    import re as _re2
+                    _sm = _re2.search(r'SCORE:\s*(\d+)%', _txt)
+                    _sc = int(_sm.group(1)) if _sm else 0
+                    _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else "#ef4444")
+                    _sc_l = "✅ Отлично для ЦА" if _sc>=75 else ("🟡 Средне" if _sc>=50 else "🔴 Слабо для ЦА")
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-left:4px solid {_sc_c};border-radius:8px;padding:12px 14px">' +
+                        f'<div style="font-size:1.4rem;font-weight:800;color:{_sc_c}">{_sc}% <span style="font-size:0.8rem">{_sc_l}</span></div>' +
+                        f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
+                        f'</div>',
+                        unsafe_allow_html=True)
+            if st.button("🗑️ Очистить", key="clear_aud"):
+                st.session_state.pop("_aud_results", None)
+                st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
     _claid_key = st.secrets.get("CLAID_API_KEY","")
@@ -5328,6 +5773,95 @@ elif page == "📱 Mobile Score":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Audience Score ────────────────────────────────────────────────────────
+    with st.expander("👥 AI Audience Score — оценка фото для вашей ЦА", expanded=False):
+        st.caption("AI оценивает каждое фото с точки зрения вашей целевой аудитории")
+        _aud_col1, _aud_col2 = st.columns(2)
+        with _aud_col1:
+            _aud_age = st.text_input("👤 Возраст и пол", placeholder="Мужчина 30-45 лет", key="aud_age")
+            _aud_lifestyle = st.text_input("🏃 Образ жизни", placeholder="Активный, outdoor, hiking, путешествия", key="aud_lifestyle")
+        with _aud_col2:
+            _aud_income = st.selectbox("💰 Доход", ["Средний", "Выше среднего", "Высокий", "Любой"], key="aud_income")
+            _aud_geo = st.text_input("🌍 География", placeholder="Германия, EU", key="aud_geo")
+        _aud_extra = st.text_area("💬 Доп. инфо о ЦА", placeholder="Ценит качество, экологичность, покупает онлайн, читает отзывы...", height=68, key="aud_extra")
+
+        _imgs_for_aud = st.session_state.get("images", [])
+        if not _imgs_for_aud:
+            st.info("Запусти анализ чтобы загрузить фото листинга")
+        elif st.button("👥 Оценить все фото для ЦА", type="primary", key="btn_audience_score"):
+            if not (_aud_age or _aud_lifestyle):
+                st.warning("Заполни хотя бы возраст/пол и образ жизни")
+            else:
+                _aud_profile = f"""
+ЦЕЛЕВАЯ АУДИТОРИЯ:
+- Возраст/пол: {_aud_age}
+- Образ жизни: {_aud_lifestyle}
+- Доход: {_aud_income}
+- География: {_aud_geo}
+- Дополнительно: {_aud_extra}
+""".strip()
+                _aud_results = []
+                _vprog = st.progress(0, "👥 Оцениваю фото для ЦА...")
+                for _ai_idx, _aimg in enumerate(_imgs_for_aud[:6]):
+                    _vprog.progress(int((_ai_idx+1)/min(len(_imgs_for_aud),6)*100), f"Фото {_ai_idx+1}...")
+                    try:
+                        _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
+                        _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
+
+{_aud_profile}
+
+ПРОДУКТ: {od.get('title','')}
+
+Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+
+Ответь строго в формате:
+SCORE: [0-100]%
+ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
+СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
+НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
+РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+                        _ar = anthropic_client().messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=400,
+                            messages=[{"role":"user","content":[
+                                {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
+                                {"type":"text","text":_aprompt}
+                            ]}]
+                        )
+                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                    except Exception as _ae:
+                        _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
+                _vprog.progress(100, "✅ Готово!")
+                st.session_state["_aud_results"] = _aud_results
+
+        # Show results
+        if st.session_state.get("_aud_results"):
+            st.markdown("---")
+            for _ar in st.session_state["_aud_results"]:
+                _arc1, _arc2 = st.columns([1, 3])
+                with _arc1:
+                    if _ar.get("b64"):
+                        st.image(f"data:{_ar['mt']};base64,{_ar['b64']}", use_container_width=True)
+                    st.caption(f"Фото #{_ar['idx']}")
+                with _arc2:
+                    _txt = _ar["text"]
+                    # Extract score for color
+                    import re as _re2
+                    _sm = _re2.search(r'SCORE:\s*(\d+)%', _txt)
+                    _sc = int(_sm.group(1)) if _sm else 0
+                    _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else "#ef4444")
+                    _sc_l = "✅ Отлично для ЦА" if _sc>=75 else ("🟡 Средне" if _sc>=50 else "🔴 Слабо для ЦА")
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-left:4px solid {_sc_c};border-radius:8px;padding:12px 14px">' +
+                        f'<div style="font-size:1.4rem;font-weight:800;color:{_sc_c}">{_sc}% <span style="font-size:0.8rem">{_sc_l}</span></div>' +
+                        f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
+                        f'</div>',
+                        unsafe_allow_html=True)
+            if st.button("🗑️ Очистить", key="clear_aud"):
+                st.session_state.pop("_aud_results", None)
+                st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
     _claid_key = st.secrets.get("CLAID_API_KEY","")
