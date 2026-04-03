@@ -1479,50 +1479,42 @@ def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="i
         if not _bg_removed_url:
             return None, f"No URL after bg removal: {str(_s1)[:300]}"
 
-        # Step 2: AI Background generation
+        # Step 2: AI Background generation via /v1-ea/scene/create
         _step2 = requests.post(
-            "https://api.claid.ai/v1/image/background",
+            "https://api.claid.ai/v1-ea/scene/create",
             headers={"Authorization": f"Bearer {claid_key}",
                      "Content-Type": "application/json"},
             json={
-                "input": _bg_removed_url,
+                "object": {"image_url": _bg_removed_url},
                 "scene": {
                     "prompt": scene,
-                    "number_of_images": 2
+                    "model": "v2",
+                    "negative_prompt": "text, watermark, logo, low quality, blurry, cartoon",
+                    "preference": "optimal"
                 },
-                "output": {"format": "jpeg"}
+                "output": {"number_of_images": 2, "format": "jpeg"}
             },
             timeout=90
         )
         if not _step2.ok:
-            # Try alternate endpoint
-            _step2 = requests.post(
-                "https://api.claid.ai/v1-beta1/image/background",
-                headers={"Authorization": f"Bearer {claid_key}",
-                         "Content-Type": "application/json"},
-                json={
-                    "input": _bg_removed_url,
-                    "scene": {"prompt": scene, "number_of_images": 2}
-                },
-                timeout=90
-            )
-        if not _step2.ok:
             return None, f"Step2 error {_step2.status_code}: {_step2.text[:400]}"
         _s2 = _step2.json()
-        # Extract result URLs
+        # Extract result URLs from response
         _urls = []
-        for _key in ["data","images","results","outputs"]:
-            _items = _s2.get(_key, [])
-            if isinstance(_items, list):
-                for _item in _items:
-                    _u = (_item.get("tmp_url") or _item.get("url") or
-                          _item.get("output",{}).get("tmp_url","") if isinstance(_item,dict) else "")
-                    if _u: _urls.append(_u)
-            elif isinstance(_items, dict):
-                _u = _items.get("tmp_url") or _items.get("url","")
+        _items = _s2.get("data", _s2.get("images", _s2.get("results", [])))
+        if isinstance(_items, list):
+            for _item in _items:
+                if isinstance(_item, dict):
+                    _u = _item.get("url") or _item.get("tmp_url") or _item.get("image_url","")
+                elif isinstance(_item, str):
+                    _u = _item
+                else: _u = ""
                 if _u: _urls.append(_u)
+        elif isinstance(_items, dict):
+            _u = _items.get("url") or _items.get("tmp_url","")
+            if _u: _urls.append(_u)
         if not _urls:
-            _u = _s2.get("tmp_url") or _s2.get("url","")
+            _u = _s2.get("url") or _s2.get("tmp_url","")
             if _u: _urls.append(_u)
         if _urls: return _urls, None
         return None, f"No output URLs: {str(_s2)[:400]}"
