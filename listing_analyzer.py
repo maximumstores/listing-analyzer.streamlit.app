@@ -1444,6 +1444,52 @@ def db_lookup_asin(asin):
         return []
 
 
+def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="image/jpeg"):
+    """Generate lifestyle photo via Claid.ai API"""
+    claid_key = st.secrets.get("CLAID_API_KEY","")
+    if not claid_key: return None, "CLAID_API_KEY не найден в Secrets"
+    try:
+        import base64 as _b64
+        # Upload image to Claid storage first
+        _upload_r = requests.post(
+            "https://api.claid.ai/v1-beta1/image/upload",
+            headers={"Authorization": f"Bearer {claid_key}"},
+            json={"image": {"data": image_b64, "type": media_type}},
+            timeout=30
+        )
+        if not _upload_r.ok:
+            return None, f"Upload error: {_upload_r.status_code} {_upload_r.text[:200]}"
+        _image_id = _upload_r.json().get("id") or _upload_r.json().get("data",{}).get("id","")
+        if not _image_id:
+            return None, f"No image ID returned: {_upload_r.text[:200]}"
+
+        # Generate lifestyle photo
+        _gen_r = requests.post(
+            "https://api.claid.ai/v1-beta1/image/generate/lifestyle",
+            headers={"Authorization": f"Bearer {claid_key}", "Content-Type": "application/json"},
+            json={
+                "input": {"id": _image_id},
+                "output": {
+                    "settings": {
+                        "description": scene,
+                        "num_samples": 2
+                    }
+                }
+            },
+            timeout=60
+        )
+        if not _gen_r.ok:
+            return None, f"Generate error: {_gen_r.status_code} {_gen_r.text[:300]}"
+        _result = _gen_r.json()
+        _urls = []
+        for _item in _result.get("data", _result.get("outputs", [])):
+            _url = _item.get("url") or _item.get("image",{}).get("url","")
+            if _url: _urls.append(_url)
+        return _urls, None
+    except Exception as e:
+        return None, str(e)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log, prog=None):
     _steps_done = []
@@ -2933,7 +2979,13 @@ def health_card():
     title_h   = od.get("title","") or st.session_state.get("_hist_title","")
     tlen      = len(title_h)
     brand_h   = od.get("brand","")
-    asin_h    = od.get("parent_asin","") or pi.get("ASIN","") or st.session_state.get("our_url_saved","")
+    _input_asin_h = od.get("_input_asin","")
+    _parent_asin_h = od.get("parent_asin","") or pi.get("ASIN","")
+    asin_h = _parent_asin_h or _input_asin_h or st.session_state.get("our_url_saved","")
+    # Show both if they differ
+    _asin_display = asin_h
+    if _input_asin_h and _parent_asin_h and _input_asin_h != _parent_asin_h:
+        _asin_display = f"{_input_asin_h} → {_parent_asin_h} (parent)"
     price_h   = od.get("price","")
     prev_price = od.get("previous_price","") or od.get("list_price","")
     rating_h  = od.get("average_rating","")
@@ -3321,6 +3373,55 @@ elif page == "📸 Фото":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Claid AI Photo Generator ──────────────────────────────────────────────
+    _claid_key = st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:
+        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            _claid_col1, _claid_col2 = st.columns([3,2])
+            with _claid_col1:
+                _claid_scene = st.selectbox("Сцена", [
+                    "outdoor hiking mountain lifestyle",
+                    "cozy home interior lifestyle",
+                    "gym fitness workout lifestyle",
+                    "winter snow cold weather lifestyle",
+                    "minimalist white studio product shot",
+                    "summer outdoor active lifestyle",
+                    "office work professional lifestyle",
+                ], key="claid_scene_sel")
+            with _claid_col2:
+                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+
+            if _claid_upload:
+                import base64 as _b64c
+                _img_bytes = _claid_upload.read()
+                _img_b64 = _b64c.b64encode(_img_bytes).decode()
+                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                st.image(_img_bytes, caption="Ваше фото", width=180)
+
+                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        if _err:
+                            st.error(f"❌ {_err}")
+                        elif _urls:
+                            st.session_state["_claid_results"] = _urls
+                            st.success(f"✅ {len(_urls)} фото готово!")
+                        else:
+                            st.warning("Фото не получены")
+
+            if st.session_state.get("_claid_results"):
+                _cr = st.session_state["_claid_results"]
+                _rc = st.columns(min(len(_cr), 4))
+                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        st.image(_rurl, use_container_width=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                if st.button("🗑️ Очистить", key="claid_clear"):
+                    st.session_state.pop("_claid_results", None)
+                    st.rerun()
+
     _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v) if v else []
     blocks = [b.strip() for b in _all_blocks if b.strip() and re.search(r"\d+/10", b)]
     if not blocks: blocks = [b.strip() for b in _all_blocks if b.strip()]
@@ -3456,6 +3557,55 @@ elif page == "🎨 A+ Контент":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Claid AI Photo Generator ──────────────────────────────────────────────
+    _claid_key = st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:
+        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            _claid_col1, _claid_col2 = st.columns([3,2])
+            with _claid_col1:
+                _claid_scene = st.selectbox("Сцена", [
+                    "outdoor hiking mountain lifestyle",
+                    "cozy home interior lifestyle",
+                    "gym fitness workout lifestyle",
+                    "winter snow cold weather lifestyle",
+                    "minimalist white studio product shot",
+                    "summer outdoor active lifestyle",
+                    "office work professional lifestyle",
+                ], key="claid_scene_sel")
+            with _claid_col2:
+                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+
+            if _claid_upload:
+                import base64 as _b64c
+                _img_bytes = _claid_upload.read()
+                _img_b64 = _b64c.b64encode(_img_bytes).decode()
+                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                st.image(_img_bytes, caption="Ваше фото", width=180)
+
+                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        if _err:
+                            st.error(f"❌ {_err}")
+                        elif _urls:
+                            st.session_state["_claid_results"] = _urls
+                            st.success(f"✅ {len(_urls)} фото готово!")
+                        else:
+                            st.warning("Фото не получены")
+
+            if st.session_state.get("_claid_results"):
+                _cr = st.session_state["_claid_results"]
+                _rc = st.columns(min(len(_cr), 4))
+                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        st.image(_rurl, use_container_width=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                if st.button("🗑️ Очистить", key="claid_clear"):
+                    st.session_state.pop("_claid_results", None)
+                    st.rerun()
+
     _av = st.session_state.get("aplus_vision","")
     _av_urls = st.session_state.get("aplus_img_urls", [])
     if not _av_urls:
@@ -3530,6 +3680,55 @@ elif page == "📝 Контент":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Claid AI Photo Generator ──────────────────────────────────────────────
+    _claid_key = st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:
+        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            _claid_col1, _claid_col2 = st.columns([3,2])
+            with _claid_col1:
+                _claid_scene = st.selectbox("Сцена", [
+                    "outdoor hiking mountain lifestyle",
+                    "cozy home interior lifestyle",
+                    "gym fitness workout lifestyle",
+                    "winter snow cold weather lifestyle",
+                    "minimalist white studio product shot",
+                    "summer outdoor active lifestyle",
+                    "office work professional lifestyle",
+                ], key="claid_scene_sel")
+            with _claid_col2:
+                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+
+            if _claid_upload:
+                import base64 as _b64c
+                _img_bytes = _claid_upload.read()
+                _img_b64 = _b64c.b64encode(_img_bytes).decode()
+                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                st.image(_img_bytes, caption="Ваше фото", width=180)
+
+                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        if _err:
+                            st.error(f"❌ {_err}")
+                        elif _urls:
+                            st.session_state["_claid_results"] = _urls
+                            st.success(f"✅ {len(_urls)} фото готово!")
+                        else:
+                            st.warning("Фото не получены")
+
+            if st.session_state.get("_claid_results"):
+                _cr = st.session_state["_claid_results"]
+                _rc = st.columns(min(len(_cr), 4))
+                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        st.image(_rurl, use_container_width=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                if st.button("🗑️ Очистить", key="claid_clear"):
+                    st.session_state.pop("_claid_results", None)
+                    st.rerun()
+
     our_title   = od.get("title","")
     our_bullets = od.get("feature_bullets",[])
     our_desc    = od.get("description","")
@@ -3689,6 +3888,55 @@ elif page == "🧠 COSMO / Rufus":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Claid AI Photo Generator ──────────────────────────────────────────────
+    _claid_key = st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:
+        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            _claid_col1, _claid_col2 = st.columns([3,2])
+            with _claid_col1:
+                _claid_scene = st.selectbox("Сцена", [
+                    "outdoor hiking mountain lifestyle",
+                    "cozy home interior lifestyle",
+                    "gym fitness workout lifestyle",
+                    "winter snow cold weather lifestyle",
+                    "minimalist white studio product shot",
+                    "summer outdoor active lifestyle",
+                    "office work professional lifestyle",
+                ], key="claid_scene_sel")
+            with _claid_col2:
+                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+
+            if _claid_upload:
+                import base64 as _b64c
+                _img_bytes = _claid_upload.read()
+                _img_b64 = _b64c.b64encode(_img_bytes).decode()
+                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                st.image(_img_bytes, caption="Ваше фото", width=180)
+
+                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        if _err:
+                            st.error(f"❌ {_err}")
+                        elif _urls:
+                            st.session_state["_claid_results"] = _urls
+                            st.success(f"✅ {len(_urls)} фото готово!")
+                        else:
+                            st.warning("Фото не получены")
+
+            if st.session_state.get("_claid_results"):
+                _cr = st.session_state["_claid_results"]
+                _rc = st.columns(min(len(_cr), 4))
+                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        st.image(_rurl, use_container_width=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                if st.button("🗑️ Очистить", key="claid_clear"):
+                    st.session_state.pop("_claid_results", None)
+                    st.rerun()
+
     _ca=r.get("cosmo_analysis",{}); cosmo=pct(_ca.get("score",r.get("cosmo_score",0)))
     _ra=r.get("rufus_analysis",{}); rufus_s=pct(_ra.get("score",0))
     cc="#22c55e" if cosmo>=75 else ("#f59e0b" if cosmo>=50 else "#ef4444")
@@ -4058,6 +4306,55 @@ elif page == "🎯 VPC / JTBD":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Claid AI Photo Generator ──────────────────────────────────────────────
+    _claid_key = st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:
+        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            _claid_col1, _claid_col2 = st.columns([3,2])
+            with _claid_col1:
+                _claid_scene = st.selectbox("Сцена", [
+                    "outdoor hiking mountain lifestyle",
+                    "cozy home interior lifestyle",
+                    "gym fitness workout lifestyle",
+                    "winter snow cold weather lifestyle",
+                    "minimalist white studio product shot",
+                    "summer outdoor active lifestyle",
+                    "office work professional lifestyle",
+                ], key="claid_scene_sel")
+            with _claid_col2:
+                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+
+            if _claid_upload:
+                import base64 as _b64c
+                _img_bytes = _claid_upload.read()
+                _img_b64 = _b64c.b64encode(_img_bytes).decode()
+                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                st.image(_img_bytes, caption="Ваше фото", width=180)
+
+                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        if _err:
+                            st.error(f"❌ {_err}")
+                        elif _urls:
+                            st.session_state["_claid_results"] = _urls
+                            st.success(f"✅ {len(_urls)} фото готово!")
+                        else:
+                            st.warning("Фото не получены")
+
+            if st.session_state.get("_claid_results"):
+                _cr = st.session_state["_claid_results"]
+                _rc = st.columns(min(len(_cr), 4))
+                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        st.image(_rurl, use_container_width=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                if st.button("🗑️ Очистить", key="claid_clear"):
+                    st.session_state.pop("_claid_results", None)
+                    st.rerun()
+
     _vpc=r.get("vpc_analysis",{}); _jtbd=r.get("jtbd_analysis",{})
     if not _vpc and not _jtbd: st.info("Данные VPC/JTBD появятся после следующего анализа"); st.stop()
     _fit=pct(_vpc.get("fit_score",_jtbd.get("alignment_score",0))); _jfit=pct(_jtbd.get("alignment_score",0))
@@ -4805,6 +5102,55 @@ elif page == "📱 Mobile Score":
     if not od or not od.get("title"):
         st.info("ℹ️ Эта страница доступна только при анализе **нашего листинга**. Добавь URL в поле 🔵 НАШ листинг и перезапусти.")
         st.stop()
+
+    # ── Claid AI Photo Generator ──────────────────────────────────────────────
+    _claid_key = st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:
+        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            _claid_col1, _claid_col2 = st.columns([3,2])
+            with _claid_col1:
+                _claid_scene = st.selectbox("Сцена", [
+                    "outdoor hiking mountain lifestyle",
+                    "cozy home interior lifestyle",
+                    "gym fitness workout lifestyle",
+                    "winter snow cold weather lifestyle",
+                    "minimalist white studio product shot",
+                    "summer outdoor active lifestyle",
+                    "office work professional lifestyle",
+                ], key="claid_scene_sel")
+            with _claid_col2:
+                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+
+            if _claid_upload:
+                import base64 as _b64c
+                _img_bytes = _claid_upload.read()
+                _img_b64 = _b64c.b64encode(_img_bytes).decode()
+                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                st.image(_img_bytes, caption="Ваше фото", width=180)
+
+                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        if _err:
+                            st.error(f"❌ {_err}")
+                        elif _urls:
+                            st.session_state["_claid_results"] = _urls
+                            st.success(f"✅ {len(_urls)} фото готово!")
+                        else:
+                            st.warning("Фото не получены")
+
+            if st.session_state.get("_claid_results"):
+                _cr = st.session_state["_claid_results"]
+                _rc = st.columns(min(len(_cr), 4))
+                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        st.image(_rurl, use_container_width=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                if st.button("🗑️ Очистить", key="claid_clear"):
+                    st.session_state.pop("_claid_results", None)
+                    st.rerun()
+
     st.caption("70% покупок Amazon — с мобильного. Как выглядит твой листинг на смартфоне?")
 
     _title   = od.get("title","") if od else ""
