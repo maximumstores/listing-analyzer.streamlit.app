@@ -3444,20 +3444,30 @@ elif page == "📸 Фото":
                     try:
                         _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
                         _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        # Photo #1 = main Amazon image (white bg required)
+                        _is_main_photo = (_ai_idx == 0)
+                        _photo_context = """ВАЖНО: Это ГЛАВНОЕ фото листинга (#1).
+По правилам Amazon главное фото ОБЯЗАНО быть на чистом белом фоне (RGB 255,255,255).
+НЕ рекомендуй менять белый фон на lifestyle — это нарушит правила Amazon и приведёт к suppression.
+Оценивай только: позу модели, читаемость товара, посадку, выражение лица, динамику движения, 
+соответствие модели ЦА. Рекомендуй улучшения в рамках белого фона (поза, движение, угол съёмки).""" if _is_main_photo else """Это дополнительное фото #{} листинга. Оценивай свободно — фон, контекст, lifestyle.""".format(_ai_idx+1)
+
                         _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
 
 {_aud_profile}
 
 ПРОДУКТ: {od.get('title','')}
 
-Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+{_photo_context}
+
+Оцени по шкале 0-100% насколько это фото убедительно для данной аудитории.
 
 Ответь строго в формате:
 SCORE: [0-100]%
 ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
-РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+РЕКОМЕНДАЦИЯ: [одно конкретное улучшение — поза/движение/угол для #1, сцена/контекст для остальных]"""
                         _aud_resp = anthropic_vision(
                             content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
@@ -3508,25 +3518,43 @@ SCORE: [0-100]%
             st.markdown("---")
             st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
 
-            # Best photo badge
+            # Detect which photo has white background (likely photo #1 from listing)
+            # Main image (#1) MUST be white bg per Amazon rules — pin it to position #1
+            _main_photo_idx = 1  # always keep original #1 as main (white bg rule)
+            _rest_sorted = [(sc,idx,txt) for sc,idx,txt in _aud_scored_sorted if idx != _main_photo_idx]
             _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
-            _best_rec = ""
-            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
-            if _rm: _best_rec = _rm.group(1).strip()[:200]
 
             st.markdown(
-                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
-                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
-                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
-                f'</div>',
-                unsafe_allow_html=True)
+                '<div style="background:#1a1a0a;border:2px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                '<div style="font-size:0.75rem;font-weight:700;color:#f59e0b">⚠️ ПРАВИЛО AMAZON</div>' +
+                '<div style="font-size:0.82rem;color:#fde68a;margin-top:4px">Главное фото (#1) <b>всегда белый фон</b> — это обязательное требование Amazon. Оно не участвует в ранжировании по ЦА.</div>' +
+                '</div>', unsafe_allow_html=True)
+
+            # Best lifestyle photo
+            if _rest_sorted:
+                _bsc, _bidx, _btxt = _rest_sorted[0]
+                _brm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _btxt, _re3.DOTALL)
+                _brec = _brm.group(1).strip()[:200] if _brm else ""
+                st.markdown(
+                    f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                    f'<div style="font-size:0.9rem;font-weight:800;color:#22c55e">🥇 Лучшее lifestyle фото для ЦА — Фото #{_bidx} ({_bsc}%)</div>' +
+                    (f'<div style="font-size:0.78rem;color:#86efac;margin-top:4px">{_brec}</div>' if _brec else "") +
+                    f'</div>', unsafe_allow_html=True)
 
             # Ordered ranking table
             _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
-            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
-            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+            # Position 1 = always original main photo (white bg)
+            _rank_html += (
+                '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                '<span style="font-size:0.8rem;color:#94a3b8">📸 Главное (#1) — Amazon rule</span>' +
+                f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #1</span>' +
+                '<span style="font-size:0.75rem;color:#f59e0b">🤍 Белый фон</span>' +
+                '</div>'
+            )
+            _position_labels2 = ["🥇 Второе (#2) — лучшее lifestyle", "🥈 Третье (#3)", "🥉 Четвёртое (#4)", "4️⃣ Пятое (#5)", "5️⃣ Шестое (#6)"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_rest_sorted):
                 _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
-                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _plbl = _position_labels2[_pi] if _pi < len(_position_labels2) else f"#{_pi+2}"
                 _rank_html += (
                     f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
                     f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
@@ -3822,20 +3850,30 @@ elif page == "🎨 A+ Контент":
                     try:
                         _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
                         _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        # Photo #1 = main Amazon image (white bg required)
+                        _is_main_photo = (_ai_idx == 0)
+                        _photo_context = """ВАЖНО: Это ГЛАВНОЕ фото листинга (#1).
+По правилам Amazon главное фото ОБЯЗАНО быть на чистом белом фоне (RGB 255,255,255).
+НЕ рекомендуй менять белый фон на lifestyle — это нарушит правила Amazon и приведёт к suppression.
+Оценивай только: позу модели, читаемость товара, посадку, выражение лица, динамику движения, 
+соответствие модели ЦА. Рекомендуй улучшения в рамках белого фона (поза, движение, угол съёмки).""" if _is_main_photo else """Это дополнительное фото #{} листинга. Оценивай свободно — фон, контекст, lifestyle.""".format(_ai_idx+1)
+
                         _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
 
 {_aud_profile}
 
 ПРОДУКТ: {od.get('title','')}
 
-Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+{_photo_context}
+
+Оцени по шкале 0-100% насколько это фото убедительно для данной аудитории.
 
 Ответь строго в формате:
 SCORE: [0-100]%
 ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
-РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+РЕКОМЕНДАЦИЯ: [одно конкретное улучшение — поза/движение/угол для #1, сцена/контекст для остальных]"""
                         _aud_resp = anthropic_vision(
                             content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
@@ -3886,25 +3924,43 @@ SCORE: [0-100]%
             st.markdown("---")
             st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
 
-            # Best photo badge
+            # Detect which photo has white background (likely photo #1 from listing)
+            # Main image (#1) MUST be white bg per Amazon rules — pin it to position #1
+            _main_photo_idx = 1  # always keep original #1 as main (white bg rule)
+            _rest_sorted = [(sc,idx,txt) for sc,idx,txt in _aud_scored_sorted if idx != _main_photo_idx]
             _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
-            _best_rec = ""
-            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
-            if _rm: _best_rec = _rm.group(1).strip()[:200]
 
             st.markdown(
-                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
-                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
-                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
-                f'</div>',
-                unsafe_allow_html=True)
+                '<div style="background:#1a1a0a;border:2px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                '<div style="font-size:0.75rem;font-weight:700;color:#f59e0b">⚠️ ПРАВИЛО AMAZON</div>' +
+                '<div style="font-size:0.82rem;color:#fde68a;margin-top:4px">Главное фото (#1) <b>всегда белый фон</b> — это обязательное требование Amazon. Оно не участвует в ранжировании по ЦА.</div>' +
+                '</div>', unsafe_allow_html=True)
+
+            # Best lifestyle photo
+            if _rest_sorted:
+                _bsc, _bidx, _btxt = _rest_sorted[0]
+                _brm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _btxt, _re3.DOTALL)
+                _brec = _brm.group(1).strip()[:200] if _brm else ""
+                st.markdown(
+                    f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                    f'<div style="font-size:0.9rem;font-weight:800;color:#22c55e">🥇 Лучшее lifestyle фото для ЦА — Фото #{_bidx} ({_bsc}%)</div>' +
+                    (f'<div style="font-size:0.78rem;color:#86efac;margin-top:4px">{_brec}</div>' if _brec else "") +
+                    f'</div>', unsafe_allow_html=True)
 
             # Ordered ranking table
             _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
-            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
-            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+            # Position 1 = always original main photo (white bg)
+            _rank_html += (
+                '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                '<span style="font-size:0.8rem;color:#94a3b8">📸 Главное (#1) — Amazon rule</span>' +
+                f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #1</span>' +
+                '<span style="font-size:0.75rem;color:#f59e0b">🤍 Белый фон</span>' +
+                '</div>'
+            )
+            _position_labels2 = ["🥇 Второе (#2) — лучшее lifestyle", "🥈 Третье (#3)", "🥉 Четвёртое (#4)", "4️⃣ Пятое (#5)", "5️⃣ Шестое (#6)"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_rest_sorted):
                 _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
-                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _plbl = _position_labels2[_pi] if _pi < len(_position_labels2) else f"#{_pi+2}"
                 _rank_html += (
                     f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
                     f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
@@ -4139,20 +4195,30 @@ elif page == "📝 Контент":
                     try:
                         _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
                         _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        # Photo #1 = main Amazon image (white bg required)
+                        _is_main_photo = (_ai_idx == 0)
+                        _photo_context = """ВАЖНО: Это ГЛАВНОЕ фото листинга (#1).
+По правилам Amazon главное фото ОБЯЗАНО быть на чистом белом фоне (RGB 255,255,255).
+НЕ рекомендуй менять белый фон на lifestyle — это нарушит правила Amazon и приведёт к suppression.
+Оценивай только: позу модели, читаемость товара, посадку, выражение лица, динамику движения, 
+соответствие модели ЦА. Рекомендуй улучшения в рамках белого фона (поза, движение, угол съёмки).""" if _is_main_photo else """Это дополнительное фото #{} листинга. Оценивай свободно — фон, контекст, lifestyle.""".format(_ai_idx+1)
+
                         _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
 
 {_aud_profile}
 
 ПРОДУКТ: {od.get('title','')}
 
-Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+{_photo_context}
+
+Оцени по шкале 0-100% насколько это фото убедительно для данной аудитории.
 
 Ответь строго в формате:
 SCORE: [0-100]%
 ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
-РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+РЕКОМЕНДАЦИЯ: [одно конкретное улучшение — поза/движение/угол для #1, сцена/контекст для остальных]"""
                         _aud_resp = anthropic_vision(
                             content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
@@ -4203,25 +4269,43 @@ SCORE: [0-100]%
             st.markdown("---")
             st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
 
-            # Best photo badge
+            # Detect which photo has white background (likely photo #1 from listing)
+            # Main image (#1) MUST be white bg per Amazon rules — pin it to position #1
+            _main_photo_idx = 1  # always keep original #1 as main (white bg rule)
+            _rest_sorted = [(sc,idx,txt) for sc,idx,txt in _aud_scored_sorted if idx != _main_photo_idx]
             _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
-            _best_rec = ""
-            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
-            if _rm: _best_rec = _rm.group(1).strip()[:200]
 
             st.markdown(
-                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
-                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
-                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
-                f'</div>',
-                unsafe_allow_html=True)
+                '<div style="background:#1a1a0a;border:2px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                '<div style="font-size:0.75rem;font-weight:700;color:#f59e0b">⚠️ ПРАВИЛО AMAZON</div>' +
+                '<div style="font-size:0.82rem;color:#fde68a;margin-top:4px">Главное фото (#1) <b>всегда белый фон</b> — это обязательное требование Amazon. Оно не участвует в ранжировании по ЦА.</div>' +
+                '</div>', unsafe_allow_html=True)
+
+            # Best lifestyle photo
+            if _rest_sorted:
+                _bsc, _bidx, _btxt = _rest_sorted[0]
+                _brm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _btxt, _re3.DOTALL)
+                _brec = _brm.group(1).strip()[:200] if _brm else ""
+                st.markdown(
+                    f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                    f'<div style="font-size:0.9rem;font-weight:800;color:#22c55e">🥇 Лучшее lifestyle фото для ЦА — Фото #{_bidx} ({_bsc}%)</div>' +
+                    (f'<div style="font-size:0.78rem;color:#86efac;margin-top:4px">{_brec}</div>' if _brec else "") +
+                    f'</div>', unsafe_allow_html=True)
 
             # Ordered ranking table
             _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
-            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
-            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+            # Position 1 = always original main photo (white bg)
+            _rank_html += (
+                '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                '<span style="font-size:0.8rem;color:#94a3b8">📸 Главное (#1) — Amazon rule</span>' +
+                f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #1</span>' +
+                '<span style="font-size:0.75rem;color:#f59e0b">🤍 Белый фон</span>' +
+                '</div>'
+            )
+            _position_labels2 = ["🥇 Второе (#2) — лучшее lifestyle", "🥈 Третье (#3)", "🥉 Четвёртое (#4)", "4️⃣ Пятое (#5)", "5️⃣ Шестое (#6)"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_rest_sorted):
                 _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
-                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _plbl = _position_labels2[_pi] if _pi < len(_position_labels2) else f"#{_pi+2}"
                 _rank_html += (
                     f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
                     f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
@@ -4541,20 +4625,30 @@ elif page == "🧠 COSMO / Rufus":
                     try:
                         _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
                         _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        # Photo #1 = main Amazon image (white bg required)
+                        _is_main_photo = (_ai_idx == 0)
+                        _photo_context = """ВАЖНО: Это ГЛАВНОЕ фото листинга (#1).
+По правилам Amazon главное фото ОБЯЗАНО быть на чистом белом фоне (RGB 255,255,255).
+НЕ рекомендуй менять белый фон на lifestyle — это нарушит правила Amazon и приведёт к suppression.
+Оценивай только: позу модели, читаемость товара, посадку, выражение лица, динамику движения, 
+соответствие модели ЦА. Рекомендуй улучшения в рамках белого фона (поза, движение, угол съёмки).""" if _is_main_photo else """Это дополнительное фото #{} листинга. Оценивай свободно — фон, контекст, lifestyle.""".format(_ai_idx+1)
+
                         _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
 
 {_aud_profile}
 
 ПРОДУКТ: {od.get('title','')}
 
-Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+{_photo_context}
+
+Оцени по шкале 0-100% насколько это фото убедительно для данной аудитории.
 
 Ответь строго в формате:
 SCORE: [0-100]%
 ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
-РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+РЕКОМЕНДАЦИЯ: [одно конкретное улучшение — поза/движение/угол для #1, сцена/контекст для остальных]"""
                         _aud_resp = anthropic_vision(
                             content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
@@ -4605,25 +4699,43 @@ SCORE: [0-100]%
             st.markdown("---")
             st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
 
-            # Best photo badge
+            # Detect which photo has white background (likely photo #1 from listing)
+            # Main image (#1) MUST be white bg per Amazon rules — pin it to position #1
+            _main_photo_idx = 1  # always keep original #1 as main (white bg rule)
+            _rest_sorted = [(sc,idx,txt) for sc,idx,txt in _aud_scored_sorted if idx != _main_photo_idx]
             _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
-            _best_rec = ""
-            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
-            if _rm: _best_rec = _rm.group(1).strip()[:200]
 
             st.markdown(
-                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
-                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
-                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
-                f'</div>',
-                unsafe_allow_html=True)
+                '<div style="background:#1a1a0a;border:2px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                '<div style="font-size:0.75rem;font-weight:700;color:#f59e0b">⚠️ ПРАВИЛО AMAZON</div>' +
+                '<div style="font-size:0.82rem;color:#fde68a;margin-top:4px">Главное фото (#1) <b>всегда белый фон</b> — это обязательное требование Amazon. Оно не участвует в ранжировании по ЦА.</div>' +
+                '</div>', unsafe_allow_html=True)
+
+            # Best lifestyle photo
+            if _rest_sorted:
+                _bsc, _bidx, _btxt = _rest_sorted[0]
+                _brm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _btxt, _re3.DOTALL)
+                _brec = _brm.group(1).strip()[:200] if _brm else ""
+                st.markdown(
+                    f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                    f'<div style="font-size:0.9rem;font-weight:800;color:#22c55e">🥇 Лучшее lifestyle фото для ЦА — Фото #{_bidx} ({_bsc}%)</div>' +
+                    (f'<div style="font-size:0.78rem;color:#86efac;margin-top:4px">{_brec}</div>' if _brec else "") +
+                    f'</div>', unsafe_allow_html=True)
 
             # Ordered ranking table
             _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
-            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
-            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+            # Position 1 = always original main photo (white bg)
+            _rank_html += (
+                '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                '<span style="font-size:0.8rem;color:#94a3b8">📸 Главное (#1) — Amazon rule</span>' +
+                f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #1</span>' +
+                '<span style="font-size:0.75rem;color:#f59e0b">🤍 Белый фон</span>' +
+                '</div>'
+            )
+            _position_labels2 = ["🥇 Второе (#2) — лучшее lifestyle", "🥈 Третье (#3)", "🥉 Четвёртое (#4)", "4️⃣ Пятое (#5)", "5️⃣ Шестое (#6)"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_rest_sorted):
                 _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
-                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _plbl = _position_labels2[_pi] if _pi < len(_position_labels2) else f"#{_pi+2}"
                 _rank_html += (
                     f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
                     f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
@@ -5153,20 +5265,30 @@ elif page == "🎯 VPC / JTBD":
                     try:
                         _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
                         _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        # Photo #1 = main Amazon image (white bg required)
+                        _is_main_photo = (_ai_idx == 0)
+                        _photo_context = """ВАЖНО: Это ГЛАВНОЕ фото листинга (#1).
+По правилам Amazon главное фото ОБЯЗАНО быть на чистом белом фоне (RGB 255,255,255).
+НЕ рекомендуй менять белый фон на lifestyle — это нарушит правила Amazon и приведёт к suppression.
+Оценивай только: позу модели, читаемость товара, посадку, выражение лица, динамику движения, 
+соответствие модели ЦА. Рекомендуй улучшения в рамках белого фона (поза, движение, угол съёмки).""" if _is_main_photo else """Это дополнительное фото #{} листинга. Оценивай свободно — фон, контекст, lifestyle.""".format(_ai_idx+1)
+
                         _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
 
 {_aud_profile}
 
 ПРОДУКТ: {od.get('title','')}
 
-Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+{_photo_context}
+
+Оцени по шкале 0-100% насколько это фото убедительно для данной аудитории.
 
 Ответь строго в формате:
 SCORE: [0-100]%
 ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
-РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+РЕКОМЕНДАЦИЯ: [одно конкретное улучшение — поза/движение/угол для #1, сцена/контекст для остальных]"""
                         _aud_resp = anthropic_vision(
                             content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
@@ -5217,25 +5339,43 @@ SCORE: [0-100]%
             st.markdown("---")
             st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
 
-            # Best photo badge
+            # Detect which photo has white background (likely photo #1 from listing)
+            # Main image (#1) MUST be white bg per Amazon rules — pin it to position #1
+            _main_photo_idx = 1  # always keep original #1 as main (white bg rule)
+            _rest_sorted = [(sc,idx,txt) for sc,idx,txt in _aud_scored_sorted if idx != _main_photo_idx]
             _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
-            _best_rec = ""
-            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
-            if _rm: _best_rec = _rm.group(1).strip()[:200]
 
             st.markdown(
-                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
-                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
-                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
-                f'</div>',
-                unsafe_allow_html=True)
+                '<div style="background:#1a1a0a;border:2px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                '<div style="font-size:0.75rem;font-weight:700;color:#f59e0b">⚠️ ПРАВИЛО AMAZON</div>' +
+                '<div style="font-size:0.82rem;color:#fde68a;margin-top:4px">Главное фото (#1) <b>всегда белый фон</b> — это обязательное требование Amazon. Оно не участвует в ранжировании по ЦА.</div>' +
+                '</div>', unsafe_allow_html=True)
+
+            # Best lifestyle photo
+            if _rest_sorted:
+                _bsc, _bidx, _btxt = _rest_sorted[0]
+                _brm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _btxt, _re3.DOTALL)
+                _brec = _brm.group(1).strip()[:200] if _brm else ""
+                st.markdown(
+                    f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                    f'<div style="font-size:0.9rem;font-weight:800;color:#22c55e">🥇 Лучшее lifestyle фото для ЦА — Фото #{_bidx} ({_bsc}%)</div>' +
+                    (f'<div style="font-size:0.78rem;color:#86efac;margin-top:4px">{_brec}</div>' if _brec else "") +
+                    f'</div>', unsafe_allow_html=True)
 
             # Ordered ranking table
             _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
-            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
-            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+            # Position 1 = always original main photo (white bg)
+            _rank_html += (
+                '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                '<span style="font-size:0.8rem;color:#94a3b8">📸 Главное (#1) — Amazon rule</span>' +
+                f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #1</span>' +
+                '<span style="font-size:0.75rem;color:#f59e0b">🤍 Белый фон</span>' +
+                '</div>'
+            )
+            _position_labels2 = ["🥇 Второе (#2) — лучшее lifestyle", "🥈 Третье (#3)", "🥉 Четвёртое (#4)", "4️⃣ Пятое (#5)", "5️⃣ Шестое (#6)"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_rest_sorted):
                 _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
-                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _plbl = _position_labels2[_pi] if _pi < len(_position_labels2) else f"#{_pi+2}"
                 _rank_html += (
                     f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
                     f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
@@ -6143,20 +6283,30 @@ elif page == "📱 Mobile Score":
                     try:
                         _ab64 = _aimg.get("b64","") if isinstance(_aimg, dict) else _aimg
                         _amt = _aimg.get("media_type","image/jpeg") if isinstance(_aimg, dict) else "image/jpeg"
+                        # Photo #1 = main Amazon image (white bg required)
+                        _is_main_photo = (_ai_idx == 0)
+                        _photo_context = """ВАЖНО: Это ГЛАВНОЕ фото листинга (#1).
+По правилам Amazon главное фото ОБЯЗАНО быть на чистом белом фоне (RGB 255,255,255).
+НЕ рекомендуй менять белый фон на lifestyle — это нарушит правила Amazon и приведёт к suppression.
+Оценивай только: позу модели, читаемость товара, посадку, выражение лица, динамику движения, 
+соответствие модели ЦА. Рекомендуй улучшения в рамках белого фона (поза, движение, угол съёмки).""" if _is_main_photo else """Это дополнительное фото #{} листинга. Оценивай свободно — фон, контекст, lifestyle.""".format(_ai_idx+1)
+
                         _aprompt = f"""Ты маркетолог-эксперт по Amazon. Оцени это фото товара с точки зрения целевой аудитории.
 
 {_aud_profile}
 
 ПРОДУКТ: {od.get('title','')}
 
-Оцени по шкале 0-100% насколько это фото релевантно и убедительно для данной аудитории.
+{_photo_context}
+
+Оцени по шкале 0-100% насколько это фото убедительно для данной аудитории.
 
 Ответь строго в формате:
 SCORE: [0-100]%
 ЭМОЦИЯ_ЦА: [что чувствует покупатель глядя на это фото]
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
-РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
+РЕКОМЕНДАЦИЯ: [одно конкретное улучшение — поза/движение/угол для #1, сцена/контекст для остальных]"""
                         _aud_resp = anthropic_vision(
                             content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
@@ -6207,25 +6357,43 @@ SCORE: [0-100]%
             st.markdown("---")
             st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
 
-            # Best photo badge
+            # Detect which photo has white background (likely photo #1 from listing)
+            # Main image (#1) MUST be white bg per Amazon rules — pin it to position #1
+            _main_photo_idx = 1  # always keep original #1 as main (white bg rule)
+            _rest_sorted = [(sc,idx,txt) for sc,idx,txt in _aud_scored_sorted if idx != _main_photo_idx]
             _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
-            _best_rec = ""
-            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
-            if _rm: _best_rec = _rm.group(1).strip()[:200]
 
             st.markdown(
-                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
-                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
-                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
-                f'</div>',
-                unsafe_allow_html=True)
+                '<div style="background:#1a1a0a;border:2px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                '<div style="font-size:0.75rem;font-weight:700;color:#f59e0b">⚠️ ПРАВИЛО AMAZON</div>' +
+                '<div style="font-size:0.82rem;color:#fde68a;margin-top:4px">Главное фото (#1) <b>всегда белый фон</b> — это обязательное требование Amazon. Оно не участвует в ранжировании по ЦА.</div>' +
+                '</div>', unsafe_allow_html=True)
+
+            # Best lifestyle photo
+            if _rest_sorted:
+                _bsc, _bidx, _btxt = _rest_sorted[0]
+                _brm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _btxt, _re3.DOTALL)
+                _brec = _brm.group(1).strip()[:200] if _brm else ""
+                st.markdown(
+                    f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:12px 16px;margin-bottom:10px">' +
+                    f'<div style="font-size:0.9rem;font-weight:800;color:#22c55e">🥇 Лучшее lifestyle фото для ЦА — Фото #{_bidx} ({_bsc}%)</div>' +
+                    (f'<div style="font-size:0.78rem;color:#86efac;margin-top:4px">{_brec}</div>' if _brec else "") +
+                    f'</div>', unsafe_allow_html=True)
 
             # Ordered ranking table
             _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
-            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
-            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+            # Position 1 = always original main photo (white bg)
+            _rank_html += (
+                '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                '<span style="font-size:0.8rem;color:#94a3b8">📸 Главное (#1) — Amazon rule</span>' +
+                f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #1</span>' +
+                '<span style="font-size:0.75rem;color:#f59e0b">🤍 Белый фон</span>' +
+                '</div>'
+            )
+            _position_labels2 = ["🥇 Второе (#2) — лучшее lifestyle", "🥈 Третье (#3)", "🥉 Четвёртое (#4)", "4️⃣ Пятое (#5)", "5️⃣ Шестое (#6)"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_rest_sorted):
                 _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
-                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _plbl = _position_labels2[_pi] if _pi < len(_position_labels2) else f"#{_pi+2}"
                 _rank_html += (
                     f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
                     f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
