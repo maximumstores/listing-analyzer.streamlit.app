@@ -1499,23 +1499,23 @@ def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="i
         if not _step2.ok:
             return None, f"Step2 error {_step2.status_code}: {_step2.text[:400]}"
         _s2 = _step2.json()
-        # Extract result URLs from response
+        # Extract result URLs — output is list of dicts with tmp_url
         _urls = []
-        _items = _s2.get("data", _s2.get("images", _s2.get("results", [])))
-        if isinstance(_items, list):
-            for _item in _items:
+        _data = _s2.get("data", {})
+        # data.output is a list of image objects
+        _output_list = _data.get("output", []) if isinstance(_data, dict) else []
+        if isinstance(_output_list, list):
+            for _item in _output_list:
                 if isinstance(_item, dict):
-                    _u = _item.get("url") or _item.get("tmp_url") or _item.get("image_url","")
-                elif isinstance(_item, str):
-                    _u = _item
-                else: _u = ""
-                if _u: _urls.append(_u)
-        elif isinstance(_items, dict):
-            _u = _items.get("url") or _items.get("tmp_url","")
-            if _u: _urls.append(_u)
+                    _u = _item.get("tmp_url") or _item.get("url","")
+                    if _u: _urls.append(_u)
+        # Fallback: search recursively for tmp_url
         if not _urls:
-            _u = _s2.get("url") or _s2.get("tmp_url","")
-            if _u: _urls.append(_u)
+            import json as _j
+            _raw = _j.dumps(_s2)
+            import re as _re
+            _found = _re.findall(r'"tmp_url":\s*"([^"]+)"', _raw)
+            _urls = [u for u in _found if u and u != "null"]
         if _urls: return _urls, None
         return None, f"No output URLs: {str(_s2)[:400]}"
     except Exception as e:
