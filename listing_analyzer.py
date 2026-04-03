@@ -3458,15 +3458,16 @@ SCORE: [0-100]%
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
 РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
-                        _ar = anthropic_client().messages.create(
-                            model="claude-sonnet-4-6",
-                            max_tokens=400,
-                            messages=[{"role":"user","content":[
+                        _aud_resp = anthropic_vision(
+                            content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
                                 {"type":"text","text":_aprompt}
-                            ]}]
+                            ],
+                            max_tokens=500,
+                            system="Ты маркетолог-эксперт по Amazon. Отвечай строго по формату."
                         )
-                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                        _aud_text = _aud_resp.get("content",[{}])[0].get("text","") if isinstance(_aud_resp, dict) else str(_aud_resp)
+                        _aud_results.append({"idx": _ai_idx+1, "text": _aud_text, "b64": _ab64, "mt": _amt})
                     except Exception as _ae:
                         _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
                 _vprog.progress(100, "✅ Готово!")
@@ -3769,15 +3770,16 @@ SCORE: [0-100]%
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
 РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
-                        _ar = anthropic_client().messages.create(
-                            model="claude-sonnet-4-6",
-                            max_tokens=400,
-                            messages=[{"role":"user","content":[
+                        _aud_resp = anthropic_vision(
+                            content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
                                 {"type":"text","text":_aprompt}
-                            ]}]
+                            ],
+                            max_tokens=500,
+                            system="Ты маркетолог-эксперт по Amazon. Отвечай строго по формату."
                         )
-                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                        _aud_text = _aud_resp.get("content",[{}])[0].get("text","") if isinstance(_aud_resp, dict) else str(_aud_resp)
+                        _aud_results.append({"idx": _ai_idx+1, "text": _aud_text, "b64": _ab64, "mt": _amt})
                     except Exception as _ae:
                         _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
                 _vprog.progress(100, "✅ Готово!")
@@ -4019,15 +4021,16 @@ SCORE: [0-100]%
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
 РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
-                        _ar = anthropic_client().messages.create(
-                            model="claude-sonnet-4-6",
-                            max_tokens=400,
-                            messages=[{"role":"user","content":[
+                        _aud_resp = anthropic_vision(
+                            content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
                                 {"type":"text","text":_aprompt}
-                            ]}]
+                            ],
+                            max_tokens=500,
+                            system="Ты маркетолог-эксперт по Amazon. Отвечай строго по формату."
                         )
-                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                        _aud_text = _aud_resp.get("content",[{}])[0].get("text","") if isinstance(_aud_resp, dict) else str(_aud_resp)
+                        _aud_results.append({"idx": _ai_idx+1, "text": _aud_text, "b64": _ab64, "mt": _amt})
                     except Exception as _ae:
                         _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
                 _vprog.progress(100, "✅ Готово!")
@@ -4354,15 +4357,16 @@ SCORE: [0-100]%
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
 РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
-                        _ar = anthropic_client().messages.create(
-                            model="claude-sonnet-4-6",
-                            max_tokens=400,
-                            messages=[{"role":"user","content":[
+                        _aud_resp = anthropic_vision(
+                            content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
                                 {"type":"text","text":_aprompt}
-                            ]}]
+                            ],
+                            max_tokens=500,
+                            system="Ты маркетолог-эксперт по Amazon. Отвечай строго по формату."
                         )
-                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                        _aud_text = _aud_resp.get("content",[{}])[0].get("text","") if isinstance(_aud_resp, dict) else str(_aud_resp)
+                        _aud_results.append({"idx": _ai_idx+1, "text": _aud_text, "b64": _ab64, "mt": _amt})
                     except Exception as _ae:
                         _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
                 _vprog.progress(100, "✅ Готово!")
@@ -4899,15 +4903,16 @@ SCORE: [0-100]%
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
 РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
-                        _ar = anthropic_client().messages.create(
-                            model="claude-sonnet-4-6",
-                            max_tokens=400,
-                            messages=[{"role":"user","content":[
+                        _aud_resp = anthropic_vision(
+                            content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
                                 {"type":"text","text":_aprompt}
-                            ]}]
+                            ],
+                            max_tokens=500,
+                            system="Ты маркетолог-эксперт по Amazon. Отвечай строго по формату."
                         )
-                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                        _aud_text = _aud_resp.get("content",[{}])[0].get("text","") if isinstance(_aud_resp, dict) else str(_aud_resp)
+                        _aud_results.append({"idx": _ai_idx+1, "text": _aud_text, "b64": _ab64, "mt": _amt})
                     except Exception as _ae:
                         _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
                 _vprog.progress(100, "✅ Готово!")
@@ -5822,15 +5827,16 @@ SCORE: [0-100]%
 СООТВЕТСТВУЕТ: [что на фото совпадает с интересами ЦА]
 НЕ СООТВЕТСТВУЕТ: [что не совпадает или отталкивает ЦА]
 РЕКОМЕНДАЦИЯ: [одно конкретное действие чтобы улучшить фото для ЦА]"""
-                        _ar = anthropic_client().messages.create(
-                            model="claude-sonnet-4-6",
-                            max_tokens=400,
-                            messages=[{"role":"user","content":[
+                        _aud_resp = anthropic_vision(
+                            content_blocks=[
                                 {"type":"image","source":{"type":"base64","media_type":_amt,"data":_ab64}},
                                 {"type":"text","text":_aprompt}
-                            ]}]
+                            ],
+                            max_tokens=500,
+                            system="Ты маркетолог-эксперт по Amazon. Отвечай строго по формату."
                         )
-                        _aud_results.append({"idx": _ai_idx+1, "text": _ar.content[0].text, "b64": _ab64, "mt": _amt})
+                        _aud_text = _aud_resp.get("content",[{}])[0].get("text","") if isinstance(_aud_resp, dict) else str(_aud_resp)
+                        _aud_results.append({"idx": _ai_idx+1, "text": _aud_text, "b64": _ab64, "mt": _amt})
                     except Exception as _ae:
                         _aud_results.append({"idx": _ai_idx+1, "text": f"Ошибка: {_ae}", "b64": "", "mt": ""})
                 _vprog.progress(100, "✅ Готово!")
