@@ -3413,15 +3413,22 @@ elif page == "📸 Фото":
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
-                _claid_scene = st.selectbox("Сцена", [
-                    "outdoor hiking mountain lifestyle",
-                    "cozy home interior lifestyle",
-                    "gym fitness workout lifestyle",
-                    "winter snow cold weather lifestyle",
-                    "minimalist white studio product shot",
-                    "summer outdoor active lifestyle",
-                    "office work professional lifestyle",
-                ], key="claid_scene_sel")
+                _scene_options = {
+                "🤍 Белый фон (Amazon Main Image)": "pure white background, professional studio product photography, soft shadow, white backdrop, e-commerce",
+                "🏔️ Hiking / Outdoor горы": "on a rugged mountain trail, scattered rocks, sunlight through pine trees, rich earthy colors, warm light, professional product photography",
+                "🏠 Уютный дом / Interior": "cozy modern home interior, warm lighting, wooden furniture, lifestyle product photography",
+                "🏋️ Gym / Фитнес": "modern gym interior, fitness lifestyle, dynamic lighting, professional product photography",
+                "❄️ Зима / Snow": "snowy mountain landscape, cold winter day, soft blue light, outdoor winter lifestyle",
+                "🌊 Лето / Summer beach": "sunny summer day, outdoor adventure, bright natural light, lifestyle product photography",
+                "🌿 Nature / Природа": "lush green forest path, dappled sunlight, natural outdoor setting, professional photography",
+                "💼 Офис / Professional": "modern office setting, professional lifestyle, clean minimalist background",
+            }
+            _scene_label = st.selectbox("Сцена", list(_scene_options.keys()), key="claid_scene_sel")
+            _claid_scene = _scene_options[_scene_label]
+            if "белый" in _scene_label.lower() or "Amazon" in _scene_label:
+                st.caption("✅ Подходит для главного фото Amazon (#1) — чистый белый фон")
+            else:
+                st.caption("📸 Lifestyle сцена — для фото #2-7 в листинге")
 
             # Photos from analysis
             _analysis_imgs = st.session_state.get("images", [])
@@ -3628,15 +3635,22 @@ elif page == "🎨 A+ Контент":
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
-                _claid_scene = st.selectbox("Сцена", [
-                    "outdoor hiking mountain lifestyle",
-                    "cozy home interior lifestyle",
-                    "gym fitness workout lifestyle",
-                    "winter snow cold weather lifestyle",
-                    "minimalist white studio product shot",
-                    "summer outdoor active lifestyle",
-                    "office work professional lifestyle",
-                ], key="claid_scene_sel")
+                _scene_options = {
+                "🤍 Белый фон (Amazon Main Image)": "pure white background, professional studio product photography, soft shadow, white backdrop, e-commerce",
+                "🏔️ Hiking / Outdoor горы": "on a rugged mountain trail, scattered rocks, sunlight through pine trees, rich earthy colors, warm light, professional product photography",
+                "🏠 Уютный дом / Interior": "cozy modern home interior, warm lighting, wooden furniture, lifestyle product photography",
+                "🏋️ Gym / Фитнес": "modern gym interior, fitness lifestyle, dynamic lighting, professional product photography",
+                "❄️ Зима / Snow": "snowy mountain landscape, cold winter day, soft blue light, outdoor winter lifestyle",
+                "🌊 Лето / Summer beach": "sunny summer day, outdoor adventure, bright natural light, lifestyle product photography",
+                "🌿 Nature / Природа": "lush green forest path, dappled sunlight, natural outdoor setting, professional photography",
+                "💼 Офис / Professional": "modern office setting, professional lifestyle, clean minimalist background",
+            }
+            _scene_label = st.selectbox("Сцена", list(_scene_options.keys()), key="claid_scene_sel")
+            _claid_scene = _scene_options[_scene_label]
+            if "белый" in _scene_label.lower() or "Amazon" in _scene_label:
+                st.caption("✅ Подходит для главного фото Amazon (#1) — чистый белый фон")
+            else:
+                st.caption("📸 Lifestyle сцена — для фото #2-7 в листинге")
 
             # Photos from analysis
             _analysis_imgs = st.session_state.get("images", [])
@@ -3782,15 +3796,22 @@ elif page == "📝 Контент":
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
-                _claid_scene = st.selectbox("Сцена", [
-                    "outdoor hiking mountain lifestyle",
-                    "cozy home interior lifestyle",
-                    "gym fitness workout lifestyle",
-                    "winter snow cold weather lifestyle",
-                    "minimalist white studio product shot",
-                    "summer outdoor active lifestyle",
-                    "office work professional lifestyle",
-                ], key="claid_scene_sel")
+                _scene_options = {
+                "🤍 Белый фон (Amazon Main Image)": "pure white background, professional studio product photography, soft shadow, white backdrop, e-commerce",
+                "🏔️ Hiking / Outdoor горы": "on a rugged mountain trail, scattered rocks, sunlight through pine trees, rich earthy colors, warm light, professional product photography",
+                "🏠 Уютный дом / Interior": "cozy modern home interior, warm lighting, wooden furniture, lifestyle product photography",
+                "🏋️ Gym / Фитнес": "modern gym interior, fitness lifestyle, dynamic lighting, professional product photography",
+                "❄️ Зима / Snow": "snowy mountain landscape, cold winter day, soft blue light, outdoor winter lifestyle",
+                "🌊 Лето / Summer beach": "sunny summer day, outdoor adventure, bright natural light, lifestyle product photography",
+                "🌿 Nature / Природа": "lush green forest path, dappled sunlight, natural outdoor setting, professional photography",
+                "💼 Офис / Professional": "modern office setting, professional lifestyle, clean minimalist background",
+            }
+            _scene_label = st.selectbox("Сцена", list(_scene_options.keys()), key="claid_scene_sel")
+            _claid_scene = _scene_options[_scene_label]
+            if "белый" in _scene_label.lower() or "Amazon" in _scene_label:
+                st.caption("✅ Подходит для главного фото Amazon (#1) — чистый белый фон")
+            else:
+                st.caption("📸 Lifestyle сцена — для фото #2-7 в листинге")
 
             # Photos from analysis
             _analysis_imgs = st.session_state.get("images", [])
@@ -4021,15 +4042,22 @@ elif page == "🧠 COSMO / Rufus":
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
-                _claid_scene = st.selectbox("Сцена", [
-                    "outdoor hiking mountain lifestyle",
-                    "cozy home interior lifestyle",
-                    "gym fitness workout lifestyle",
-                    "winter snow cold weather lifestyle",
-                    "minimalist white studio product shot",
-                    "summer outdoor active lifestyle",
-                    "office work professional lifestyle",
-                ], key="claid_scene_sel")
+                _scene_options = {
+                "🤍 Белый фон (Amazon Main Image)": "pure white background, professional studio product photography, soft shadow, white backdrop, e-commerce",
+                "🏔️ Hiking / Outdoor горы": "on a rugged mountain trail, scattered rocks, sunlight through pine trees, rich earthy colors, warm light, professional product photography",
+                "🏠 Уютный дом / Interior": "cozy modern home interior, warm lighting, wooden furniture, lifestyle product photography",
+                "🏋️ Gym / Фитнес": "modern gym interior, fitness lifestyle, dynamic lighting, professional product photography",
+                "❄️ Зима / Snow": "snowy mountain landscape, cold winter day, soft blue light, outdoor winter lifestyle",
+                "🌊 Лето / Summer beach": "sunny summer day, outdoor adventure, bright natural light, lifestyle product photography",
+                "🌿 Nature / Природа": "lush green forest path, dappled sunlight, natural outdoor setting, professional photography",
+                "💼 Офис / Professional": "modern office setting, professional lifestyle, clean minimalist background",
+            }
+            _scene_label = st.selectbox("Сцена", list(_scene_options.keys()), key="claid_scene_sel")
+            _claid_scene = _scene_options[_scene_label]
+            if "белый" in _scene_label.lower() or "Amazon" in _scene_label:
+                st.caption("✅ Подходит для главного фото Amazon (#1) — чистый белый фон")
+            else:
+                st.caption("📸 Lifestyle сцена — для фото #2-7 в листинге")
 
             # Photos from analysis
             _analysis_imgs = st.session_state.get("images", [])
@@ -4470,15 +4498,22 @@ elif page == "🎯 VPC / JTBD":
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
-                _claid_scene = st.selectbox("Сцена", [
-                    "outdoor hiking mountain lifestyle",
-                    "cozy home interior lifestyle",
-                    "gym fitness workout lifestyle",
-                    "winter snow cold weather lifestyle",
-                    "minimalist white studio product shot",
-                    "summer outdoor active lifestyle",
-                    "office work professional lifestyle",
-                ], key="claid_scene_sel")
+                _scene_options = {
+                "🤍 Белый фон (Amazon Main Image)": "pure white background, professional studio product photography, soft shadow, white backdrop, e-commerce",
+                "🏔️ Hiking / Outdoor горы": "on a rugged mountain trail, scattered rocks, sunlight through pine trees, rich earthy colors, warm light, professional product photography",
+                "🏠 Уютный дом / Interior": "cozy modern home interior, warm lighting, wooden furniture, lifestyle product photography",
+                "🏋️ Gym / Фитнес": "modern gym interior, fitness lifestyle, dynamic lighting, professional product photography",
+                "❄️ Зима / Snow": "snowy mountain landscape, cold winter day, soft blue light, outdoor winter lifestyle",
+                "🌊 Лето / Summer beach": "sunny summer day, outdoor adventure, bright natural light, lifestyle product photography",
+                "🌿 Nature / Природа": "lush green forest path, dappled sunlight, natural outdoor setting, professional photography",
+                "💼 Офис / Professional": "modern office setting, professional lifestyle, clean minimalist background",
+            }
+            _scene_label = st.selectbox("Сцена", list(_scene_options.keys()), key="claid_scene_sel")
+            _claid_scene = _scene_options[_scene_label]
+            if "белый" in _scene_label.lower() or "Amazon" in _scene_label:
+                st.caption("✅ Подходит для главного фото Amazon (#1) — чистый белый фон")
+            else:
+                st.caption("📸 Lifestyle сцена — для фото #2-7 в листинге")
 
             # Photos from analysis
             _analysis_imgs = st.session_state.get("images", [])
@@ -5297,15 +5332,22 @@ elif page == "📱 Mobile Score":
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
-                _claid_scene = st.selectbox("Сцена", [
-                    "outdoor hiking mountain lifestyle",
-                    "cozy home interior lifestyle",
-                    "gym fitness workout lifestyle",
-                    "winter snow cold weather lifestyle",
-                    "minimalist white studio product shot",
-                    "summer outdoor active lifestyle",
-                    "office work professional lifestyle",
-                ], key="claid_scene_sel")
+                _scene_options = {
+                "🤍 Белый фон (Amazon Main Image)": "pure white background, professional studio product photography, soft shadow, white backdrop, e-commerce",
+                "🏔️ Hiking / Outdoor горы": "on a rugged mountain trail, scattered rocks, sunlight through pine trees, rich earthy colors, warm light, professional product photography",
+                "🏠 Уютный дом / Interior": "cozy modern home interior, warm lighting, wooden furniture, lifestyle product photography",
+                "🏋️ Gym / Фитнес": "modern gym interior, fitness lifestyle, dynamic lighting, professional product photography",
+                "❄️ Зима / Snow": "snowy mountain landscape, cold winter day, soft blue light, outdoor winter lifestyle",
+                "🌊 Лето / Summer beach": "sunny summer day, outdoor adventure, bright natural light, lifestyle product photography",
+                "🌿 Nature / Природа": "lush green forest path, dappled sunlight, natural outdoor setting, professional photography",
+                "💼 Офис / Professional": "modern office setting, professional lifestyle, clean minimalist background",
+            }
+            _scene_label = st.selectbox("Сцена", list(_scene_options.keys()), key="claid_scene_sel")
+            _claid_scene = _scene_options[_scene_label]
+            if "белый" in _scene_label.lower() or "Amazon" in _scene_label:
+                st.caption("✅ Подходит для главного фото Amazon (#1) — чистый белый фон")
+            else:
+                st.caption("📸 Lifestyle сцена — для фото #2-7 в листинге")
 
             # Photos from analysis
             _analysis_imgs = st.session_state.get("images", [])
