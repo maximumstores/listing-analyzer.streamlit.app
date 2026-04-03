@@ -3378,7 +3378,7 @@ elif page == "📸 Фото":
     _claid_key = st.secrets.get("CLAID_API_KEY","")
     if _claid_key:
         with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
-            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
                 _claid_scene = st.selectbox("Сцена", [
@@ -3390,36 +3390,67 @@ elif page == "📸 Фото":
                     "summer outdoor active lifestyle",
                     "office work professional lifestyle",
                 ], key="claid_scene_sel")
+
+            # Photos from analysis
+            _analysis_imgs = st.session_state.get("images", [])
+            _img_b64_claid = None
+            _img_mt_claid = "image/jpeg"
+
+            if _analysis_imgs:
+                st.markdown("**📸 Выбери фото из анализа:**")
+                _img_cols = st.columns(min(len(_analysis_imgs), 5))
+                for _pi, (_pc, _pimg) in enumerate(zip(_img_cols, _analysis_imgs[:5])):
+                    with _pc:
+                        try:
+                            _pb64 = _pimg.get("b64","") if isinstance(_pimg, dict) else _pimg
+                            _pmt = _pimg.get("media_type","image/jpeg") if isinstance(_pimg, dict) else "image/jpeg"
+                            st.image(f"data:{_pmt};base64,{_pb64}", use_container_width=True)
+                            if st.button(f"✓ Фото {_pi+1}", key=f"claid_pick_{_pi}", use_container_width=True):
+                                st.session_state["_claid_picked_b64"] = _pb64
+                                st.session_state["_claid_picked_mt"] = _pmt
+                                st.session_state["_claid_picked_idx"] = _pi+1
+                                st.rerun()
+                        except: pass
+
+                if st.session_state.get("_claid_picked_b64"):
+                    _img_b64_claid = st.session_state["_claid_picked_b64"]
+                    _img_mt_claid = st.session_state.get("_claid_picked_mt","image/jpeg")
+                    st.success(f"✅ Выбрано фото #{st.session_state.get('_claid_picked_idx',1)}")
+
+            # Or upload new
             with _claid_col2:
-                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+                st.markdown("**или загрузи своё:**")
+                _claid_upload = st.file_uploader("📤 PNG/JPG", type=["png","jpg","jpeg"], key="claid_upload", label_visibility="collapsed")
+                if _claid_upload:
+                    import base64 as _b64c
+                    _img_bytes = _claid_upload.read()
+                    _img_b64_claid = _b64c.b64encode(_img_bytes).decode()
+                    _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                    st.image(_img_bytes, width=120)
 
-            if _claid_upload:
-                import base64 as _b64c
-                _img_bytes = _claid_upload.read()
-                _img_b64 = _b64c.b64encode(_img_bytes).decode()
-                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
-                st.image(_img_bytes, caption="Ваше фото", width=180)
-
-                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+            if _img_b64_claid:
+                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
                     with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
-                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
                         elif _urls:
                             st.session_state["_claid_results"] = _urls
                             st.success(f"✅ {len(_urls)} фото готово!")
                         else:
-                            st.warning("Фото не получены")
+                            st.warning("Фото не получены — попробуй ещё раз")
 
             if st.session_state.get("_claid_results"):
                 _cr = st.session_state["_claid_results"]
+                st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
                 for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
+                    st.session_state.pop("_claid_picked_b64", None)
                     st.rerun()
 
     _all_blocks = re.split(r"PHOTO_BLOCK_\d+", v) if v else []
@@ -3562,7 +3593,7 @@ elif page == "🎨 A+ Контент":
     _claid_key = st.secrets.get("CLAID_API_KEY","")
     if _claid_key:
         with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
-            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
                 _claid_scene = st.selectbox("Сцена", [
@@ -3574,36 +3605,67 @@ elif page == "🎨 A+ Контент":
                     "summer outdoor active lifestyle",
                     "office work professional lifestyle",
                 ], key="claid_scene_sel")
+
+            # Photos from analysis
+            _analysis_imgs = st.session_state.get("images", [])
+            _img_b64_claid = None
+            _img_mt_claid = "image/jpeg"
+
+            if _analysis_imgs:
+                st.markdown("**📸 Выбери фото из анализа:**")
+                _img_cols = st.columns(min(len(_analysis_imgs), 5))
+                for _pi, (_pc, _pimg) in enumerate(zip(_img_cols, _analysis_imgs[:5])):
+                    with _pc:
+                        try:
+                            _pb64 = _pimg.get("b64","") if isinstance(_pimg, dict) else _pimg
+                            _pmt = _pimg.get("media_type","image/jpeg") if isinstance(_pimg, dict) else "image/jpeg"
+                            st.image(f"data:{_pmt};base64,{_pb64}", use_container_width=True)
+                            if st.button(f"✓ Фото {_pi+1}", key=f"claid_pick_{_pi}", use_container_width=True):
+                                st.session_state["_claid_picked_b64"] = _pb64
+                                st.session_state["_claid_picked_mt"] = _pmt
+                                st.session_state["_claid_picked_idx"] = _pi+1
+                                st.rerun()
+                        except: pass
+
+                if st.session_state.get("_claid_picked_b64"):
+                    _img_b64_claid = st.session_state["_claid_picked_b64"]
+                    _img_mt_claid = st.session_state.get("_claid_picked_mt","image/jpeg")
+                    st.success(f"✅ Выбрано фото #{st.session_state.get('_claid_picked_idx',1)}")
+
+            # Or upload new
             with _claid_col2:
-                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+                st.markdown("**или загрузи своё:**")
+                _claid_upload = st.file_uploader("📤 PNG/JPG", type=["png","jpg","jpeg"], key="claid_upload", label_visibility="collapsed")
+                if _claid_upload:
+                    import base64 as _b64c
+                    _img_bytes = _claid_upload.read()
+                    _img_b64_claid = _b64c.b64encode(_img_bytes).decode()
+                    _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                    st.image(_img_bytes, width=120)
 
-            if _claid_upload:
-                import base64 as _b64c
-                _img_bytes = _claid_upload.read()
-                _img_b64 = _b64c.b64encode(_img_bytes).decode()
-                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
-                st.image(_img_bytes, caption="Ваше фото", width=180)
-
-                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+            if _img_b64_claid:
+                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
                     with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
-                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
                         elif _urls:
                             st.session_state["_claid_results"] = _urls
                             st.success(f"✅ {len(_urls)} фото готово!")
                         else:
-                            st.warning("Фото не получены")
+                            st.warning("Фото не получены — попробуй ещё раз")
 
             if st.session_state.get("_claid_results"):
                 _cr = st.session_state["_claid_results"]
+                st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
                 for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
+                    st.session_state.pop("_claid_picked_b64", None)
                     st.rerun()
 
     _av = st.session_state.get("aplus_vision","")
@@ -3685,7 +3747,7 @@ elif page == "📝 Контент":
     _claid_key = st.secrets.get("CLAID_API_KEY","")
     if _claid_key:
         with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
-            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
                 _claid_scene = st.selectbox("Сцена", [
@@ -3697,36 +3759,67 @@ elif page == "📝 Контент":
                     "summer outdoor active lifestyle",
                     "office work professional lifestyle",
                 ], key="claid_scene_sel")
+
+            # Photos from analysis
+            _analysis_imgs = st.session_state.get("images", [])
+            _img_b64_claid = None
+            _img_mt_claid = "image/jpeg"
+
+            if _analysis_imgs:
+                st.markdown("**📸 Выбери фото из анализа:**")
+                _img_cols = st.columns(min(len(_analysis_imgs), 5))
+                for _pi, (_pc, _pimg) in enumerate(zip(_img_cols, _analysis_imgs[:5])):
+                    with _pc:
+                        try:
+                            _pb64 = _pimg.get("b64","") if isinstance(_pimg, dict) else _pimg
+                            _pmt = _pimg.get("media_type","image/jpeg") if isinstance(_pimg, dict) else "image/jpeg"
+                            st.image(f"data:{_pmt};base64,{_pb64}", use_container_width=True)
+                            if st.button(f"✓ Фото {_pi+1}", key=f"claid_pick_{_pi}", use_container_width=True):
+                                st.session_state["_claid_picked_b64"] = _pb64
+                                st.session_state["_claid_picked_mt"] = _pmt
+                                st.session_state["_claid_picked_idx"] = _pi+1
+                                st.rerun()
+                        except: pass
+
+                if st.session_state.get("_claid_picked_b64"):
+                    _img_b64_claid = st.session_state["_claid_picked_b64"]
+                    _img_mt_claid = st.session_state.get("_claid_picked_mt","image/jpeg")
+                    st.success(f"✅ Выбрано фото #{st.session_state.get('_claid_picked_idx',1)}")
+
+            # Or upload new
             with _claid_col2:
-                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+                st.markdown("**или загрузи своё:**")
+                _claid_upload = st.file_uploader("📤 PNG/JPG", type=["png","jpg","jpeg"], key="claid_upload", label_visibility="collapsed")
+                if _claid_upload:
+                    import base64 as _b64c
+                    _img_bytes = _claid_upload.read()
+                    _img_b64_claid = _b64c.b64encode(_img_bytes).decode()
+                    _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                    st.image(_img_bytes, width=120)
 
-            if _claid_upload:
-                import base64 as _b64c
-                _img_bytes = _claid_upload.read()
-                _img_b64 = _b64c.b64encode(_img_bytes).decode()
-                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
-                st.image(_img_bytes, caption="Ваше фото", width=180)
-
-                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+            if _img_b64_claid:
+                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
                     with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
-                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
                         elif _urls:
                             st.session_state["_claid_results"] = _urls
                             st.success(f"✅ {len(_urls)} фото готово!")
                         else:
-                            st.warning("Фото не получены")
+                            st.warning("Фото не получены — попробуй ещё раз")
 
             if st.session_state.get("_claid_results"):
                 _cr = st.session_state["_claid_results"]
+                st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
                 for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
+                    st.session_state.pop("_claid_picked_b64", None)
                     st.rerun()
 
     our_title   = od.get("title","")
@@ -3893,7 +3986,7 @@ elif page == "🧠 COSMO / Rufus":
     _claid_key = st.secrets.get("CLAID_API_KEY","")
     if _claid_key:
         with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
-            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
                 _claid_scene = st.selectbox("Сцена", [
@@ -3905,36 +3998,67 @@ elif page == "🧠 COSMO / Rufus":
                     "summer outdoor active lifestyle",
                     "office work professional lifestyle",
                 ], key="claid_scene_sel")
+
+            # Photos from analysis
+            _analysis_imgs = st.session_state.get("images", [])
+            _img_b64_claid = None
+            _img_mt_claid = "image/jpeg"
+
+            if _analysis_imgs:
+                st.markdown("**📸 Выбери фото из анализа:**")
+                _img_cols = st.columns(min(len(_analysis_imgs), 5))
+                for _pi, (_pc, _pimg) in enumerate(zip(_img_cols, _analysis_imgs[:5])):
+                    with _pc:
+                        try:
+                            _pb64 = _pimg.get("b64","") if isinstance(_pimg, dict) else _pimg
+                            _pmt = _pimg.get("media_type","image/jpeg") if isinstance(_pimg, dict) else "image/jpeg"
+                            st.image(f"data:{_pmt};base64,{_pb64}", use_container_width=True)
+                            if st.button(f"✓ Фото {_pi+1}", key=f"claid_pick_{_pi}", use_container_width=True):
+                                st.session_state["_claid_picked_b64"] = _pb64
+                                st.session_state["_claid_picked_mt"] = _pmt
+                                st.session_state["_claid_picked_idx"] = _pi+1
+                                st.rerun()
+                        except: pass
+
+                if st.session_state.get("_claid_picked_b64"):
+                    _img_b64_claid = st.session_state["_claid_picked_b64"]
+                    _img_mt_claid = st.session_state.get("_claid_picked_mt","image/jpeg")
+                    st.success(f"✅ Выбрано фото #{st.session_state.get('_claid_picked_idx',1)}")
+
+            # Or upload new
             with _claid_col2:
-                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+                st.markdown("**или загрузи своё:**")
+                _claid_upload = st.file_uploader("📤 PNG/JPG", type=["png","jpg","jpeg"], key="claid_upload", label_visibility="collapsed")
+                if _claid_upload:
+                    import base64 as _b64c
+                    _img_bytes = _claid_upload.read()
+                    _img_b64_claid = _b64c.b64encode(_img_bytes).decode()
+                    _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                    st.image(_img_bytes, width=120)
 
-            if _claid_upload:
-                import base64 as _b64c
-                _img_bytes = _claid_upload.read()
-                _img_b64 = _b64c.b64encode(_img_bytes).decode()
-                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
-                st.image(_img_bytes, caption="Ваше фото", width=180)
-
-                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+            if _img_b64_claid:
+                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
                     with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
-                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
                         elif _urls:
                             st.session_state["_claid_results"] = _urls
                             st.success(f"✅ {len(_urls)} фото готово!")
                         else:
-                            st.warning("Фото не получены")
+                            st.warning("Фото не получены — попробуй ещё раз")
 
             if st.session_state.get("_claid_results"):
                 _cr = st.session_state["_claid_results"]
+                st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
                 for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
+                    st.session_state.pop("_claid_picked_b64", None)
                     st.rerun()
 
     _ca=r.get("cosmo_analysis",{}); cosmo=pct(_ca.get("score",r.get("cosmo_score",0)))
@@ -4311,7 +4435,7 @@ elif page == "🎯 VPC / JTBD":
     _claid_key = st.secrets.get("CLAID_API_KEY","")
     if _claid_key:
         with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
-            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
                 _claid_scene = st.selectbox("Сцена", [
@@ -4323,36 +4447,67 @@ elif page == "🎯 VPC / JTBD":
                     "summer outdoor active lifestyle",
                     "office work professional lifestyle",
                 ], key="claid_scene_sel")
+
+            # Photos from analysis
+            _analysis_imgs = st.session_state.get("images", [])
+            _img_b64_claid = None
+            _img_mt_claid = "image/jpeg"
+
+            if _analysis_imgs:
+                st.markdown("**📸 Выбери фото из анализа:**")
+                _img_cols = st.columns(min(len(_analysis_imgs), 5))
+                for _pi, (_pc, _pimg) in enumerate(zip(_img_cols, _analysis_imgs[:5])):
+                    with _pc:
+                        try:
+                            _pb64 = _pimg.get("b64","") if isinstance(_pimg, dict) else _pimg
+                            _pmt = _pimg.get("media_type","image/jpeg") if isinstance(_pimg, dict) else "image/jpeg"
+                            st.image(f"data:{_pmt};base64,{_pb64}", use_container_width=True)
+                            if st.button(f"✓ Фото {_pi+1}", key=f"claid_pick_{_pi}", use_container_width=True):
+                                st.session_state["_claid_picked_b64"] = _pb64
+                                st.session_state["_claid_picked_mt"] = _pmt
+                                st.session_state["_claid_picked_idx"] = _pi+1
+                                st.rerun()
+                        except: pass
+
+                if st.session_state.get("_claid_picked_b64"):
+                    _img_b64_claid = st.session_state["_claid_picked_b64"]
+                    _img_mt_claid = st.session_state.get("_claid_picked_mt","image/jpeg")
+                    st.success(f"✅ Выбрано фото #{st.session_state.get('_claid_picked_idx',1)}")
+
+            # Or upload new
             with _claid_col2:
-                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+                st.markdown("**или загрузи своё:**")
+                _claid_upload = st.file_uploader("📤 PNG/JPG", type=["png","jpg","jpeg"], key="claid_upload", label_visibility="collapsed")
+                if _claid_upload:
+                    import base64 as _b64c
+                    _img_bytes = _claid_upload.read()
+                    _img_b64_claid = _b64c.b64encode(_img_bytes).decode()
+                    _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                    st.image(_img_bytes, width=120)
 
-            if _claid_upload:
-                import base64 as _b64c
-                _img_bytes = _claid_upload.read()
-                _img_b64 = _b64c.b64encode(_img_bytes).decode()
-                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
-                st.image(_img_bytes, caption="Ваше фото", width=180)
-
-                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+            if _img_b64_claid:
+                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
                     with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
-                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
                         elif _urls:
                             st.session_state["_claid_results"] = _urls
                             st.success(f"✅ {len(_urls)} фото готово!")
                         else:
-                            st.warning("Фото не получены")
+                            st.warning("Фото не получены — попробуй ещё раз")
 
             if st.session_state.get("_claid_results"):
                 _cr = st.session_state["_claid_results"]
+                st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
                 for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
+                    st.session_state.pop("_claid_picked_b64", None)
                     st.rerun()
 
     _vpc=r.get("vpc_analysis",{}); _jtbd=r.get("jtbd_analysis",{})
@@ -5107,7 +5262,7 @@ elif page == "📱 Mobile Score":
     _claid_key = st.secrets.get("CLAID_API_KEY","")
     if _claid_key:
         with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
-            st.caption("Загрузи фото товара → AI создаст lifestyle сцены для Amazon (Amazon-compliant)")
+            st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
                 _claid_scene = st.selectbox("Сцена", [
@@ -5119,36 +5274,67 @@ elif page == "📱 Mobile Score":
                     "summer outdoor active lifestyle",
                     "office work professional lifestyle",
                 ], key="claid_scene_sel")
+
+            # Photos from analysis
+            _analysis_imgs = st.session_state.get("images", [])
+            _img_b64_claid = None
+            _img_mt_claid = "image/jpeg"
+
+            if _analysis_imgs:
+                st.markdown("**📸 Выбери фото из анализа:**")
+                _img_cols = st.columns(min(len(_analysis_imgs), 5))
+                for _pi, (_pc, _pimg) in enumerate(zip(_img_cols, _analysis_imgs[:5])):
+                    with _pc:
+                        try:
+                            _pb64 = _pimg.get("b64","") if isinstance(_pimg, dict) else _pimg
+                            _pmt = _pimg.get("media_type","image/jpeg") if isinstance(_pimg, dict) else "image/jpeg"
+                            st.image(f"data:{_pmt};base64,{_pb64}", use_container_width=True)
+                            if st.button(f"✓ Фото {_pi+1}", key=f"claid_pick_{_pi}", use_container_width=True):
+                                st.session_state["_claid_picked_b64"] = _pb64
+                                st.session_state["_claid_picked_mt"] = _pmt
+                                st.session_state["_claid_picked_idx"] = _pi+1
+                                st.rerun()
+                        except: pass
+
+                if st.session_state.get("_claid_picked_b64"):
+                    _img_b64_claid = st.session_state["_claid_picked_b64"]
+                    _img_mt_claid = st.session_state.get("_claid_picked_mt","image/jpeg")
+                    st.success(f"✅ Выбрано фото #{st.session_state.get('_claid_picked_idx',1)}")
+
+            # Or upload new
             with _claid_col2:
-                _claid_upload = st.file_uploader("📤 Фото товара (PNG/JPG)", type=["png","jpg","jpeg"], key="claid_upload")
+                st.markdown("**или загрузи своё:**")
+                _claid_upload = st.file_uploader("📤 PNG/JPG", type=["png","jpg","jpeg"], key="claid_upload", label_visibility="collapsed")
+                if _claid_upload:
+                    import base64 as _b64c
+                    _img_bytes = _claid_upload.read()
+                    _img_b64_claid = _b64c.b64encode(_img_bytes).decode()
+                    _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
+                    st.image(_img_bytes, width=120)
 
-            if _claid_upload:
-                import base64 as _b64c
-                _img_bytes = _claid_upload.read()
-                _img_b64 = _b64c.b64encode(_img_bytes).decode()
-                _img_mt = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
-                st.image(_img_bytes, caption="Ваше фото", width=180)
-
-                if st.button("🎨 Генерировать", type="primary", key="btn_claid_gen"):
+            if _img_b64_claid:
+                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
                     with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
-                        _urls, _err = claid_generate_lifestyle(_img_b64, scene=_claid_scene, media_type=_img_mt)
+                        _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
                         elif _urls:
                             st.session_state["_claid_results"] = _urls
                             st.success(f"✅ {len(_urls)} фото готово!")
                         else:
-                            st.warning("Фото не получены")
+                            st.warning("Фото не получены — попробуй ещё раз")
 
             if st.session_state.get("_claid_results"):
                 _cr = st.session_state["_claid_results"]
+                st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
                 for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ #{_i+1}</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
+                    st.session_state.pop("_claid_picked_b64", None)
                     st.rerun()
 
     st.caption("70% покупок Amazon — с мобильного. Как выглядит твой листинг на смартфоне?")
