@@ -1485,12 +1485,18 @@ def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="i
             headers={"Authorization": f"Bearer {claid_key}",
                      "Content-Type": "application/json"},
             json={
-                "object": {"image_url": _bg_removed_url},
+                "object": {
+                    "image_url": _bg_removed_url,
+                    "placement_type": "original",
+                    "scale": 0.85,
+                    "position": {"x": 0.5, "y": 0.55}
+                },
                 "scene": {
                     "prompt": scene,
                     "model": "v2",
-                    "negative_prompt": "text, watermark, logo, low quality, blurry, cartoon",
-                    "preference": "optimal"
+                    "negative_prompt": "text, watermark, logo, low quality, blurry, cartoon, cropped person, cut off",
+                    "preference": "optimal",
+                    "aspect_ratio": "4:5"
                 },
                 "output": {"number_of_images": 2, "format": "jpeg"}
             },
