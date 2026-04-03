@@ -1465,17 +1465,22 @@ def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="i
         if not _upload_r.ok:
             return None, f"Upload error: {_upload_r.status_code} {_upload_r.text[:300]}"
         _resp = _upload_r.json()
+        # Try id first, then extract from URL
         _image_id = (_resp.get("id") or _resp.get("data",{}).get("id","") or
                      _resp.get("asset",{}).get("id","") or _resp.get("asset_id",""))
-        if not _image_id:
-            return None, f"No image ID: {_upload_r.text[:300]}"
+        _image_url = _resp.get("data",{}).get("url","") or _resp.get("url","")
+
+        # Build input — use id if available, else url
+        _gen_input = {"id": _image_id} if _image_id else {"url": _image_url} if _image_url else None
+        if not _gen_input:
+            return None, f"No image ID or URL: {_upload_r.text[:300]}"
 
         # Generate lifestyle photo
         _gen_r = requests.post(
             "https://api.claid.ai/v1-beta1/image/generate/lifestyle",
             headers={"Authorization": f"Bearer {claid_key}", "Content-Type": "application/json"},
             json={
-                "input": {"id": _image_id},
+                "input": _gen_input,
                 "output": {"settings": {"description": scene, "num_samples": 2}}
             },
             timeout=90
