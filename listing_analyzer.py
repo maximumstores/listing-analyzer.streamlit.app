@@ -1445,7 +1445,10 @@ def db_lookup_asin(asin):
 
 
 def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="image/jpeg"):
-    """Generate lifestyle/background photo via Claid.ai API v1"""
+    """Generate lifestyle background via Claid.ai:
+    Step 1: upload+remove bg → get tmp_url
+    Step 2: AI Background API with scene prompt
+    """
     claid_key = st.secrets.get("CLAID_API_KEY","")
     if not claid_key: return None, "CLAID_API_KEY не найден в Secrets"
     try:
@@ -1455,42 +1458,74 @@ def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="i
         _img_bytes = _b64c2.b64decode(image_b64)
         _ext = "jpg" if "jpeg" in media_type else "png"
 
-        # One-step: upload + edit with generative background
-        # POST /v1/image/edit/upload — multipart with file + data (JSON operations)
-        _operations = {
-            "operations": {
-                "background": {
-                    "remove": True,
-                    "generative": {
-                        "prompt": scene
-                    }
-                },
-                "restorations": {"upscale": "smart_enhance"}
-            },
-            "output": {"format": "jpeg"}
-        }
-        _r = requests.post(
+        # Step 1: Upload + remove background → get public tmp_url
+        _step1 = requests.post(
             "https://api.claid.ai/v1/image/edit/upload",
             headers={"Authorization": f"Bearer {claid_key}"},
             files={
                 "file": (f"product.{_ext}", _io2.BytesIO(_img_bytes), media_type),
-                "data": (None, _json2.dumps(_operations), "application/json")
+                "data": (None, _json2.dumps({
+                    "operations": {"background": {"remove": {"category": "products"}}},
+                    "output": {"format": "png"}
+                }), "application/json")
+            },
+            timeout=60
+        )
+        if not _step1.ok:
+            return None, f"Step1 error {_step1.status_code}: {_step1.text[:300]}"
+        _s1 = _step1.json()
+        _bg_removed_url = (_s1.get("data",{}).get("output",{}).get("tmp_url") or
+                           _s1.get("data",{}).get("output",{}).get("url",""))
+        if not _bg_removed_url:
+            return None, f"No URL after bg removal: {str(_s1)[:300]}"
+
+        # Step 2: AI Background generation
+        _step2 = requests.post(
+            "https://api.claid.ai/v1/image/background",
+            headers={"Authorization": f"Bearer {claid_key}",
+                     "Content-Type": "application/json"},
+            json={
+                "input": _bg_removed_url,
+                "scene": {
+                    "prompt": scene,
+                    "number_of_images": 2
+                },
+                "output": {"format": "jpeg"}
             },
             timeout=90
         )
-        if not _r.ok:
-            return None, f"Error {_r.status_code}: {_r.text[:400]}"
-        _result = _r.json()
-        # Extract output URL
-        _url = (
-            _result.get("data",{}).get("output",{}).get("tmp_url") or
-            _result.get("data",{}).get("output",{}).get("url") or
-            _result.get("output",{}).get("tmp_url") or
-            _result.get("tmp_url") or ""
-        )
-        if _url:
-            return [_url], None
-        return None, f"No output URL: {str(_result)[:400]}"
+        if not _step2.ok:
+            # Try alternate endpoint
+            _step2 = requests.post(
+                "https://api.claid.ai/v1-beta1/image/background",
+                headers={"Authorization": f"Bearer {claid_key}",
+                         "Content-Type": "application/json"},
+                json={
+                    "input": _bg_removed_url,
+                    "scene": {"prompt": scene, "number_of_images": 2}
+                },
+                timeout=90
+            )
+        if not _step2.ok:
+            return None, f"Step2 error {_step2.status_code}: {_step2.text[:400]}"
+        _s2 = _step2.json()
+        # Extract result URLs
+        _urls = []
+        for _key in ["data","images","results","outputs"]:
+            _items = _s2.get(_key, [])
+            if isinstance(_items, list):
+                for _item in _items:
+                    _u = (_item.get("tmp_url") or _item.get("url") or
+                          _item.get("output",{}).get("tmp_url","") if isinstance(_item,dict) else "")
+                    if _u: _urls.append(_u)
+            elif isinstance(_items, dict):
+                _u = _items.get("tmp_url") or _items.get("url","")
+                if _u: _urls.append(_u)
+        if not _urls:
+            _u = _s2.get("tmp_url") or _s2.get("url","")
+            if _u: _urls.append(_u)
+        if _urls: return _urls, None
+        return None, f"No output URLs: {str(_s2)[:400]}"
     except Exception as e:
         return None, str(e)
 
