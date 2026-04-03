@@ -3496,8 +3496,74 @@ SCORE: [0-100]%
                         f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
                         f'</div>',
                         unsafe_allow_html=True)
+            # ── Summary & Ranking ────────────────────────────────────────────
+            import re as _re3
+            _aud_scored = []
+            for _ar2 in st.session_state["_aud_results"]:
+                _sm2 = _re3.search(r'SCORE:\s*(\d+)%', _ar2["text"])
+                _sc2 = int(_sm2.group(1)) if _sm2 else 0
+                _aud_scored.append((_sc2, _ar2["idx"], _ar2["text"]))
+            _aud_scored_sorted = sorted(_aud_scored, reverse=True)
+
+            st.markdown("---")
+            st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
+
+            # Best photo badge
+            _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
+            _best_rec = ""
+            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
+            if _rm: _best_rec = _rm.group(1).strip()[:200]
+
+            st.markdown(
+                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
+                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
+                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
+                f'</div>',
+                unsafe_allow_html=True)
+
+            # Ordered ranking table
+            _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
+            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+                _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
+                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _rank_html += (
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                    f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
+                    f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #{_pidx}</span>' +
+                    f'<span style="font-size:0.85rem;font-weight:700;color:{_pc}">{_psc}%</span>' +
+                    f'</div>'
+                )
+            _rank_html += '</div>'
+            st.markdown(_rank_html, unsafe_allow_html=True)
+
+            # AI summary prompt
+            if st.button("🧠 AI — сводный план улучшений", key="btn_aud_summary"):
+                with st.spinner("🧠 Генерирую план..."):
+                    _all_reviews = "\n\n".join([
+                        f"ФОТО #{_ar2['idx']} ({_ar2['text'][:300]})"
+                        for _ar2 in st.session_state["_aud_results"]
+                    ])
+                    _sum_prompt = f"""На основе оценки {len(st.session_state["_aud_results"])} фото листинга для ЦА ({_aud_age}, {_aud_lifestyle}, {_aud_income}):
+
+{_all_reviews}
+
+Дай КРАТКИЙ план из 3-5 конкретных действий чтобы улучшить весь набор фото для этой ЦА.
+Формат: пронумерованный список, каждый пункт = одно действие + ожидаемый эффект (+X% конверсии).
+Язык: {'русский' if st.session_state.get('analysis_lang','ru')=='ru' else 'английский'}."""
+                    _sum_r = ai_call("Amazon photo strategist", _sum_prompt, max_tokens=600)
+                    st.session_state["_aud_summary"] = _sum_r
+
+            if st.session_state.get("_aud_summary"):
+                st.markdown(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;margin-top:8px">' +
+                    '<div style="font-size:0.72rem;font-weight:700;color:#64748b;margin-bottom:8px">📋 ПЛАН УЛУЧШЕНИЙ ФОТО ДЛЯ ЦА</div>' +
+                    f'<div style="font-size:0.85rem;color:#e2e8f0;line-height:1.7">{st.session_state["_aud_summary"].replace(chr(10),"<br>")}</div></div>',
+                    unsafe_allow_html=True)
+
             if st.button("🗑️ Очистить", key="clear_aud"):
                 st.session_state.pop("_aud_results", None)
+                st.session_state.pop("_aud_summary", None)
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
@@ -3808,8 +3874,74 @@ SCORE: [0-100]%
                         f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
                         f'</div>',
                         unsafe_allow_html=True)
+            # ── Summary & Ranking ────────────────────────────────────────────
+            import re as _re3
+            _aud_scored = []
+            for _ar2 in st.session_state["_aud_results"]:
+                _sm2 = _re3.search(r'SCORE:\s*(\d+)%', _ar2["text"])
+                _sc2 = int(_sm2.group(1)) if _sm2 else 0
+                _aud_scored.append((_sc2, _ar2["idx"], _ar2["text"]))
+            _aud_scored_sorted = sorted(_aud_scored, reverse=True)
+
+            st.markdown("---")
+            st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
+
+            # Best photo badge
+            _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
+            _best_rec = ""
+            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
+            if _rm: _best_rec = _rm.group(1).strip()[:200]
+
+            st.markdown(
+                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
+                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
+                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
+                f'</div>',
+                unsafe_allow_html=True)
+
+            # Ordered ranking table
+            _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
+            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+                _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
+                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _rank_html += (
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                    f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
+                    f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #{_pidx}</span>' +
+                    f'<span style="font-size:0.85rem;font-weight:700;color:{_pc}">{_psc}%</span>' +
+                    f'</div>'
+                )
+            _rank_html += '</div>'
+            st.markdown(_rank_html, unsafe_allow_html=True)
+
+            # AI summary prompt
+            if st.button("🧠 AI — сводный план улучшений", key="btn_aud_summary"):
+                with st.spinner("🧠 Генерирую план..."):
+                    _all_reviews = "\n\n".join([
+                        f"ФОТО #{_ar2['idx']} ({_ar2['text'][:300]})"
+                        for _ar2 in st.session_state["_aud_results"]
+                    ])
+                    _sum_prompt = f"""На основе оценки {len(st.session_state["_aud_results"])} фото листинга для ЦА ({_aud_age}, {_aud_lifestyle}, {_aud_income}):
+
+{_all_reviews}
+
+Дай КРАТКИЙ план из 3-5 конкретных действий чтобы улучшить весь набор фото для этой ЦА.
+Формат: пронумерованный список, каждый пункт = одно действие + ожидаемый эффект (+X% конверсии).
+Язык: {'русский' if st.session_state.get('analysis_lang','ru')=='ru' else 'английский'}."""
+                    _sum_r = ai_call("Amazon photo strategist", _sum_prompt, max_tokens=600)
+                    st.session_state["_aud_summary"] = _sum_r
+
+            if st.session_state.get("_aud_summary"):
+                st.markdown(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;margin-top:8px">' +
+                    '<div style="font-size:0.72rem;font-weight:700;color:#64748b;margin-bottom:8px">📋 ПЛАН УЛУЧШЕНИЙ ФОТО ДЛЯ ЦА</div>' +
+                    f'<div style="font-size:0.85rem;color:#e2e8f0;line-height:1.7">{st.session_state["_aud_summary"].replace(chr(10),"<br>")}</div></div>',
+                    unsafe_allow_html=True)
+
             if st.button("🗑️ Очистить", key="clear_aud"):
                 st.session_state.pop("_aud_results", None)
+                st.session_state.pop("_aud_summary", None)
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
@@ -4059,8 +4191,74 @@ SCORE: [0-100]%
                         f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
                         f'</div>',
                         unsafe_allow_html=True)
+            # ── Summary & Ranking ────────────────────────────────────────────
+            import re as _re3
+            _aud_scored = []
+            for _ar2 in st.session_state["_aud_results"]:
+                _sm2 = _re3.search(r'SCORE:\s*(\d+)%', _ar2["text"])
+                _sc2 = int(_sm2.group(1)) if _sm2 else 0
+                _aud_scored.append((_sc2, _ar2["idx"], _ar2["text"]))
+            _aud_scored_sorted = sorted(_aud_scored, reverse=True)
+
+            st.markdown("---")
+            st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
+
+            # Best photo badge
+            _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
+            _best_rec = ""
+            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
+            if _rm: _best_rec = _rm.group(1).strip()[:200]
+
+            st.markdown(
+                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
+                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
+                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
+                f'</div>',
+                unsafe_allow_html=True)
+
+            # Ordered ranking table
+            _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
+            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+                _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
+                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _rank_html += (
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                    f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
+                    f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #{_pidx}</span>' +
+                    f'<span style="font-size:0.85rem;font-weight:700;color:{_pc}">{_psc}%</span>' +
+                    f'</div>'
+                )
+            _rank_html += '</div>'
+            st.markdown(_rank_html, unsafe_allow_html=True)
+
+            # AI summary prompt
+            if st.button("🧠 AI — сводный план улучшений", key="btn_aud_summary"):
+                with st.spinner("🧠 Генерирую план..."):
+                    _all_reviews = "\n\n".join([
+                        f"ФОТО #{_ar2['idx']} ({_ar2['text'][:300]})"
+                        for _ar2 in st.session_state["_aud_results"]
+                    ])
+                    _sum_prompt = f"""На основе оценки {len(st.session_state["_aud_results"])} фото листинга для ЦА ({_aud_age}, {_aud_lifestyle}, {_aud_income}):
+
+{_all_reviews}
+
+Дай КРАТКИЙ план из 3-5 конкретных действий чтобы улучшить весь набор фото для этой ЦА.
+Формат: пронумерованный список, каждый пункт = одно действие + ожидаемый эффект (+X% конверсии).
+Язык: {'русский' if st.session_state.get('analysis_lang','ru')=='ru' else 'английский'}."""
+                    _sum_r = ai_call("Amazon photo strategist", _sum_prompt, max_tokens=600)
+                    st.session_state["_aud_summary"] = _sum_r
+
+            if st.session_state.get("_aud_summary"):
+                st.markdown(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;margin-top:8px">' +
+                    '<div style="font-size:0.72rem;font-weight:700;color:#64748b;margin-bottom:8px">📋 ПЛАН УЛУЧШЕНИЙ ФОТО ДЛЯ ЦА</div>' +
+                    f'<div style="font-size:0.85rem;color:#e2e8f0;line-height:1.7">{st.session_state["_aud_summary"].replace(chr(10),"<br>")}</div></div>',
+                    unsafe_allow_html=True)
+
             if st.button("🗑️ Очистить", key="clear_aud"):
                 st.session_state.pop("_aud_results", None)
+                st.session_state.pop("_aud_summary", None)
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
@@ -4395,8 +4593,74 @@ SCORE: [0-100]%
                         f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
                         f'</div>',
                         unsafe_allow_html=True)
+            # ── Summary & Ranking ────────────────────────────────────────────
+            import re as _re3
+            _aud_scored = []
+            for _ar2 in st.session_state["_aud_results"]:
+                _sm2 = _re3.search(r'SCORE:\s*(\d+)%', _ar2["text"])
+                _sc2 = int(_sm2.group(1)) if _sm2 else 0
+                _aud_scored.append((_sc2, _ar2["idx"], _ar2["text"]))
+            _aud_scored_sorted = sorted(_aud_scored, reverse=True)
+
+            st.markdown("---")
+            st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
+
+            # Best photo badge
+            _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
+            _best_rec = ""
+            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
+            if _rm: _best_rec = _rm.group(1).strip()[:200]
+
+            st.markdown(
+                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
+                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
+                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
+                f'</div>',
+                unsafe_allow_html=True)
+
+            # Ordered ranking table
+            _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
+            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+                _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
+                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _rank_html += (
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                    f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
+                    f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #{_pidx}</span>' +
+                    f'<span style="font-size:0.85rem;font-weight:700;color:{_pc}">{_psc}%</span>' +
+                    f'</div>'
+                )
+            _rank_html += '</div>'
+            st.markdown(_rank_html, unsafe_allow_html=True)
+
+            # AI summary prompt
+            if st.button("🧠 AI — сводный план улучшений", key="btn_aud_summary"):
+                with st.spinner("🧠 Генерирую план..."):
+                    _all_reviews = "\n\n".join([
+                        f"ФОТО #{_ar2['idx']} ({_ar2['text'][:300]})"
+                        for _ar2 in st.session_state["_aud_results"]
+                    ])
+                    _sum_prompt = f"""На основе оценки {len(st.session_state["_aud_results"])} фото листинга для ЦА ({_aud_age}, {_aud_lifestyle}, {_aud_income}):
+
+{_all_reviews}
+
+Дай КРАТКИЙ план из 3-5 конкретных действий чтобы улучшить весь набор фото для этой ЦА.
+Формат: пронумерованный список, каждый пункт = одно действие + ожидаемый эффект (+X% конверсии).
+Язык: {'русский' if st.session_state.get('analysis_lang','ru')=='ru' else 'английский'}."""
+                    _sum_r = ai_call("Amazon photo strategist", _sum_prompt, max_tokens=600)
+                    st.session_state["_aud_summary"] = _sum_r
+
+            if st.session_state.get("_aud_summary"):
+                st.markdown(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;margin-top:8px">' +
+                    '<div style="font-size:0.72rem;font-weight:700;color:#64748b;margin-bottom:8px">📋 ПЛАН УЛУЧШЕНИЙ ФОТО ДЛЯ ЦА</div>' +
+                    f'<div style="font-size:0.85rem;color:#e2e8f0;line-height:1.7">{st.session_state["_aud_summary"].replace(chr(10),"<br>")}</div></div>',
+                    unsafe_allow_html=True)
+
             if st.button("🗑️ Очистить", key="clear_aud"):
                 st.session_state.pop("_aud_results", None)
+                st.session_state.pop("_aud_summary", None)
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
@@ -4941,8 +5205,74 @@ SCORE: [0-100]%
                         f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
                         f'</div>',
                         unsafe_allow_html=True)
+            # ── Summary & Ranking ────────────────────────────────────────────
+            import re as _re3
+            _aud_scored = []
+            for _ar2 in st.session_state["_aud_results"]:
+                _sm2 = _re3.search(r'SCORE:\s*(\d+)%', _ar2["text"])
+                _sc2 = int(_sm2.group(1)) if _sm2 else 0
+                _aud_scored.append((_sc2, _ar2["idx"], _ar2["text"]))
+            _aud_scored_sorted = sorted(_aud_scored, reverse=True)
+
+            st.markdown("---")
+            st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
+
+            # Best photo badge
+            _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
+            _best_rec = ""
+            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
+            if _rm: _best_rec = _rm.group(1).strip()[:200]
+
+            st.markdown(
+                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
+                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
+                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
+                f'</div>',
+                unsafe_allow_html=True)
+
+            # Ordered ranking table
+            _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
+            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+                _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
+                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _rank_html += (
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                    f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
+                    f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #{_pidx}</span>' +
+                    f'<span style="font-size:0.85rem;font-weight:700;color:{_pc}">{_psc}%</span>' +
+                    f'</div>'
+                )
+            _rank_html += '</div>'
+            st.markdown(_rank_html, unsafe_allow_html=True)
+
+            # AI summary prompt
+            if st.button("🧠 AI — сводный план улучшений", key="btn_aud_summary"):
+                with st.spinner("🧠 Генерирую план..."):
+                    _all_reviews = "\n\n".join([
+                        f"ФОТО #{_ar2['idx']} ({_ar2['text'][:300]})"
+                        for _ar2 in st.session_state["_aud_results"]
+                    ])
+                    _sum_prompt = f"""На основе оценки {len(st.session_state["_aud_results"])} фото листинга для ЦА ({_aud_age}, {_aud_lifestyle}, {_aud_income}):
+
+{_all_reviews}
+
+Дай КРАТКИЙ план из 3-5 конкретных действий чтобы улучшить весь набор фото для этой ЦА.
+Формат: пронумерованный список, каждый пункт = одно действие + ожидаемый эффект (+X% конверсии).
+Язык: {'русский' if st.session_state.get('analysis_lang','ru')=='ru' else 'английский'}."""
+                    _sum_r = ai_call("Amazon photo strategist", _sum_prompt, max_tokens=600)
+                    st.session_state["_aud_summary"] = _sum_r
+
+            if st.session_state.get("_aud_summary"):
+                st.markdown(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;margin-top:8px">' +
+                    '<div style="font-size:0.72rem;font-weight:700;color:#64748b;margin-bottom:8px">📋 ПЛАН УЛУЧШЕНИЙ ФОТО ДЛЯ ЦА</div>' +
+                    f'<div style="font-size:0.85rem;color:#e2e8f0;line-height:1.7">{st.session_state["_aud_summary"].replace(chr(10),"<br>")}</div></div>',
+                    unsafe_allow_html=True)
+
             if st.button("🗑️ Очистить", key="clear_aud"):
                 st.session_state.pop("_aud_results", None)
+                st.session_state.pop("_aud_summary", None)
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
@@ -5865,8 +6195,74 @@ SCORE: [0-100]%
                         f'<div style="font-size:0.82rem;color:#e2e8f0;margin-top:8px;white-space:pre-line">{_txt.replace("SCORE:","").replace(f"{_sc}%","",1).strip()}</div>' +
                         f'</div>',
                         unsafe_allow_html=True)
+            # ── Summary & Ranking ────────────────────────────────────────────
+            import re as _re3
+            _aud_scored = []
+            for _ar2 in st.session_state["_aud_results"]:
+                _sm2 = _re3.search(r'SCORE:\s*(\d+)%', _ar2["text"])
+                _sc2 = int(_sm2.group(1)) if _sm2 else 0
+                _aud_scored.append((_sc2, _ar2["idx"], _ar2["text"]))
+            _aud_scored_sorted = sorted(_aud_scored, reverse=True)
+
+            st.markdown("---")
+            st.markdown("### 🏆 Итоговый рейтинг фото для вашей ЦА")
+
+            # Best photo badge
+            _best_sc, _best_idx, _best_txt = _aud_scored_sorted[0]
+            _best_rec = ""
+            _rm = _re3.search(r'РЕКОМЕНДАЦИЯ:(.+?)(?=\n[А-Я]|$)', _best_txt, _re3.DOTALL)
+            if _rm: _best_rec = _rm.group(1).strip()[:200]
+
+            st.markdown(
+                f'<div style="background:#0f3a1a;border:2px solid #22c55e;border-radius:12px;padding:14px 18px;margin-bottom:12px">' +
+                f'<div style="font-size:1rem;font-weight:800;color:#22c55e">🥇 Лучшее фото для ЦА — Фото #{_best_idx} ({_best_sc}%)</div>' +
+                (f'<div style="font-size:0.8rem;color:#86efac;margin-top:4px">{_best_rec}</div>' if _best_rec else "") +
+                f'</div>',
+                unsafe_allow_html=True)
+
+            # Ordered ranking table
+            _rank_html = '<div style="background:#0f172a;border-radius:10px;padding:12px 16px">' + '<div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px">РЕКОМЕНДУЕМЫЙ ПОРЯДОК ФОТО</div>'
+            _position_labels = ["🥇 Главное фото (#1)", "🥈 Второе фото (#2)", "🥉 Третье фото (#3)", "4️⃣ Четвёртое", "5️⃣ Пятое", "6️⃣ Шестое"]
+            for _pi, (_psc, _pidx, _ptxt) in enumerate(_aud_scored_sorted):
+                _pc = "#22c55e" if _psc>=75 else ("#f59e0b" if _psc>=50 else "#ef4444")
+                _plbl = _position_labels[_pi] if _pi < len(_position_labels) else f"#{_pi+1}"
+                _rank_html += (
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e293b">' +
+                    f'<span style="font-size:0.8rem;color:#94a3b8">{_plbl}</span>' +
+                    f'<span style="font-size:0.82rem;color:#e2e8f0">Фото #{_pidx}</span>' +
+                    f'<span style="font-size:0.85rem;font-weight:700;color:{_pc}">{_psc}%</span>' +
+                    f'</div>'
+                )
+            _rank_html += '</div>'
+            st.markdown(_rank_html, unsafe_allow_html=True)
+
+            # AI summary prompt
+            if st.button("🧠 AI — сводный план улучшений", key="btn_aud_summary"):
+                with st.spinner("🧠 Генерирую план..."):
+                    _all_reviews = "\n\n".join([
+                        f"ФОТО #{_ar2['idx']} ({_ar2['text'][:300]})"
+                        for _ar2 in st.session_state["_aud_results"]
+                    ])
+                    _sum_prompt = f"""На основе оценки {len(st.session_state["_aud_results"])} фото листинга для ЦА ({_aud_age}, {_aud_lifestyle}, {_aud_income}):
+
+{_all_reviews}
+
+Дай КРАТКИЙ план из 3-5 конкретных действий чтобы улучшить весь набор фото для этой ЦА.
+Формат: пронумерованный список, каждый пункт = одно действие + ожидаемый эффект (+X% конверсии).
+Язык: {'русский' if st.session_state.get('analysis_lang','ru')=='ru' else 'английский'}."""
+                    _sum_r = ai_call("Amazon photo strategist", _sum_prompt, max_tokens=600)
+                    st.session_state["_aud_summary"] = _sum_r
+
+            if st.session_state.get("_aud_summary"):
+                st.markdown(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;margin-top:8px">' +
+                    '<div style="font-size:0.72rem;font-weight:700;color:#64748b;margin-bottom:8px">📋 ПЛАН УЛУЧШЕНИЙ ФОТО ДЛЯ ЦА</div>' +
+                    f'<div style="font-size:0.85rem;color:#e2e8f0;line-height:1.7">{st.session_state["_aud_summary"].replace(chr(10),"<br>")}</div></div>',
+                    unsafe_allow_html=True)
+
             if st.button("🗑️ Очистить", key="clear_aud"):
                 st.session_state.pop("_aud_results", None)
+                st.session_state.pop("_aud_summary", None)
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
