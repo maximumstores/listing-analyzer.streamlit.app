@@ -1445,61 +1445,52 @@ def db_lookup_asin(asin):
 
 
 def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="image/jpeg"):
-    """Generate lifestyle photo via Claid.ai API"""
+    """Generate lifestyle/background photo via Claid.ai API v1"""
     claid_key = st.secrets.get("CLAID_API_KEY","")
     if not claid_key: return None, "CLAID_API_KEY не найден в Secrets"
     try:
-        import base64 as _b64
-        import io as _io
-        # Decode b64 to bytes
-        _img_bytes = _b64.b64decode(image_b64)
+        import base64 as _b64c2
+        import io as _io2
+        import json as _json2
+        _img_bytes = _b64c2.b64decode(image_b64)
         _ext = "jpg" if "jpeg" in media_type else "png"
 
-        # Upload via multipart/form-data
-        _upload_r = requests.post(
-            "https://api.claid.ai/v1-beta1/image/upload",
+        # One-step: upload + edit with generative background
+        # POST /v1/image/edit/upload — multipart with file + data (JSON operations)
+        _operations = {
+            "operations": {
+                "background": {
+                    "remove": True,
+                    "generative": {
+                        "prompt": scene
+                    }
+                },
+                "restorations": {"upscale": "smart_enhance"}
+            },
+            "output": {"format": "jpeg"}
+        }
+        _r = requests.post(
+            "https://api.claid.ai/v1/image/edit/upload",
             headers={"Authorization": f"Bearer {claid_key}"},
-            files={"file": (f"product.{_ext}", _io.BytesIO(_img_bytes), media_type)},
-            timeout=30
-        )
-        if not _upload_r.ok:
-            return None, f"Upload error: {_upload_r.status_code} {_upload_r.text[:300]}"
-        _resp = _upload_r.json()
-        # Try id first, then extract from URL
-        _image_id = (_resp.get("id") or _resp.get("data",{}).get("id","") or
-                     _resp.get("asset",{}).get("id","") or _resp.get("asset_id",""))
-        _image_url = _resp.get("data",{}).get("url","") or _resp.get("url","")
-
-        # Build input — use id if available, else url
-        _gen_input = {"id": _image_id} if _image_id else {"url": _image_url} if _image_url else None
-        if not _gen_input:
-            return None, f"No image ID or URL: {_upload_r.text[:300]}"
-
-        # Generate lifestyle photo
-        _gen_r = requests.post(
-            "https://api.claid.ai/v1-beta1/image/generate/lifestyle",
-            headers={"Authorization": f"Bearer {claid_key}", "Content-Type": "application/json"},
-            json={
-                "input": _gen_input,
-                "output": {"settings": {"description": scene, "num_samples": 2}}
+            files={
+                "file": (f"product.{_ext}", _io2.BytesIO(_img_bytes), media_type),
+                "data": (None, _json2.dumps(_operations), "application/json")
             },
             timeout=90
         )
-        if not _gen_r.ok:
-            return None, f"Generate error: {_gen_r.status_code} {_gen_r.text[:300]}"
-        _result = _gen_r.json()
-        # Extract URLs from various response formats
-        _urls = []
-        for _key in ["data","outputs","results","images"]:
-            for _item in _result.get(_key, []):
-                _url = (_item.get("url") or _item.get("image",{}).get("url","") or
-                        _item.get("output",{}).get("url",""))
-                if _url: _urls.append(_url)
-        if not _urls and isinstance(_result, dict):
-            # Try direct url
-            _u = _result.get("url") or _result.get("image_url","")
-            if _u: _urls.append(_u)
-        return (_urls if _urls else None), (None if _urls else f"No URLs in response: {str(_result)[:300]}")
+        if not _r.ok:
+            return None, f"Error {_r.status_code}: {_r.text[:400]}"
+        _result = _r.json()
+        # Extract output URL
+        _url = (
+            _result.get("data",{}).get("output",{}).get("tmp_url") or
+            _result.get("data",{}).get("output",{}).get("url") or
+            _result.get("output",{}).get("tmp_url") or
+            _result.get("tmp_url") or ""
+        )
+        if _url:
+            return [_url], None
+        return None, f"No output URL: {str(_result)[:400]}"
     except Exception as e:
         return None, str(e)
 
