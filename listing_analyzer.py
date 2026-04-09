@@ -670,11 +670,41 @@ def anthropic_vision(content_blocks, max_tokens=3000, system=None):
     if system: payload["system"] = system
     return _anthropic_post(payload)
 
+# Актуальные модели Gemini по приоритету (апрель 2026)
+GEMINI_FLASH_MODELS = [
+    "gemini-3.1-flash-preview",        # новейший если доступен
+    "gemini-2.5-flash-preview-04-17",  # апрельский preview
+    "gemini-2.5-flash",                # стабильный
+]
+GEMINI_PRO_MODELS = [
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-pro-preview-05-06",
+    "gemini-2.5-pro",
+]
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_best_gemini_model(key, prefer_pro=False):
+    """Автоматически находит лучшую доступную модель"""
+    models = GEMINI_PRO_MODELS if prefer_pro else GEMINI_FLASH_MODELS
+    for m in models:
+        try:
+            r = __import__('requests').post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}",
+                json={"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":3}},
+                timeout=8
+            )
+            if r.status_code not in (404, 400, 403):
+                return m
+        except: pass
+    return models[-1]  # fallback to stable
+
+
 def gemini_call(prompt, max_tokens=3000):
     import time
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан в Secrets")
-    _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
+    _prefer_pro = "pro" in st.session_state.get("gemini_model","")
+    _gmodel = get_best_gemini_model(key, prefer_pro=_prefer_pro)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
     payload = {"contents":[{"parts":[{"text":prompt}]}],
                "generationConfig":{"maxOutputTokens":max_tokens}}
@@ -693,7 +723,8 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
     import time
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан")
-    _gmodel = st.session_state.get("gemini_model","gemini-2.5-flash")
+    _prefer_pro = "про" in st.session_state.get("gemini_model","") or "pro" in st.session_state.get("gemini_model","")
+    _gmodel = get_best_gemini_model(key, prefer_pro=_prefer_pro)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
     parts = []
     if image_urls:
@@ -966,12 +997,9 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
                 import time as _tg; _tg.sleep(8)  # пауза Gemini free tier
             if _i > 0: time.sleep(8)
             log(f"👁️ Gemini фото {_i+1}/{len(images)}...")
-            if _i == 0:
-                _pp = intro
-            else:
-                _pp = f"Ты эксперт Amazon фотографий. Оцени это фото #{_i+1} по рубрику: +2 видимость товара, +2 фон, +2 инфоценность, +2 Amazon соответствие, +1 appeal, +1 уникальность. Штрафы: -3 товар не виден, -2 лишняя одежда на главном, -2 фон не белый. Товар: {title}"
-            _pp += f"\n\nОтветь СТРОГО в формате:\nPHOTO_BLOCK_{_i+1}\n{_fmt}"
-            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=500)
+            # Используем тот же полный промпт что у Claude
+            _pp = intro + f"\n\nОтветь СТРОГО в формате:\nPHOTO_BLOCK_{_i+1}\n{_fmt}"
+            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=800)
             _m = re.search(r"PHOTO_BLOCK_\d+\s*(.*)", _br, re.DOTALL)
             _blk = _m.group(1).strip() if _m else _br.strip()
             results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
@@ -1852,19 +1880,25 @@ with st.sidebar:
     st.markdown("**🤖 Модель AI**")
     _model_choice = st.radio(
         "Выбор модели",
-        ["⚡ Claude (Anthropic)", "🟢 Gemini (Google)"],
-        horizontal=True, key="model_choice", label_visibility="collapsed"
+        ["🥇 Лучшее качество (Claude)", "⚡ Быстро и дёшево (Gemini)"],
+        horizontal=False, key="model_choice", label_visibility="collapsed",
+        help="Claude — точнее анализирует фото и текст. Gemini — в 10x дешевле, подходит для частых тестов."
     )
     st.session_state["use_gemini"] = "Gemini" in _model_choice
     if st.session_state.get("use_gemini"):
-        _gem_model = st.selectbox("Gemini модель", [
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-flash-preview-04-17",
-            "gemini-2.0-flash-lite",
-            "gemini-2.5-pro",
-        ], key="gemini_model_sel", label_visibility="collapsed")
+        # Скрытый выбор модели — авто выбор лучшей
+        _gem_tier = st.radio("Gemini режим", 
+            ["⚡ Стандарт (gemini-2.5-flash)", "🔬 Продвинутый (gemini-2.5-pro)"],
+            horizontal=True, key="gemini_tier_sel", label_visibility="collapsed",
+            help="Стандарт — быстро и дёшево. Продвинутый — ближе к Claude по качеству.")
+        _gem_model = "gemini-2.5-pro" if "про" in _gem_tier.lower() or "pro" in _gem_tier.lower() else "gemini-2.5-flash"
         st.session_state["gemini_model"] = _gem_model
+        _key_for_check = st.secrets.get("GEMINI_API_KEY","")
+        if _key_for_check:
+            _actual_model = get_best_gemini_model(_key_for_check, prefer_pro=("про" in _gem_tier.lower()))
+            st.caption(f"✅ Лучшая доступная: `{_actual_model}`")
+        else:
+            st.caption(f"Модель: `{_gem_model}`")
 
     st.divider()
     st.markdown("**🔑 API**")
