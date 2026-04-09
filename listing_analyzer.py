@@ -761,7 +761,7 @@ def gemini_call(prompt, max_tokens=3000):
         raise Exception(f"Gemini {r.status_code}: {r.text[:200]}")
     raise Exception("Gemini перегружен — попробуй через 2 мин")
 
-def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=4000):
+def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=8000):
     import time
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан")
@@ -1042,7 +1042,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
             # Используем тот же полный промпт что у Claude
             _fmt_i = _fmt.format(i=_i+1) if "{i}" in _fmt else _fmt
             _pp = intro + f"\n\nОтветь СТРОГО в формате (все 7 строк обязательны):\nPHOTO_BLOCK_{_i+1}\n{_fmt_i}"
-            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=1500)
+            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=2500)
             _m = re.search(r"PHOTO_BLOCK_\d+\s*(.*)", _br, re.DOTALL)
             _blk = _m.group(1).strip() if _m else _br.strip()
             results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
@@ -1783,8 +1783,14 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
 st.set_page_config(page_title="Listing Analyzer", page_icon="https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260", layout="wide")
 
 with st.sidebar:
-    st.image("https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260", width=120)
-    st.markdown("## <span style='color:#c0392b'>Listing Analyzer</span>", unsafe_allow_html=True)
+    _logo_col, _refresh_col = st.columns([4,1])
+    with _logo_col:
+        st.image("https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260", width=100)
+        st.markdown("## <span style='color:#c0392b'>Listing Analyzer</span>", unsafe_allow_html=True)
+    with _refresh_col:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        if st.button("🔄", key="refresh_sidebar", help="Обновить страницу"):
+            st.rerun()
     st.divider()
 
     if st.session_state.get("_api_balance_error"):
@@ -2216,6 +2222,9 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     # Save input ASIN from URL for better lookup later
                     _input_asin_save = get_asin(our_url) or get_asin_from_data(_od)
                     if _input_asin_save: _od["_input_asin"] = _input_asin_save
+                    # Сохраняем какой моделью сделан анализ
+                    _model_used = "Gemini/" + st.session_state.get("gemini_model","gemini-2.5-flash") if st.session_state.get("use_gemini") else "Claude/" + ANTHROPIC_MODEL_VISION
+                    _od["_model_used"] = _model_used
                     _saved = db_save(get_asin_from_data(_od) or _input_asin_save, result,
                             st.session_state.get("vision",""), _od.get("title",""))
                     log("💾 Сохранено в историю" if _saved else f"⚠️ БД ошибка: {st.session_state.get('_db_save_err','?')}")
@@ -2253,6 +2262,9 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                     # Save input ASIN from URL for better lookup later
                     _input_asin_save = get_asin(our_url) or get_asin_from_data(_od)
                     if _input_asin_save: _od["_input_asin"] = _input_asin_save
+                    # Сохраняем какой моделью сделан анализ
+                    _model_used = "Gemini/" + st.session_state.get("gemini_model","gemini-2.5-flash") if st.session_state.get("use_gemini") else "Claude/" + ANTHROPIC_MODEL_VISION
+                    _od["_model_used"] = _model_used
                     _saved = db_save(get_asin_from_data(_od) or _input_asin_save, result,
                             st.session_state.get("vision",""), _od.get("title",""))
                     log("💾 Сохранено в историю" if _saved else f"⚠️ БД ошибка")
@@ -2443,7 +2455,9 @@ def page_history():
                         (f' · 💰{_ca["price"]}' if _ca.get("price") else "") +
                         (f' · ⭐{_ca["rating"]}' if _ca.get("rating") else "") +
                         (f' · ({_ca["reviews"]} отз.)' if _ca.get("reviews") else "") +
-                        f' · {_cdate}</div></div>',
+                        f' · {_cdate}' +
+                        (_model_hist_badge if (_model_hist_badge := (lambda od: " · 🟢 Gemini " + od.get("_model_used","").split("/")[-1] if od and "Gemini" in od.get("_model_used","") else (" · ⚡ Claude" if od and od.get("_model_used") else ""))(json.loads(_ca["our_data_json"]) if _ca.get("our_data_json") else {})) else "") +
+                        f'</div></div>',
                         unsafe_allow_html=True)
                 with _cc3:
                     if _csc>0:
@@ -2538,8 +2552,10 @@ def page_history():
                 f'<div style="font-size:0.78rem;color:#64748b;margin-top:3px">'
                 f'{_mp_flag} &nbsp;·&nbsp; '
                 f'<a href="https://www.amazon.com/dp/{_asin}" target="_blank" style="color:#3b82f6;text-decoration:none">{_asin} ↗</a>'
-                f' &nbsp;·&nbsp; {_date}</div>'
-                f'</div>', unsafe_allow_html=True)
+                f' &nbsp;·&nbsp; {_date}' +
+                (f' &nbsp;·&nbsp; 🟢 Gemini' if (_a.get("our_data") or {}).get("_model_used","").startswith("Gemini") else
+                 (f' &nbsp;·&nbsp; ⚡ Claude' if (_a.get("our_data") or {}).get("_model_used","").startswith("Claude") else "")) +
+                f'</div></div>', unsafe_allow_html=True)
         with _ci3:
             if _sc > 0:
                 st.markdown(
