@@ -712,7 +712,19 @@ def get_best_gemini_model(key, prefer_pro=False):
     """Автоматически находит лучшую доступную модель через реальный список API"""
     available = get_available_gemini_models(key)
     preferred = GEMINI_PRO_MODELS if prefer_pro else GEMINI_FLASH_MODELS
-    # Сначала ищем из нашего preferred списка
+    # Сначала пробуем топовые модели напрямую (могут быть недоступны через list API но работают)
+    _top_try = ["gemini-3.1-pro-preview","gemini-3.1-flash-preview","gemini-pro-latest","gemini-flash-latest"]
+    for m in (_top_try if not prefer_pro else ["gemini-3.1-pro-preview","gemini-pro-latest"]):
+        if m in available or True:  # пробуем всегда — list API не всегда полный
+            try:
+                _tr = __import__('requests').post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}",
+                    json={"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":3}},
+                    timeout=5
+                )
+                if _tr.ok: return m
+            except: pass
+    # Fallback — из доступных по list API
     for m in preferred:
         if m in available:
             return m
