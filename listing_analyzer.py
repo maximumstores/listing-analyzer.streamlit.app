@@ -1948,7 +1948,8 @@ with st.sidebar:
     if _ac2.button("🧪 Gemini", key="api_test_gem"):
         get_available_gemini_models.clear()
         get_best_gemini_model.clear()
-        _key = st.secrets.get("GEMINI_API_KEY","")
+        _key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("GOOGLE_API_KEY","")
+        st.caption(f"Ключ: `...{_key[-8:] if _key else 'НЕТ'}`")
         for _ep in ["v1", "v1beta"]:
             try:
                 _r = requests.get(f"https://generativelanguage.googleapis.com/{_ep}/models?key={_key}", timeout=10)
