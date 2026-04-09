@@ -913,8 +913,17 @@ def scrapingdog_product(asin, log, domain="com"):
                 try: urls.extend([u for u in json.loads(raw) if isinstance(u,str)])
                 except: pass
         urls = list(dict.fromkeys([u for u in urls if not re.search(r'_SR\d{2}|_SX3[0-9]|_SS4|_SL75|sprite|grey',u)]))
-        log(f"✅ ScrapingDog: {len(urls)} фото")
-        return data, urls[:5]
+        # Deduplicate by ASIN part of URL (removes duplicate main image)
+        _seen_asins = set()
+        _deduped = []
+        for _u in urls:
+            _m = re.search(r'/I/([A-Z0-9]+)\.', _u)
+            _key = _m.group(1) if _m else _u
+            if _key not in _seen_asins:
+                _seen_asins.add(_key)
+                _deduped.append(_u)
+        log(f"✅ ScrapingDog: {len(_deduped)} фото (из {len(urls)} до дедупликации)")
+        return data, _deduped[:7]
     except Exception as e:
         log(f"⚠️ ScrapingDog: {e}"); return {}, []
 
@@ -3126,7 +3135,7 @@ def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=N
     if vision_text:
         for _m in _re.finditer(r"PHOTO_BLOCK_(\d+)\s*(.*?)(?=PHOTO_BLOCK_\d+|$)",vision_text,_re.DOTALL):
             _blocks[int(_m.group(1))]=_m.group(2).strip()
-    for i,img_d in enumerate(images[:5]):
+    for i,img_d in enumerate(images[:7]):
         blk=_blocks.get(i+1,"")
         sc_m=_re.search(r"(\d+)/10",blk); sc_v=int(sc_m.group(1)) if sc_m else 0
         sc_c=score_color(sc_v*10); sc_lbl="Отлично" if sc_v>=8 else ("Хорошо" if sc_v>=6 else "Слабо")
@@ -4080,7 +4089,7 @@ SCORE: [0-100]%
                     with st.expander("💡 Конверсия"): st.markdown(f"🎯 {ctxt}")
                 if etxt:
                     _ec = {"доверие":"#22c55e","trust":"#22c55e","желание":"#f59e0b","сомнение":"#ef4444","doubt":"#ef4444","любопытство":"#3b82f6","curiosity":"#3b82f6","безразличие":"#94a3b8","indifference":"#94a3b8"}.get(etxt.split()[0].lower().rstrip("/:"), "#8b5cf6")
-                    st.markdown(f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px"><span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span><span style="font-size:0.82rem;color:var(--text-color,#e2e8f0)">{etxt}</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px"><span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span><span style="font-size:0.82rem;color:#1e293b">{etxt}</span></div>', unsafe_allow_html=True)
 
     if not imgs and blocks:
         st.info("📅 История: показан текстовый анализ Vision (фото сохраняются только в новых анализах)")
