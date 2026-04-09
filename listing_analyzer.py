@@ -1040,8 +1040,9 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
             if _i > 0: time.sleep(8)
             log(f"👁️ Gemini фото {_i+1}/{len(images)}...")
             # Используем тот же полный промпт что у Claude
-            _pp = intro + f"\n\nОтветь СТРОГО в формате:\nPHOTO_BLOCK_{_i+1}\n{_fmt}"
-            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=800)
+            _fmt_i = _fmt.format(i=_i+1) if "{i}" in _fmt else _fmt
+            _pp = intro + f"\n\nОтветь СТРОГО в формате (все 7 строк обязательны):\nPHOTO_BLOCK_{_i+1}\n{_fmt_i}"
+            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=1000)
             _m = re.search(r"PHOTO_BLOCK_\d+\s*(.*)", _br, re.DOTALL)
             _blk = _m.group(1).strip() if _m else _br.strip()
             results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
@@ -3837,9 +3838,7 @@ SCORE: [0-100]%
                             st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
                         elif isinstance(_rimg, str):
                             st.image(_rimg, use_container_width=True)
-                    with _rcol:
-                        st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
+
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
                     st.session_state.pop("_claid_picked_b64", None)
@@ -4251,9 +4250,7 @@ SCORE: [0-100]%
                             st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
                         elif isinstance(_rimg, str):
                             st.image(_rimg, use_container_width=True)
-                    with _rcol:
-                        st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
+
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
                     st.session_state.pop("_claid_picked_b64", None)
@@ -4604,9 +4601,7 @@ SCORE: [0-100]%
                             st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
                         elif isinstance(_rimg, str):
                             st.image(_rimg, use_container_width=True)
-                    with _rcol:
-                        st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
+
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
                     st.session_state.pop("_claid_picked_b64", None)
@@ -5042,9 +5037,7 @@ SCORE: [0-100]%
                             st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
                         elif isinstance(_rimg, str):
                             st.image(_rimg, use_container_width=True)
-                    with _rcol:
-                        st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
+
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
                     st.session_state.pop("_claid_picked_b64", None)
@@ -5690,9 +5683,7 @@ SCORE: [0-100]%
                             st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
                         elif isinstance(_rimg, str):
                             st.image(_rimg, use_container_width=True)
-                    with _rcol:
-                        st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
+
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
                     st.session_state.pop("_claid_picked_b64", None)
@@ -6716,9 +6707,7 @@ SCORE: [0-100]%
                             st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
                         elif isinstance(_rimg, str):
                             st.image(_rimg, use_container_width=True)
-                    with _rcol:
-                        st.image(_rurl, use_container_width=True)
-                        st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
+
                 if st.button("🗑️ Очистить", key="claid_clear"):
                     st.session_state.pop("_claid_results", None)
                     st.session_state.pop("_claid_picked_b64", None)
