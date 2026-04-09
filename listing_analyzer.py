@@ -691,7 +691,7 @@ GEMINI_IMAGE_MODELS = [
     "gemini-2.0-flash-exp-image-generation",
 ]
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)  # 5 мин
 def get_available_gemini_models(key):
     """Получает список реально доступных моделей через API"""
     try:
@@ -707,7 +707,7 @@ def get_available_gemini_models(key):
     except: pass
     return []
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)  # 5 мин
 def get_best_gemini_model(key, prefer_pro=False):
     """Автоматически находит лучшую доступную модель через реальный список API"""
     available = get_available_gemini_models(key)
@@ -1946,6 +1946,8 @@ with st.sidebar:
         except Exception as e:
             st.error(f"❌ {str(e)[:60]}")
     if _ac2.button("🧪 Gemini", key="api_test_gem"):
+        get_available_gemini_models.clear()
+        get_best_gemini_model.clear()
         _key = st.secrets.get("GEMINI_API_KEY","")
         for _ep in ["v1", "v1beta"]:
             try:
