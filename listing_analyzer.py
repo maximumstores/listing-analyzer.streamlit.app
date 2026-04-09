@@ -670,33 +670,55 @@ def anthropic_vision(content_blocks, max_tokens=3000, system=None):
     if system: payload["system"] = system
     return _anthropic_post(payload)
 
-# Актуальные модели Gemini по приоритету (апрель 2026)
+# Актуальные модели Gemini (апрель 2026) — реально доступные на paid tier
 GEMINI_FLASH_MODELS = [
-    "gemini-3.1-flash-preview",        # новейший если доступен
-    "gemini-2.5-flash-preview-04-17",  # апрельский preview
-    "gemini-2.5-flash",                # стабильный
+    "gemini-2.5-flash",          # лучший доступный flash
+    "gemini-2.0-flash-001",      # стабильный
+    "gemini-2.0-flash",          # fallback
+    "gemini-2.0-flash-lite",     # быстрый fallback
 ]
 GEMINI_PRO_MODELS = [
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-pro-preview-05-06",
-    "gemini-2.5-pro",
+    "gemini-2.5-pro",            # лучший доступный pro
+    "gemini-2.5-flash",          # fallback если pro недоступен
+    "gemini-2.0-flash",
 ]
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def get_available_gemini_models(key):
+    """Получает список реально доступных моделей через API"""
+    try:
+        r = __import__('requests').get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+            timeout=10
+        )
+        if r.ok:
+            all_models = [m["name"].replace("models/","") for m in r.json().get("models",[])]
+            # Только image/text модели (не embedding, не tts)
+            return [m for m in all_models if any(x in m for x in ["flash","pro"]) 
+                    and not any(x in m for x in ["embed","tts","aqa","vision-only"])]
+    except: pass
+    return []
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_best_gemini_model(key, prefer_pro=False):
-    """Автоматически находит лучшую доступную модель"""
-    models = GEMINI_PRO_MODELS if prefer_pro else GEMINI_FLASH_MODELS
-    for m in models:
-        try:
-            r = __import__('requests').post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}",
-                json={"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":3}},
-                timeout=8
-            )
-            if r.status_code not in (404, 400, 403):
+    """Автоматически находит лучшую доступную модель через реальный список API"""
+    available = get_available_gemini_models(key)
+    preferred = GEMINI_PRO_MODELS if prefer_pro else GEMINI_FLASH_MODELS
+    # Сначала ищем из нашего preferred списка
+    for m in preferred:
+        if m in available:
+            return m
+    # Если нет — берём лучшее из доступного
+    if available:
+        # Приоритет: 2.5 > 2.0, flash > lite
+        for m in available:
+            if "2.5" in m and ("pro" if prefer_pro else "flash") in m and "lite" not in m:
                 return m
-        except: pass
-    return models[-1]  # fallback to stable
+        for m in available:
+            if ("pro" if prefer_pro else "flash") in m and "lite" not in m:
+                return m
+        return available[0]
+    return preferred[-1]  # hardcoded fallback
 
 
 def gemini_call(prompt, max_tokens=3000):
