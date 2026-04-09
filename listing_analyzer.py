@@ -1033,7 +1033,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
     results = []
     if st.session_state.get("use_gemini"):
         import time; time.sleep(5)
-        _fmt = "Тип: [тип]\nОценка: X/10\nСильная сторона: [текст]\nСлабость: [текст]\nДействие: [текст]"
+        _fmt = block_fmt  # используем полный формат как у Claude
         for _i, _img in enumerate(images):
             if _i > 0: 
                 import time as _tg; _tg.sleep(8)  # пауза Gemini free tier
