@@ -749,7 +749,12 @@ def gemini_call(prompt, max_tokens=3000):
     _gmodel = get_best_gemini_model(key, prefer_pro=_prefer_pro)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
     payload = {"contents":[{"parts":[{"text":prompt}]}],
-               "generationConfig":{"maxOutputTokens":max_tokens}}
+               "generationConfig":{
+                   "maxOutputTokens": max_tokens,
+                   "temperature": 0.2,      # низкая = стабильные результаты
+                   "topP": 0.8,
+                   "topK": 40
+               }}
     for attempt in range(3):
         r = requests.post(url, json=payload, timeout=120)
         if r.ok:
@@ -783,7 +788,12 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
             parts.append({"inline_data": {"mime_type": mime or "image/jpeg", "data": b64}})
     parts.append({"text": prompt})
     payload = {"contents": [{"parts": parts}],
-               "generationConfig": {"maxOutputTokens": max_tokens}}
+               "generationConfig": {
+                   "maxOutputTokens": max_tokens,
+                   "temperature": 0.2,
+                   "topP": 0.8,
+                   "topK": 40
+               }}
     import time as _time
     _last_err = ""
     _waits = [15, 30, 60]  # короткие паузы для бесплатного tier
@@ -1280,6 +1290,19 @@ FACTUAL STATS (do NOT contradict these):
                         "customization_score": "50%", "prime_score": "50%",
                         "priority_improvements": ["JSON repair failed — rerun analysis"]}
 
+    # Inject previous analysis context
+    _prev = db_get_prev_analysis(asin)
+    _prev_context = ""
+    if _prev and _prev.get("score",0) > 0:
+        _prev_r = _prev.get("result",{})
+        _prev_actions = _prev_r.get("priority_improvements",[])[:3] if _prev_r else []
+        _prev_context = f"""
+## PREVIOUS ANALYSIS ({_prev['date']}) — Overall: {_prev['score']}%
+Previous top issues that needed fixing:
+{chr(10).join(f"- {a}" for a in _prev_actions)}
+Compare with current state: did these improve? Flag progress or regression.
+"""
+
     prompt = f"""You are an expert Amazon listing analyst specializing in the Listing 3.0 era where AI visibility (Cosmo + Rufus) determines 50% of success.
 
 OUR LISTING (ASIN {asin}):
@@ -1288,6 +1311,7 @@ OUR LISTING (ASIN {asin}):
 {comp_text}
 {vision_section}
 {context_section}
+{_prev_context}
 
 ## YOUR TASK
 Analyze the listing above and score each component. Use ONLY real data from the listing provided.
@@ -1651,6 +1675,30 @@ Requirements:
         return None, f"No images in response: {str(_result)[:300]}"
     except Exception as e:
         return None, str(e)
+
+
+def db_get_prev_analysis(asin):
+    """Get previous analysis for context injection"""
+    conn = get_db()
+    if not conn or not asin: return None
+    try:
+        import json as _j2
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT overall_score, analyzed_at, result_json
+            FROM listing_analysis
+            WHERE (asin = %s OR our_data_json::text ILIKE %s)
+            AND listing_type = 'наш'
+            ORDER BY analyzed_at DESC LIMIT 1
+        """, (asin, f'%{asin}%'))
+        row = cur.fetchone(); conn.close()
+        if not row: return None
+        _result = {}
+        try: _result = _j2.loads(row[2]) if row[2] else {}
+        except: pass
+        _date = row[1].strftime("%d.%m.%Y") if row[1] else "—"
+        return {"score": row[0] or 0, "date": _date, "result": _result}
+    except: return None
 
 
 def run_analysis(our_url, competitor_urls, log, prog=None):
