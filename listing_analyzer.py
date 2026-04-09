@@ -3383,6 +3383,38 @@ if page == "🏠 Обзор":
             _all_actions.append({"action": item, "impact": "HIGH", "effort": "MEDIUM", "details": ""})
         for a in actions:
             if isinstance(a, dict): _all_actions.append(a)
+
+        # ── Content-Visual Gap ─────────────────────────────────────────────
+        _vision_txt = st.session_state.get("vision","")
+        _title_txt = od.get("title","") if od else ""
+        _bullets_txt = " ".join(od.get("feature_bullets",[]) if od else [])
+        if _vision_txt and (_title_txt or _bullets_txt):
+            _gap_prompt = f"""Ты эксперт Amazon. Найди РАЗРЫВ между тем что обещает текст листинга и тем что реально показывают фото.
+
+ТЕКСТ (Title + Bullets):
+{_title_txt}
+{_bullets_txt[:500]}
+
+ФОТО (Vision анализ):
+{_vision_txt[:800]}
+
+Найди максимум 3 конкретных разрыва. Формат — строго JSON массив:
+[{{"gap": "короткое описание разрыва", "text_claims": "что говорит текст", "photo_shows": "что показывает фото", "fix": "что добавить/изменить в фото"}}]
+Если разрывов нет — верни пустой массив [].
+Отвечай ТОЛЬКО JSON, без markdown."""
+            try:
+                _gap_r = ai_call("Amazon listing expert", _gap_prompt, max_tokens=600)
+                import json as _jg
+                _gaps = _jg.loads(_gap_r.strip().replace("```json","").replace("```",""))
+                if _gaps:
+                    for _g in _gaps[:3]:
+                        _all_actions.append({
+                            "action": f"📸 ФОТО не подтверждает текст: «{_g.get('text_claims','')}» — {_g.get('fix','')}",
+                            "impact": "MEDIUM",
+                            "effort": "MEDIUM",
+                            "details": f"Текст обещает: {_g.get('text_claims','')} | Фото показывает: {_g.get('photo_shows','')}"
+                        })
+            except: pass
         _order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
         _all_actions.sort(key=lambda x: _order.get(x.get("impact","MEDIUM"), 1))
         _high = [a for a in _all_actions if a.get("impact","") == "HIGH"]
