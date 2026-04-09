@@ -761,7 +761,7 @@ def gemini_call(prompt, max_tokens=3000):
         raise Exception(f"Gemini {r.status_code}: {r.text[:200]}")
     raise Exception("Gemini перегружен — попробуй через 2 мин")
 
-def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=2000):
+def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=4000):
     import time
     key = st.secrets.get("GEMINI_API_KEY","")
     if not key: raise Exception("GEMINI_API_KEY не задан")
@@ -1042,7 +1042,7 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
             # Используем тот же полный промпт что у Claude
             _fmt_i = _fmt.format(i=_i+1) if "{i}" in _fmt else _fmt
             _pp = intro + f"\n\nОтветь СТРОГО в формате (все 7 строк обязательны):\nPHOTO_BLOCK_{_i+1}\n{_fmt_i}"
-            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=1000)
+            _br = gemini_vision_call(_pp, image_b64_list=[(_img["b64"], _img.get("media_type","image/jpeg"))], max_tokens=1500)
             _m = re.search(r"PHOTO_BLOCK_\d+\s*(.*)", _br, re.DOTALL)
             _blk = _m.group(1).strip() if _m else _br.strip()
             results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
@@ -1121,12 +1121,29 @@ APLUS_BLOCK_{{i}}
 
     try:
         if st.session_state.get("use_gemini"):
-            _ap_b64 = [(img["b64"], img["media_type"]) for img in images]
-            _ap_prompt = sys_prompt + "\n\n" + "\n".join(
-                [f"A+ баннер #{i+1}:" for i in range(len(images))])
-            result = gemini_vision_call(_ap_prompt, image_b64_list=_ap_b64, max_tokens=2000)
+            # Gemini: по одному баннеру с паузой (как для фото)
+            import time as _ta
+            _ap_results = []
+            for _ai, _aimg in enumerate(images):
+                if _ai > 0: _ta.sleep(8)
+                log(f"  👁️ A+ баннер {_ai+1}/{len(images)}...")
+                _ap_fmt = sys_prompt + f"""
+
+Сейчас анализируй ТОЛЬКО этот баннер #{_ai+1}.
+Ответь СТРОГО в формате:
+APLUS_BLOCK_{_ai+1}
+{'Модуль' if lang!='en' else 'Module'}: [тип]
+{'Содержание' if lang!='en' else 'Summary'}: [1-2 предложения]
+{'Оценка' if lang!='en' else 'Score'}: X/10
+{'Сильная сторона' if lang!='en' else 'Strength'}: [1 конкретная]
+{'Слабость' if lang!='en' else 'Weakness'}: [1 конкретная проблема]
+{'Действие' if lang!='en' else 'Action'}: [1 конкретный фикс с глагола]
+{'Конверсия' if lang!='en' else 'Conversion'}: [1 инсайт психологии покупателя]"""
+                _apr = gemini_vision_call(_ap_fmt, image_b64_list=[(_aimg["b64"], _aimg["media_type"])], max_tokens=1000)
+                _ap_results.append(_apr)
+            result = "\n\n".join(_ap_results)
         else:
-            result = anthropic_vision(msg_content, max_tokens=2000, system=sys_prompt)
+            result = anthropic_vision(msg_content, max_tokens=4000, system=sys_prompt)
         log(f"✅ A+ Vision: {len(images)} баннеров проанализировано")
         return result
     except Exception as e:
@@ -3955,13 +3972,13 @@ SCORE: [0-100]%
                     st.markdown(f'<div style="display:flex;align-items:center;gap:12px;margin:8px 0"><div style="font-size:2rem;font-weight:800;color:{bc}">{score}/10</div><div style="flex:1"><div style="background:#e5e7eb;border-radius:6px;height:10px"><div style="background:{bc};width:{score*10}%;height:10px;border-radius:6px"></div></div><div style="color:{bc};font-size:0.8rem;margin-top:2px">{slbl}</div></div></div>', unsafe_allow_html=True)
                 if stxt: st.success(f"✅ {stxt}")
                 if wtxt: st.warning(f"⚠️ {wtxt}")
-                if score > 0 and score < 8 and (atxt or wtxt):
-                    with st.expander("🛠 Что делать"): st.markdown(f"→ {atxt or wtxt}")
+                if atxt:
+                    with st.expander("🛠 Что делать"): st.markdown(f"→ **{atxt}**")
                 if ctxt:
-                    with st.expander("💡 Конверсия"): st.info(f"🎯 {ctxt}")
+                    with st.expander("💡 Конверсия"): st.markdown(f"🎯 {ctxt}")
                 if etxt:
                     _ec = {"доверие":"#22c55e","trust":"#22c55e","желание":"#f59e0b","сомнение":"#ef4444","doubt":"#ef4444","любопытство":"#3b82f6","curiosity":"#3b82f6","безразличие":"#94a3b8","indifference":"#94a3b8"}.get(etxt.split()[0].lower().rstrip("/:"), "#8b5cf6")
-                    st.markdown(f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px"><span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span><span style="font-size:0.82rem;color:#1e293b">{etxt}</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="background:{_ec}22;border-left:3px solid {_ec};border-radius:6px;padding:8px 12px;margin-top:4px"><span style="font-size:0.8rem;font-weight:700;color:{_ec}">😶 ЭМОЦИЯ: </span><span style="font-size:0.82rem;color:var(--text-color,#e2e8f0)">{etxt}</span></div>', unsafe_allow_html=True)
 
     if not imgs and blocks:
         st.info("📅 История: показан текстовый анализ Vision (фото сохраняются только в новых анализах)")
