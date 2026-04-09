@@ -1908,19 +1908,14 @@ with st.sidebar:
     )
     st.session_state["use_gemini"] = "Gemini" in _model_choice
     if st.session_state.get("use_gemini"):
-        # Скрытый выбор модели — авто выбор лучшей
-        _gem_tier = st.radio("Gemini режим", 
-            ["⚡ Стандарт (gemini-2.5-flash)", "🔬 Продвинутый (gemini-2.5-pro)"],
-            horizontal=True, key="gemini_tier_sel", label_visibility="collapsed",
-            help="Стандарт — быстро и дёшево. Продвинутый — ближе к Claude по качеству.")
-        _gem_model = "gemini-2.5-pro" if "про" in _gem_tier.lower() or "pro" in _gem_tier.lower() else "gemini-2.5-flash"
-        st.session_state["gemini_model"] = _gem_model
         _key_for_check = st.secrets.get("GEMINI_API_KEY","")
         if _key_for_check:
-            _actual_model = get_best_gemini_model(_key_for_check, prefer_pro=("про" in _gem_tier.lower()))
-            st.caption(f"✅ Лучшая доступная: `{_actual_model}`")
+            _actual_model = get_best_gemini_model(_key_for_check, prefer_pro=False)
+            st.session_state["gemini_model"] = _actual_model
+            st.caption(f"✅ Авто: `{_actual_model}`")
         else:
-            st.caption(f"Модель: `{_gem_model}`")
+            st.session_state["gemini_model"] = "gemini-2.5-flash"
+            st.caption("⚠️ Добавь GEMINI_API_KEY в Secrets")
 
     st.divider()
     st.markdown("**🔑 API**")
@@ -1929,10 +1924,11 @@ with st.sidebar:
         if st.button("🔍 Проверить Gemini tier", key="btn_check_gemini", use_container_width=True):
             with st.spinner("Проверяю..."):
                 _tier_result = check_gemini_tier(_gkey_check)
+                _avail = get_available_gemini_models(_gkey_check)
             if _tier_result.get("tier") == "free" or _tier_result.get("status") == "429":
                 st.error("🆓 Бесплатный — будут лимиты 429")
-            elif _tier_result.get("status") in ("ok","ok_paid","ok_paid"):
-                st.success("✅ Платный — лимиты высокие")
+            elif _tier_result.get("status") in ("ok","ok_paid"):
+                st.success(f"✅ Платный — лучшая модель: `{get_best_gemini_model(_gkey_check)}`")
             else:
                 st.warning(f"⚠️ {_tier_result.get('msg','?')}")
     _ac1, _ac2 = st.columns(2)
@@ -1949,7 +1945,8 @@ with st.sidebar:
                 _r = requests.get(f"https://generativelanguage.googleapis.com/{_ep}/models?key={_key}", timeout=10)
                 if _r.ok:
                     _names = [m["name"] for m in _r.json().get("models",[]) if "generateContent" in m.get("supportedGenerationMethods",[])]
-                    st.info(f"[{_ep}] Доступно {len(_names)} моделей:\n" + "\n".join(_names[:20]))
+                    _best = get_best_gemini_model(_key)
+                    st.success(f"✅ Gemini OK — {len(_names)} моделей доступно, используем: `{_best}`")
                     break
                 else:
                     st.warning(f"[{_ep}] {_r.status_code}: {_r.text[:100]}")
