@@ -3239,7 +3239,11 @@ def health_card():
 
 # ── Pages dispatch ────────────────────────────────────────────────────────────
 if page == "🏠 Обзор":
-    st.title("🏠 Обзор листинга")
+    _rc1, _rc2 = st.columns([8,1])
+    with _rc1: st.title("🏠 Обзор листинга")
+    with _rc2:
+        if st.button("🔄", key="refresh_overview", help="Обновить страницу"):
+            st.rerun()
     with st.expander("ℹ️ Как читать эту страницу", expanded=False):
         st.markdown("""
 **Health Score** — итоговая оценка листинга. 🟢 75%+ = сильный, 🟡 50-74% = есть проблемы, 🔴 <50% = критично.
@@ -3568,7 +3572,11 @@ Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else '
 
 # ══ Фото ══════════════════════════════════════════════════════════════════════
 elif page == "📸 Фото":
-    st.title("📸 Vision анализ фотографий")
+    _rc1, _rc2 = st.columns([8,1])
+    with _rc1: st.title("📸 Vision анализ фотографий")
+    with _rc2:
+        if st.button("🔄", key="refresh_vision", help="Обновить страницу"):
+            st.rerun()
     with st.expander("ℹ️ Как читать Vision анализ", expanded=False):
         st.markdown("""
 **Оценки фото (1-10):** 9-10 = отлично, 7-8 = хорошо, 5-6 = улучшить, 1-4 = заменить.
