@@ -670,17 +670,25 @@ def anthropic_vision(content_blocks, max_tokens=3000, system=None):
     if system: payload["system"] = system
     return _anthropic_post(payload)
 
-# Актуальные модели Gemini (апрель 2026) — реально доступные на paid tier
+# Актуальные модели Gemini (апрель 2026)
 GEMINI_FLASH_MODELS = [
-    "gemini-2.5-flash",          # лучший доступный flash
-    "gemini-2.0-flash-001",      # стабильный
-    "gemini-2.0-flash",          # fallback
-    "gemini-2.0-flash-lite",     # быстрый fallback
+    "gemini-3.1-flash-preview",   # новейший flash
+    "gemini-flash-latest",        # auto-latest alias
+    "gemini-2.5-flash",           # стабильный
+    "gemini-2.0-flash-001",
+    "gemini-2.0-flash",
 ]
 GEMINI_PRO_MODELS = [
-    "gemini-2.5-pro",            # лучший доступный pro
-    "gemini-2.5-flash",          # fallback если pro недоступен
+    "gemini-3.1-pro-preview",     # новейший pro
+    "gemini-pro-latest",          # auto-latest alias
+    "gemini-2.5-pro",             # стабильный pro
+    "gemini-2.5-flash",           # fallback
     "gemini-2.0-flash",
+]
+GEMINI_IMAGE_MODELS = [
+    "gemini-3.1-flash-image-preview",  # Nano Banana 2 — генерация фото
+    "gemini-2.5-flash-image",          # стабильный
+    "gemini-2.0-flash-exp-image-generation",
 ]
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -1578,11 +1586,10 @@ Requirements:
         # Try models in order: latest → fallback
         # Актуальные модели на апрель 2026:
         # gemini-3-pro-image-preview ОТКЛЮЧЁН 9 марта 2026
-        _models_to_try = [
-            "gemini-3.1-flash-image-preview",        # Nano Banana 2 (февраль 2026, новейший)
-            "gemini-2.5-flash-image",                # Nano Banana (стабильный, бесплатный)
-            "gemini-2.0-flash-exp-image-generation", # fallback
-        ]
+        # Берём из глобального списка если доступен
+        _img_key = st.secrets.get("GEMINI_API_KEY","")
+        _avail_img = get_available_gemini_models(_img_key) if _img_key else []
+        _models_to_try = [m for m in GEMINI_IMAGE_MODELS if m in _avail_img] or GEMINI_IMAGE_MODELS
         _r = None
         _last_err = ""
         for _model_id in _models_to_try:
