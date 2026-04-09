@@ -711,19 +711,51 @@ def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=
     parts.append({"text": prompt})
     payload = {"contents": [{"parts": parts}],
                "generationConfig": {"maxOutputTokens": max_tokens}}
+    import time as _time
     _last_err = ""
-    for attempt in range(3):
+    _waits = [15, 30, 60]  # короткие паузы для бесплатного tier
+    for attempt in range(4):
         r = requests.post(url, json=payload, timeout=120)
-        _last_err = f"{r.status_code}: {r.text[:300]}"
-        st.toast(f"🔍 Gemini Vision attempt {attempt+1}: {r.status_code}")
+        _last_err = f"{r.status_code}: {r.text[:200]}"
         if r.ok:
             return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        if r.status_code in (429, 503, 500):
-            wait = 60*(attempt+1)
-            st.toast(f"⏳ Gemini Vision {r.status_code}, жду {wait}с...")
-            import time; time.sleep(wait); continue
-        raise Exception(f"Gemini Vision {_last_err}")
-    raise Exception(f"Gemini Vision исчерпан: {_last_err}")
+        if r.status_code == 429:
+            wait = _waits[min(attempt, len(_waits)-1)]
+            st.toast(f"⏳ Gemini лимит, пауза {wait}с (попытка {attempt+1}/4)...")
+            _time.sleep(wait)
+            continue
+        if r.status_code in (503, 500):
+            _time.sleep(10)
+            continue
+        raise Exception(f"Gemini Vision ошибка: {_last_err}")
+    raise Exception(f"Gemini Vision: превышен лимит запросов. Попробуй через минуту или переключись на Claude.")
+
+
+def check_gemini_tier(api_key):
+    """Check if Gemini API key is free or paid tier"""
+    try:
+        import requests as _rq
+        # Simple test request - send minimal payload
+        _r = _rq.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+            json={"contents": [{"parts": [{"text": "hi"}]}],
+                  "generationConfig": {"maxOutputTokens": 5}},
+            timeout=15
+        )
+        if _r.ok:
+            # Check rate limit headers
+            _rpm = _r.headers.get("x-ratelimit-limit-requests","")
+            _remaining = _r.headers.get("x-ratelimit-remaining-requests","")
+            return {"status": "ok", "rpm": _rpm, "remaining": _remaining,
+                    "tier": "paid" if _rpm and int(_rpm or 0) > 15 else "likely_free"}
+        elif _r.status_code == 429:
+            return {"status": "429", "tier": "free", "msg": "Rate limit — бесплатный"}
+        elif _r.status_code == 400:
+            return {"status": "ok_paid", "tier": "paid", "msg": "Ключ рабочий"}
+        else:
+            return {"status": "error", "code": _r.status_code, "msg": _r.text[:100]}
+    except Exception as e:
+        return {"status": "exception", "msg": str(e)}
 
 def ai_vision_call(prompt, image_b64=None, image_url=None, media_type="image/jpeg", max_tokens=500, system=None):
     if st.session_state.get("use_gemini"):
@@ -930,6 +962,8 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
         import time; time.sleep(5)
         _fmt = "Тип: [тип]\nОценка: X/10\nСильная сторона: [текст]\nСлабость: [текст]\nДействие: [текст]"
         for _i, _img in enumerate(images):
+            if _i > 0: 
+                import time as _tg; _tg.sleep(8)  # пауза Gemini free tier
             if _i > 0: time.sleep(8)
             log(f"👁️ Gemini фото {_i+1}/{len(images)}...")
             if _i == 0:
@@ -943,6 +977,8 @@ IMPORTANT: Look carefully — are there any items in the photo that are NOT the 
             results.append(f"PHOTO_BLOCK_{_i+1}\n{_blk}")
     else:
         for i, img in enumerate(images):
+            if i > 0 and st.session_state.get("use_gemini"):
+                import time as _tg2; _tg2.sleep(8)
             log(f"👁️ Фото {i+1}/{len(images)} {'🔵' * (i+1)}{'⚪' * (len(images)-i-1)}")
             if i == 0:
                 photo_intro = intro
@@ -1445,88 +1481,91 @@ def db_lookup_asin(asin):
 
 
 def claid_generate_lifestyle(image_b64, scene="outdoor lifestyle", media_type="image/jpeg"):
-    """Generate lifestyle background via Claid.ai:
-    Step 1: upload+remove bg → get tmp_url
-    Step 2: AI Background API with scene prompt
+    """Generate lifestyle photo via Gemini Nano Banana Pro (gemini-3-pro-image-preview).
+    Step 1: Remove background (keep product/person)
+    Step 2: Generate new scene with product placed in it
     """
-    claid_key = st.secrets.get("CLAID_API_KEY","")
-    if not claid_key: return None, "CLAID_API_KEY не найден в Secrets"
+    gemini_key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("GOOGLE_API_KEY","")
+    if not gemini_key: return None, "GEMINI_API_KEY не найден в Secrets"
     try:
-        import base64 as _b64c2
-        import io as _io2
-        import json as _json2
-        _img_bytes = _b64c2.b64decode(image_b64)
-        _ext = "jpg" if "jpeg" in media_type else "png"
+        import base64 as _b64g
+        import io as _iog
+        import json as _jsong
 
-        # Step 1: Upload + remove background → get public tmp_url
-        _step1 = requests.post(
-            "https://api.claid.ai/v1/image/edit/upload",
-            headers={"Authorization": f"Bearer {claid_key}"},
-            files={
-                "file": (f"product.{_ext}", _io2.BytesIO(_img_bytes), media_type),
-                "data": (None, _json2.dumps({
-                    "operations": {"background": {"remove": {"category": "products"}}},
-                    "output": {"format": "png"}
-                }), "application/json")
-            },
-            timeout=60
-        )
-        if not _step1.ok:
-            return None, f"Step1 error {_step1.status_code}: {_step1.text[:300]}"
-        _s1 = _step1.json()
-        _bg_removed_url = (_s1.get("data",{}).get("output",{}).get("tmp_url") or
-                           _s1.get("data",{}).get("output",{}).get("url",""))
-        if not _bg_removed_url:
-            return None, f"No URL after bg removal: {str(_s1)[:300]}"
+        _img_bytes = _b64g.b64decode(image_b64)
+        _ext = "jpeg" if "jpeg" in media_type else "png"
 
-        # Step 2: AI Background generation via /v1-ea/scene/create
-        _step2 = requests.post(
-            "https://api.claid.ai/v1-ea/scene/create",
-            headers={"Authorization": f"Bearer {claid_key}",
-                     "Content-Type": "application/json"},
-            json={
-                "object": {
-                    "image_url": _bg_removed_url,
-                    "placement_type": "original"
-                },
-                "scene": {
-                    "prompt": scene,
-                    "model": "v2",
-                    "negative_prompt": "text, watermark, logo, low quality, blurry, cartoon, cropped person, cut off",
-                    "preference": "optimal",
-                    "aspect_ratio": "4:5"
-                },
-                "output": {"number_of_images": 2, "format": "jpeg"}
-            },
-            timeout=90
-        )
-        if not _step2.ok:
-            return None, f"Step2 error {_step2.status_code}: {_step2.text[:400]}"
-        _s2 = _step2.json()
-        # Extract result URLs — output is list of dicts with tmp_url
-        _urls = []
-        _data = _s2.get("data", {})
-        # data.output is a list of image objects
-        _output_list = _data.get("output", []) if isinstance(_data, dict) else []
-        if isinstance(_output_list, list):
-            for _item in _output_list:
-                if isinstance(_item, dict):
-                    _u = _item.get("tmp_url") or _item.get("url","")
-                    if _u: _urls.append(_u)
-        # Fallback: search recursively for tmp_url
-        if not _urls:
-            import json as _j
-            _raw = _j.dumps(_s2)
-            import re as _re
-            _found = _re.findall(r'"tmp_url":\s*"([^"]+)"', _raw)
-            _urls = [u for u in _found if u and u != "null"]
-        if _urls: return _urls, None
-        return None, f"No output URLs: {str(_s2)[:400]}"
+        # Gemini API — image editing with scene description
+        _prompt = f"""You are a professional Amazon product photographer.
+
+Take this product image and place it in a new scene: {scene}
+
+Requirements:
+- Keep the product/person exactly as-is (same pose, clothing, proportions)
+- Replace only the background with the new scene
+- Maintain professional product photography quality
+- The result should look like a real lifestyle photo
+- Amazon-ready image quality
+- Do NOT add text, logos or watermarks"""
+
+        _payload = {
+            "contents": [{
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": media_type,
+                            "data": image_b64
+                        }
+                    },
+                    {"text": _prompt}
+                ]
+            }],
+            "generationConfig": {
+                "responseModalities": ["IMAGE", "TEXT"]
+            }
+        }
+
+        # Try models in order: latest → fallback
+        # Актуальные модели на апрель 2026:
+        # gemini-3-pro-image-preview ОТКЛЮЧЁН 9 марта 2026
+        _models_to_try = [
+            "gemini-3.1-flash-image-preview",        # Nano Banana 2 (февраль 2026, новейший)
+            "gemini-2.5-flash-image",                # Nano Banana (стабильный, бесплатный)
+            "gemini-2.0-flash-exp-image-generation", # fallback
+        ]
+        _r = None
+        _last_err = ""
+        for _model_id in _models_to_try:
+            _r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{_model_id}:generateContent?key={gemini_key}",
+                headers={"Content-Type": "application/json"},
+                json=_payload,
+                timeout=120
+            )
+            if _r.ok:
+                break
+            _last_err = f"{_model_id}: {_r.status_code}"
+
+        if not _r or not _r.ok:
+            return None, f"Gemini error: {_last_err} | {_r.text[:200] if _r else 'no response'}"
+
+        _result = _r.json()
+        # Extract base64 images from response
+        _imgs_b64 = []
+        for _cand in _result.get("candidates", []):
+            for _part in _cand.get("content",{}).get("parts",[]):
+                if _part.get("inlineData",{}).get("mimeType","").startswith("image"):
+                    _imgs_b64.append({
+                        "b64": _part["inlineData"]["data"],
+                        "mt": _part["inlineData"]["mimeType"]
+                    })
+        if _imgs_b64:
+            return _imgs_b64, None
+        return None, f"No images in response: {str(_result)[:300]}"
     except Exception as e:
         return None, str(e)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 def run_analysis(our_url, competitor_urls, log, prog=None):
     _steps_done = []
     def _prog(pct, text):
@@ -1821,7 +1860,7 @@ with st.sidebar:
         _gem_model = st.selectbox("Gemini модель", [
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
-            "gemini-2.0-flash",
+            "gemini-2.5-flash-preview-04-17",
             "gemini-2.0-flash-lite",
             "gemini-2.5-pro",
         ], key="gemini_model_sel", label_visibility="collapsed")
@@ -1829,6 +1868,17 @@ with st.sidebar:
 
     st.divider()
     st.markdown("**🔑 API**")
+    _gkey_check = st.secrets.get("GEMINI_API_KEY","")
+    if _gkey_check:
+        if st.button("🔍 Проверить Gemini tier", key="btn_check_gemini", use_container_width=True):
+            with st.spinner("Проверяю..."):
+                _tier_result = check_gemini_tier(_gkey_check)
+            if _tier_result.get("tier") == "free" or _tier_result.get("status") == "429":
+                st.error("🆓 Бесплатный — будут лимиты 429")
+            elif _tier_result.get("status") in ("ok","ok_paid","ok_paid"):
+                st.success("✅ Платный — лимиты высокие")
+            else:
+                st.warning(f"⚠️ {_tier_result.get('msg','?')}")
     _ac1, _ac2 = st.columns(2)
     if _ac1.button("🧪 Claude", key="api_test"):
         try:
@@ -3595,9 +3645,9 @@ SCORE: [0-100]%
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
-    _claid_key = st.secrets.get("CLAID_API_KEY","")
-    if _claid_key:
-        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+    _claid_key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:  # GEMINI_API_KEY
+        with st.expander("🎨 AI-генерация lifestyle фото — Gemini Nano Banana Pro", expanded=False):
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
@@ -3671,7 +3721,15 @@ SCORE: [0-100]%
                 _cr = st.session_state["_claid_results"]
                 st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
-                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                for _i, (_rcol, _rimg) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        if isinstance(_rimg, dict) and _rimg.get("b64"):
+                            import base64 as _b64dl
+                            _rb64=_rimg["b64"]; _rmt=_rimg.get("mt","image/jpeg")
+                            st.image(f"data:{_rmt};base64,{_rb64}", use_container_width=True)
+                            st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
+                        elif isinstance(_rimg, str):
+                            st.image(_rimg, use_container_width=True)
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
                         st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
@@ -4001,9 +4059,9 @@ SCORE: [0-100]%
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
-    _claid_key = st.secrets.get("CLAID_API_KEY","")
-    if _claid_key:
-        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+    _claid_key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:  # GEMINI_API_KEY
+        with st.expander("🎨 AI-генерация lifestyle фото — Gemini Nano Banana Pro", expanded=False):
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
@@ -4077,7 +4135,15 @@ SCORE: [0-100]%
                 _cr = st.session_state["_claid_results"]
                 st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
-                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                for _i, (_rcol, _rimg) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        if isinstance(_rimg, dict) and _rimg.get("b64"):
+                            import base64 as _b64dl
+                            _rb64=_rimg["b64"]; _rmt=_rimg.get("mt","image/jpeg")
+                            st.image(f"data:{_rmt};base64,{_rb64}", use_container_width=True)
+                            st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
+                        elif isinstance(_rimg, str):
+                            st.image(_rimg, use_container_width=True)
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
                         st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
@@ -4346,9 +4412,9 @@ SCORE: [0-100]%
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
-    _claid_key = st.secrets.get("CLAID_API_KEY","")
-    if _claid_key:
-        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+    _claid_key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:  # GEMINI_API_KEY
+        with st.expander("🎨 AI-генерация lifestyle фото — Gemini Nano Banana Pro", expanded=False):
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
@@ -4422,7 +4488,15 @@ SCORE: [0-100]%
                 _cr = st.session_state["_claid_results"]
                 st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
-                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                for _i, (_rcol, _rimg) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        if isinstance(_rimg, dict) and _rimg.get("b64"):
+                            import base64 as _b64dl
+                            _rb64=_rimg["b64"]; _rmt=_rimg.get("mt","image/jpeg")
+                            st.image(f"data:{_rmt};base64,{_rb64}", use_container_width=True)
+                            st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
+                        elif isinstance(_rimg, str):
+                            st.image(_rimg, use_container_width=True)
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
                         st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
@@ -4776,9 +4850,9 @@ SCORE: [0-100]%
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
-    _claid_key = st.secrets.get("CLAID_API_KEY","")
-    if _claid_key:
-        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+    _claid_key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:  # GEMINI_API_KEY
+        with st.expander("🎨 AI-генерация lifestyle фото — Gemini Nano Banana Pro", expanded=False):
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
@@ -4852,7 +4926,15 @@ SCORE: [0-100]%
                 _cr = st.session_state["_claid_results"]
                 st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
-                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                for _i, (_rcol, _rimg) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        if isinstance(_rimg, dict) and _rimg.get("b64"):
+                            import base64 as _b64dl
+                            _rb64=_rimg["b64"]; _rmt=_rimg.get("mt","image/jpeg")
+                            st.image(f"data:{_rmt};base64,{_rb64}", use_container_width=True)
+                            st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
+                        elif isinstance(_rimg, str):
+                            st.image(_rimg, use_container_width=True)
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
                         st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
@@ -5416,9 +5498,9 @@ SCORE: [0-100]%
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
-    _claid_key = st.secrets.get("CLAID_API_KEY","")
-    if _claid_key:
-        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+    _claid_key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:  # GEMINI_API_KEY
+        with st.expander("🎨 AI-генерация lifestyle фото — Gemini Nano Banana Pro", expanded=False):
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
@@ -5492,7 +5574,15 @@ SCORE: [0-100]%
                 _cr = st.session_state["_claid_results"]
                 st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
-                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                for _i, (_rcol, _rimg) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        if isinstance(_rimg, dict) and _rimg.get("b64"):
+                            import base64 as _b64dl
+                            _rb64=_rimg["b64"]; _rmt=_rimg.get("mt","image/jpeg")
+                            st.image(f"data:{_rmt};base64,{_rb64}", use_container_width=True)
+                            st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
+                        elif isinstance(_rimg, str):
+                            st.image(_rimg, use_container_width=True)
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
                         st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
@@ -6434,9 +6524,9 @@ SCORE: [0-100]%
                 st.rerun()
 
     # ── Claid AI Photo Generator ──────────────────────────────────────────────
-    _claid_key = st.secrets.get("CLAID_API_KEY","")
-    if _claid_key:
-        with st.expander("🎨 AI-генерация lifestyle фото — Claid.ai", expanded=False):
+    _claid_key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("CLAID_API_KEY","")
+    if _claid_key:  # GEMINI_API_KEY
+        with st.expander("🎨 AI-генерация lifestyle фото — Gemini Nano Banana Pro", expanded=False):
             st.caption("Выбери любое фото из анализа или загрузи своё → AI создаст lifestyle сцену")
             _claid_col1, _claid_col2 = st.columns([3,2])
             with _claid_col1:
@@ -6510,7 +6600,15 @@ SCORE: [0-100]%
                 _cr = st.session_state["_claid_results"]
                 st.markdown(f"**🖼️ Результат ({len(_cr)} фото):**")
                 _rc = st.columns(min(len(_cr), 4))
-                for _i, (_rcol, _rurl) in enumerate(zip(_rc, _cr)):
+                for _i, (_rcol, _rimg) in enumerate(zip(_rc, _cr)):
+                    with _rcol:
+                        if isinstance(_rimg, dict) and _rimg.get("b64"):
+                            import base64 as _b64dl
+                            _rb64=_rimg["b64"]; _rmt=_rimg.get("mt","image/jpeg")
+                            st.image(f"data:{_rmt};base64,{_rb64}", use_container_width=True)
+                            st.download_button(f"⬇️ #{_i+1}", _b64dl.b64decode(_rb64), f"lifestyle_{_i+1}.jpg", "image/jpeg", key=f"dl_img_{_i}", use_container_width=True)
+                        elif isinstance(_rimg, str):
+                            st.image(_rimg, use_container_width=True)
                     with _rcol:
                         st.image(_rurl, use_container_width=True)
                         st.markdown(f'<a href="{_rurl}" target="_blank"><button style="width:100%;padding:4px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.72rem">⬇️ Скачать #{_i+1}</button></a>', unsafe_allow_html=True)
