@@ -2067,13 +2067,43 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                 _oft = "🔵 НАШ" if _of["type"]=="наш" else "🔴 Конкурент"
                 _ofmp = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}.get(_of.get("marketplace","com"),"🌍")
                 _ofdate = _of["date"].strftime("%d.%m.%Y") if _of.get("date") else "—"
-                st.markdown(
-                    f'<div style="background:#0f172a;border-left:3px solid {_ofc};border-radius:6px;padding:7px 12px;margin-top:3px;display:flex;justify-content:space-between;align-items:center">' +
-                    f'<div><span style="font-size:0.75rem;font-weight:700;color:{_ofc}">{_oft} {_ofmp}</span>' +
-                    f'<span style="font-size:0.7rem;color:#64748b;margin-left:8px">{_ofdate}</span>' +
-                    f'<div style="font-size:0.75rem;color:#94a3b8">{str(_of.get("title") or "")[:50]}</div></div>' +
-                    f'<div style="font-size:1.2rem;font-weight:800;color:{_ofc}">{_of["score"]}%</div></div>',
-                    unsafe_allow_html=True)
+                _oh_c1, _oh_c2 = st.columns([5,1])
+                with _oh_c1:
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-left:3px solid {_ofc};border-radius:6px;padding:7px 12px;margin-top:3px;display:flex;justify-content:space-between;align-items:center">' +
+                        f'<div><span style="font-size:0.75rem;font-weight:700;color:{_ofc}">{_oft} {_ofmp}</span>' +
+                        f'<span style="font-size:0.7rem;color:#64748b;margin-left:8px">{_ofdate}</span>' +
+                        f'<div style="font-size:0.75rem;color:#94a3b8">{str(_of.get("title") or "")[:50]}</div></div>' +
+                        f'<div style="font-size:1.2rem;font-weight:800;color:{_ofc}">{_of["score"]}%</div></div>',
+                        unsafe_allow_html=True)
+                with _oh_c2:
+                    if st.button("📂", key="btn_open_our_hist", help="Открыть этот анализ", use_container_width=True):
+                        _conn_oh = get_db()
+                        if _conn_oh:
+                            try:
+                                _cur_oh = _conn_oh.cursor()
+                                _cur_oh.execute("""SELECT result_json, our_data_json, images_json, aplus_img_urls_json, aplus_vision_text
+                                    FROM listing_analysis WHERE (asin=%s OR our_data_json::text ILIKE %s)
+                                    AND listing_type='наш' ORDER BY analyzed_at DESC LIMIT 1""",
+                                    (_of["asin"], f'%{_of["asin"]}%'))
+                                _row_oh = _cur_oh.fetchone(); _conn_oh.close()
+                                if _row_oh:
+                                    if _row_oh[0]:
+                                        try: st.session_state["result"] = json.loads(_row_oh[0])
+                                        except: pass
+                                    if _row_oh[1]:
+                                        try: st.session_state["our_data"] = json.loads(_row_oh[1])
+                                        except: pass
+                                    if _row_oh[2]:
+                                        try: st.session_state["images"] = json.loads(_row_oh[2])
+                                        except: pass
+                                    if _row_oh[3]:
+                                        try: st.session_state["aplus_img_urls"] = json.loads(_row_oh[3])
+                                        except: pass
+                                    if _row_oh[4]: st.session_state["aplus_vision"] = _row_oh[4]
+                                    st.session_state["page"] = "🏠 Обзор"
+                                    st.rerun()
+                            except Exception as _oe: st.error(str(_oe)[:100])
             else:
                 st.markdown('<div style="font-size:0.72rem;color:#64748b;margin-top:2px">🆕 Новый листинг — ещё не анализировался</div>', unsafe_allow_html=True)
 
