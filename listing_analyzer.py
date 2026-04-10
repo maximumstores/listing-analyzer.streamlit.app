@@ -2725,8 +2725,9 @@ def page_history():
                     _cfl = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱"}.get(_cmp,"🌍")
                     _csc_c = "#22c55e" if _csc>=75 else ("#f59e0b" if _csc>=50 else ("#ef4444" if _csc>0 else "#94a3b8"))
                     _sc_str = f'<span style="font-weight:700;color:{_csc_c}">{_csc}%</span>' if _csc else ""
+                    _asin_link = f'<a href="https://www.amazon.{_cmp}/dp/{_cas}" target="_blank" style="color:#3b82f6;text-decoration:none;font-family:monospace;font-size:0.8rem">{_cas} ↗</a>' if _cas else ""
                     st.markdown(
-                        f'{_cfl} • **{_cn}**' + (f' `{_cas}`' if _cas else "") + (f' — {_sc_str}' if _sc_str else ""),
+                        f'{_cfl} • **{_cn}** {_asin_link}' + (f' — {_sc_str}' if _sc_str else ""),
                         unsafe_allow_html=True)
         with _ci4:
             if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True, type="primary"):
