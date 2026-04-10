@@ -222,10 +222,10 @@ def db_all_asins():
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT DISTINCT ON (asin) asin, our_title, overall_score, analyzed_at, listing_type,
+            SELECT asin, our_title, overall_score, analyzed_at, listing_type,
                    COALESCE(marketplace,'com') as marketplace, our_data_json
             FROM listing_analysis
-            ORDER BY asin, analyzed_at DESC
+            ORDER BY analyzed_at DESC
         """)
         rows = cur.fetchall()
         conn.close()
@@ -240,14 +240,15 @@ def db_all_asins():
                         _img = next((u for u in _imgs if isinstance(u,str) and u.startswith("http") and "_SR" not in u and "_SS4" not in u), "")
                 except: pass
             # Extract model used from our_data_json
-            _model_used = ""
+            _model_used = ""; _duration = 0
             if r[6]:
                 try:
                     _od2 = json.loads(r[6])
                     _model_used = _od2.get("_model_used","")
+                    _duration = _od2.get("_analysis_duration_sec", 0)
                 except: pass
             result.append({"asin": r[0], "title": r[1], "score": r[2], "date": r[3],
-                           "type": r[4], "marketplace": r[5], "img": _img, "model_used": _model_used})
+                           "type": r[4], "marketplace": r[5], "img": _img, "model_used": _model_used, "duration": _duration})
         return result
     except Exception:
         return []
@@ -1609,8 +1610,9 @@ def db_lookup_asin(asin):
                 import json as _jl
                 _od = _jl.loads(r[6]) if r[6] else {}
                 _mu = _od.get("_model_used","")
+                _dur = _od.get("_analysis_duration_sec", 0)
             except: pass
-            result_list.append({"asin":r[0],"title":r[1],"score":r[2],"date":r[3],"type":r[4],"marketplace":r[5],"model_used":_mu})
+            result_list.append({"asin":r[0],"title":r[1],"score":r[2],"date":r[3],"type":r[4],"marketplace":r[5],"model_used":_mu,"duration":_dur})
         return result_list
     except Exception as e:
         return []
@@ -1848,7 +1850,9 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
     _prog(92, "💾 Сохраняю результаты в историю...")
     st.session_state['our_data'] = our_data
     st.session_state['comp_data_list'] = comp_data_list
-    _prog(98, "✅ Анализ завершён!")
+    _total_sec = int(__import__("time").time() - _t_analysis_begin)
+    our_data["_analysis_duration_sec"] = _total_sec
+    _prog(98, f"✅ Анализ завершён за {_total_sec//60}м {_total_sec%60}с!")
     return result, vision_result
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -2515,7 +2519,8 @@ def page_history():
     if not all_asins and not all_comps:
         st.info("История пуста — запусти первый анализ")
         return
-    _tab_our, _tab_comp, _tab_bench = st.tabs([f"🔵 Наши ({len(all_asins)})", f"🔴 Конкуренты ({len(all_comps)})", "📊 AI Benchmark"])
+    _unique_asins_count = len(set(a["asin"] for a in all_asins))
+    _tab_our, _tab_comp, _tab_bench = st.tabs([f"🔵 Наши ({_unique_asins_count})", f"🔴 Конкуренты ({len(all_comps)})", "📊 AI Benchmark"])
     with _tab_comp:
         if not all_comps:
             st.info("Конкуренты появятся после анализа с конкурентами")
@@ -2610,7 +2615,17 @@ def page_history():
     if _search and "/dp/" in _search:
         _sm2 = re.search(r'/dp/([A-Z0-9]{10})', _search, re.IGNORECASE)
         if _sm2: _search_asin = _sm2.group(1)
-    _filtered_asins = [a for a in all_asins if not _search or
+    # Keep all versions but deduplicate for display (latest per ASIN)
+    _seen_asins_d = set()
+    _deduped_asins = []
+    for _a in all_asins:
+        if _a["asin"] not in _seen_asins_d:
+            _seen_asins_d.add(_a["asin"])
+            _deduped_asins.append(_a)
+    _all_versions_map = {}  # asin -> list of all versions
+    for _a in all_asins:
+        _all_versions_map.setdefault(_a["asin"], []).append(_a)
+    _filtered_asins = [a for a in _deduped_asins if not _search or
         _search_asin.upper() in a["asin"].upper() or
         _search.lower() in (a.get("title") or "").lower()]
 
@@ -2658,6 +2673,7 @@ def page_history():
                 f' &nbsp;·&nbsp; {_date}' +
                 (f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if (_a.get("model_used","")).startswith("Gemini") else
                  (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if (_a.get("model_used","")).startswith("Claude") else "")) +
+                (f' &nbsp;·&nbsp; <span style="color:#64748b">⏱ {_a["duration"]//60}м {_a["duration"]%60}с</span>' if _a.get("duration",0)>0 else "") +
                 f'</div></div>', unsafe_allow_html=True)
         with _ci3:
             if _sc > 0:
@@ -2668,6 +2684,22 @@ def page_history():
                     f'</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<div style="text-align:center;padding:10px 0;color:#94a3b8">—</div>', unsafe_allow_html=True)
+        # Check if this ASIN has multiple analyses
+        _all_versions = _all_versions_map.get(_asin, [])
+        if len(_all_versions) > 1:
+            with st.container():
+                with st.expander(f"📅 {len(_all_versions)} анализа", expanded=False):
+                    for _v in _all_versions:
+                        _vd = _v["date"].strftime("%d.%m.%Y %H:%M") if _v.get("date") else "—"
+                        _vmu = _v.get("model_used","")
+                        _vsc = _v.get("score",0) or 0
+                        _vsc_c = "#22c55e" if _vsc>=75 else ("#f59e0b" if _vsc>=50 else "#ef4444")
+                        _vm_badge = f'<span style="color:#22c55e">⬤ Gemini</span>' if "Gemini" in _vmu else f'<span style="color:#a78bfa">⚡ Claude</span>' if "Claude" in _vmu else ""
+                        st.markdown(
+                            f'<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #f1f5f9">' +
+                            f'<span style="font-size:0.75rem;color:#64748b">{_vd} &nbsp; {_vm_badge}</span>' +
+                            f'<span style="font-size:0.8rem;font-weight:700;color:{_vsc_c}">{_vsc}%</span>' +
+                            f'</div>', unsafe_allow_html=True)
         with _ci4:
             if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True, type="primary"):
                 _conn_o = get_db()
