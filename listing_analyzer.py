@@ -223,7 +223,7 @@ def db_all_asins():
         cur = conn.cursor()
         cur.execute("""
             SELECT asin, our_title, overall_score, analyzed_at, listing_type,
-                   COALESCE(marketplace,'com') as marketplace, our_data_json
+                   COALESCE(marketplace,'com') as marketplace, our_data_json, competitors_json
             FROM listing_analysis
             ORDER BY analyzed_at DESC
         """)
@@ -240,15 +240,26 @@ def db_all_asins():
                         _img = next((u for u in _imgs if isinstance(u,str) and u.startswith("http") and "_SR" not in u and "_SS4" not in u), "")
                 except: pass
             # Extract model used from our_data_json
-            _model_used = ""; _duration = 0
+            _model_used = ""; _duration = 0; _comp_names = []
             if r[6]:
                 try:
                     _od2 = json.loads(r[6])
                     _model_used = _od2.get("_model_used","")
                     _duration = _od2.get("_analysis_duration_sec", 0)
                 except: pass
+            if r[7]:
+                try:
+                    _comps = json.loads(r[7])
+                    _comp_names = []
+                    for c in _comps[:3]:
+                        if isinstance(c, dict):
+                            _ct = (c.get("title","") or "")[:30]
+                            _ca2 = c.get("asin","")
+                            _comp_names.append({"title": _ct, "asin": _ca2})
+                except: pass
             result.append({"asin": r[0], "title": r[1], "score": r[2], "date": r[3],
-                           "type": r[4], "marketplace": r[5], "img": _img, "model_used": _model_used, "duration": _duration})
+                           "type": r[4], "marketplace": r[5], "img": _img, "model_used": _model_used,
+                           "duration": _duration, "competitors": _comp_names})
         return result
     except Exception:
         return []
@@ -2674,7 +2685,9 @@ def page_history():
                 (f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if (_a.get("model_used","")).startswith("Gemini") else
                  (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if (_a.get("model_used","")).startswith("Claude") else "")) +
                 (f' &nbsp;·&nbsp; <span style="color:#64748b">⏱ {_a["duration"]//60}м {_a["duration"]%60}с</span>' if _a.get("duration",0)>0 else "") +
-                f'</div></div>', unsafe_allow_html=True)
+                f'</div>' +
+                (f'<div style="font-size:0.72rem;color:#64748b;margin-top:2px">🏆 {len(_a["competitors"])} конкурента</div>' if _a.get("competitors") else "") +
+                f'</div>', unsafe_allow_html=True)
         with _ci3:
             if _sc > 0:
                 st.markdown(
@@ -2700,6 +2713,12 @@ def page_history():
                             f'<span style="font-size:0.75rem;color:#64748b">{_vd} &nbsp; {_vm_badge}</span>' +
                             f'<span style="font-size:0.8rem;font-weight:700;color:{_vsc_c}">{_vsc}%</span>' +
                             f'</div>', unsafe_allow_html=True)
+        if _a.get("competitors"):
+            with st.expander(f"🏆 {len(_a['competitors'])} конкурента в Benchmark", expanded=False):
+                for _ci in _a["competitors"]:
+                    _cn = _ci.get("title","") if isinstance(_ci,dict) else str(_ci)
+                    _cas = _ci.get("asin","") if isinstance(_ci,dict) else ""
+                    st.markdown(f"• **{_cn}**" + (f" `{_cas}`" if _cas else ""))
         with _ci4:
             if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True, type="primary"):
                 _conn_o = get_db()
@@ -3030,18 +3049,76 @@ if "result" not in st.session_state and page not in ["🔥 Топ ниши", "�
 <div style="font-size:1.5rem">{_ficon}</div>
 <div style="font-weight:600;color:#1e293b;margin-top:4px;white-space:pre-line">{_fname}</div>
 </div>''', unsafe_allow_html=True)
-    st.stop()
+    with _tab_bench:
+        st.markdown("### 📊 Сравнение результатов: Claude vs Gemini")
+        st.caption("Одни и те же ASINы — разные модели. Показывает реальную разницу в оценках.")
 
-r  = st.session_state.get("result", {})
-v  = st.session_state.get("vision", "")
-od = st.session_state.get("our_data", {})
-pi = od.get("product_information", {})
-cd = st.session_state.get("comp_data_list", [])
-imgs = st.session_state.get("images", [])
+        # Group by ASIN, collect scores per model
+        _bench_data = {}
+        for _a in all_asins:
+            _asin = _a["asin"]
+            _mu = _a.get("model_used","")
+            _sc = _a.get("score", 0) or 0
+            if _sc == 0: continue
+            if _asin not in _bench_data:
+                _bench_data[_asin] = {"title": (_a.get("title") or "")[:40], "claude": [], "gemini": []}
+            if "Gemini" in _mu:
+                _bench_data[_asin]["gemini"].append(_sc)
+            elif "Claude" in _mu:
+                _bench_data[_asin]["claude"].append(_sc)
+            else:
+                _bench_data[_asin]["claude"].append(_sc)  # assume Claude if unknown
+
+        # Filter ASINs with both models
+        _both = {k:v for k,v in _bench_data.items() if v["claude"] and v["gemini"]}
+        _only_one = {k:v for k,v in _bench_data.items() if not (v["claude"] and v["gemini"])}
+
+        if _both:
+            st.markdown("#### 🆚 Анализировали обеими моделями:")
+            _total_diff = []
+            for _asin, _d in _both.items():
+                _c_avg = sum(_d["claude"]) / len(_d["claude"])
+                _g_avg = sum(_d["gemini"]) / len(_d["gemini"])
+                _diff = _c_avg - _g_avg
+                _total_diff.append(_diff)
+                _diff_c = "#22c55e" if abs(_diff) < 5 else ("#f59e0b" if abs(_diff) < 15 else "#ef4444")
+                _diff_str = f"+{_diff:.0f}%" if _diff > 0 else f"{_diff:.0f}%"
+                st.markdown(
+                    f'<div style="background:#0f172a;border-radius:8px;padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">' +
+                    f'<div style="font-size:0.82rem;color:#e2e8f0">{_d["title"]}<br><span style="color:#64748b;font-size:0.72rem">{_asin}</span></div>' +
+                    f'<div style="display:flex;gap:20px;align-items:center">' +
+                    f'<div style="text-align:center"><div style="font-size:0.7rem;color:#64748b">⚡ Claude</div><div style="font-size:1.1rem;font-weight:700;color:#a78bfa">{_c_avg:.0f}%</div></div>' +
+                    f'<div style="text-align:center"><div style="font-size:0.7rem;color:#64748b">🟢 Gemini</div><div style="font-size:1.1rem;font-weight:700;color:#34d399">{_g_avg:.0f}%</div></div>' +
+                    f'<div style="text-align:center;min-width:60px"><div style="font-size:0.7rem;color:#64748b">Разница</div><div style="font-size:1.1rem;font-weight:700;color:{_diff_c}">{_diff_str}</div></div>' +
+                    f'</div></div>',
+                    unsafe_allow_html=True)
+            if _total_diff:
+                _avg_diff = sum(_total_diff) / len(_total_diff)
+                st.markdown("---")
+                if abs(_avg_diff) < 3:
+                    st.success(f"✅ Модели дают похожие результаты — разница {_avg_diff:+.1f}% в среднем")
+                elif _avg_diff > 0:
+                    st.info(f"⚡ Claude даёт на **{_avg_diff:.1f}%** выше оценку чем Gemini в среднем")
+                else:
+                    st.info(f"🟢 Gemini даёт на **{abs(_avg_diff):.1f}%** выше оценку чем Claude в среднем")
+        else:
+            st.info("Нет ASINов проанализированных обеими моделями. Запусти один и тот же листинг через Claude и Gemini для сравнения.")
+
+        if _only_one:
+            st.markdown("#### 📋 Только одной моделью:")
+            for _asin, _d in list(_only_one.items())[:10]:
+                _mu_label = "⚡ Claude" if _d["claude"] else "🟢 Gemini"
+                _sc_list = _d["claude"] or _d["gemini"]
+                _sc_avg = sum(_sc_list) / len(_sc_list)
+                st.markdown(f"- {_mu_label} &nbsp; **{_sc_avg:.0f}%** &nbsp; `{_asin}` {_d['title']}")
+
+
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PDF REPORT GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
+
 def generate_pdf_report(result, our_data, vision_text, images, asin, comp_data=None):
     import io, base64, re as _re
     from datetime import datetime
@@ -7594,72 +7671,6 @@ Title · Bullets · Описание · Фото · A+ · Отзывы · BSR ·
 - Для ежедневных ретестов → используй Gemini
 - Для клиентских отчётов → используй Claude
 """)
-
-    with _tab_bench:
-        st.markdown("### 📊 Сравнение результатов: Claude vs Gemini")
-        st.caption("Одни и те же ASINы — разные модели. Показывает реальную разницу в оценках.")
-
-        # Group by ASIN, collect scores per model
-        _bench_data = {}
-        for _a in all_asins:
-            _asin = _a["asin"]
-            _mu = _a.get("model_used","")
-            _sc = _a.get("score", 0) or 0
-            if _sc == 0: continue
-            if _asin not in _bench_data:
-                _bench_data[_asin] = {"title": (_a.get("title") or "")[:40], "claude": [], "gemini": []}
-            if "Gemini" in _mu:
-                _bench_data[_asin]["gemini"].append(_sc)
-            elif "Claude" in _mu:
-                _bench_data[_asin]["claude"].append(_sc)
-            else:
-                _bench_data[_asin]["claude"].append(_sc)  # assume Claude if unknown
-
-        # Filter ASINs with both models
-        _both = {k:v for k,v in _bench_data.items() if v["claude"] and v["gemini"]}
-        _only_one = {k:v for k,v in _bench_data.items() if not (v["claude"] and v["gemini"])}
-
-        if _both:
-            st.markdown("#### 🆚 Анализировали обеими моделями:")
-            _total_diff = []
-            for _asin, _d in _both.items():
-                _c_avg = sum(_d["claude"]) / len(_d["claude"])
-                _g_avg = sum(_d["gemini"]) / len(_d["gemini"])
-                _diff = _c_avg - _g_avg
-                _total_diff.append(_diff)
-                _diff_c = "#22c55e" if abs(_diff) < 5 else ("#f59e0b" if abs(_diff) < 15 else "#ef4444")
-                _diff_str = f"+{_diff:.0f}%" if _diff > 0 else f"{_diff:.0f}%"
-                st.markdown(
-                    f'<div style="background:#0f172a;border-radius:8px;padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">' +
-                    f'<div style="font-size:0.82rem;color:#e2e8f0">{_d["title"]}<br><span style="color:#64748b;font-size:0.72rem">{_asin}</span></div>' +
-                    f'<div style="display:flex;gap:20px;align-items:center">' +
-                    f'<div style="text-align:center"><div style="font-size:0.7rem;color:#64748b">⚡ Claude</div><div style="font-size:1.1rem;font-weight:700;color:#a78bfa">{_c_avg:.0f}%</div></div>' +
-                    f'<div style="text-align:center"><div style="font-size:0.7rem;color:#64748b">🟢 Gemini</div><div style="font-size:1.1rem;font-weight:700;color:#34d399">{_g_avg:.0f}%</div></div>' +
-                    f'<div style="text-align:center;min-width:60px"><div style="font-size:0.7rem;color:#64748b">Разница</div><div style="font-size:1.1rem;font-weight:700;color:{_diff_c}">{_diff_str}</div></div>' +
-                    f'</div></div>',
-                    unsafe_allow_html=True)
-            if _total_diff:
-                _avg_diff = sum(_total_diff) / len(_total_diff)
-                st.markdown("---")
-                if abs(_avg_diff) < 3:
-                    st.success(f"✅ Модели дают похожие результаты — разница {_avg_diff:+.1f}% в среднем")
-                elif _avg_diff > 0:
-                    st.info(f"⚡ Claude даёт на **{_avg_diff:.1f}%** выше оценку чем Gemini в среднем")
-                else:
-                    st.info(f"🟢 Gemini даёт на **{abs(_avg_diff):.1f}%** выше оценку чем Claude в среднем")
-        else:
-            st.info("Нет ASINов проанализированных обеими моделями. Запусти один и тот же листинг через Claude и Gemini для сравнения.")
-
-        if _only_one:
-            st.markdown("#### 📋 Только одной моделью:")
-            for _asin, _d in list(_only_one.items())[:10]:
-                _mu_label = "⚡ Claude" if _d["claude"] else "🟢 Gemini"
-                _sc_list = _d["claude"] or _d["gemini"]
-                _sc_avg = sum(_sc_list) / len(_sc_list)
-                st.markdown(f"- {_mu_label} &nbsp; **{_sc_avg:.0f}%** &nbsp; `{_asin}` {_d['title']}")
-
-
-
 # ══ Workflow ══════════════════════════════════════════════════════════════════
 elif page == "📋 Workflow":
     st.title("📋 Workflow — Pipeline листингов")
@@ -7698,3 +7709,11 @@ elif page == "📋 Workflow":
                     st.rerun()
                 else:
                     st.error("Ошибка сохранения")
+    st.stop()
+
+r  = st.session_state.get("result", {})
+v  = st.session_state.get("vision", "")
+od = st.session_state.get("our_data", {})
+pi = od.get("product_information", {})
+cd = st.session_state.get("comp_data_list", [])
+imgs = st.session_state.get("images", [])
