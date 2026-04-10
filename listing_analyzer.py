@@ -2140,8 +2140,9 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                         f'<div style="background:#f0f9ff;border-left:4px solid {_afc};border-radius:6px;'
                         f'padding:8px 12px;display:flex;justify-content:space-between;align-items:center">'
                         f'<div style="font-size:0.8rem">'
-                        f'<b style="color:{_afc}">{_aft}</b> · {_mp_flags3.get(_af.get("marketplace","com"),"🌍")} {_auto_asin} · {_afdate}<br>'
-                        f'<span style="color:#475569">{(_af.get("title") or "")[:60]}</span></div>'
+                        f'<b style="color:{_afc}">{_aft}</b> · {_mp_flags3.get(_af.get("marketplace","com"),"🌍")} {_auto_asin} · {_afdate}' +
+                        (f' · 🟢 Gemini' if _af.get("model_used","").startswith("Gemini") else (f' · ⚡ Claude' if _af.get("model_used","").startswith("Claude") else "")) +
+                        f'<br><span style="color:#475569">{(_af.get("title") or "")[:60]}</span></div>'
                         f'<div style="font-size:1.2rem;font-weight:800;color:{_afsc}">{_afs}%</div>'
                         f'</div>',
                         unsafe_allow_html=True)
