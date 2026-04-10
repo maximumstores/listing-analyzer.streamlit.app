@@ -2496,7 +2496,6 @@ def db_all_competitors():
             except: pass
         return result
     except: return []
-
 def page_history():
     st.title("📈 История анализов")
 
@@ -2534,6 +2533,10 @@ def page_history():
         return
     _unique_asins_count = len(set(a["asin"] for a in all_asins))
     _tab_our, _tab_comp, _tab_bench = st.tabs([f"🔵 Наши ({_unique_asins_count})", f"🔴 Конкуренты ({len(all_comps)})", "📊 AI Benchmark"])
+
+    # ══════════════════════════════════════════════════════════════════════
+    # TAB: Конкуренты
+    # ══════════════════════════════════════════════════════════════════════
     with _tab_comp:
         if not all_comps:
             st.info("Конкуренты появятся после анализа с конкурентами")
@@ -2551,7 +2554,6 @@ def page_history():
                 _csc_c = "#22c55e" if _csc>=75 else ("#f59e0b" if _csc>=50 else ("#ef4444" if _csc>0 else "#94a3b8"))
                 _csc_l = "Strong" if _csc>=75 else ("Needs Work" if _csc>=50 else ("Critical" if _csc>0 else "—"))
                 _cc1, _cc2, _cc3, _cc4, _cc5 = st.columns([1, 6, 2, 1.5, 0.8])
-                # Thumbnail
                 with _cc1:
                     _c_img_url = ""
                     if _ca.get("our_data_json"):
@@ -2577,7 +2579,7 @@ def page_history():
                         (f' · ⭐{_ca["rating"]}' if _ca.get("rating") else "") +
                         (f' · ({_ca["reviews"]} отз.)' if _ca.get("reviews") else "") +
                         f' · {_cdate}' +
-                        ((lambda od: f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if od and "Gemini" in od.get("_model_used","") else (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if od and od.get("_model_used") else ""))(json.loads(_ca["our_data_json"]) if _ca.get("our_data_json") else {})) +
+                        ((lambda od2: f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if od2 and "Gemini" in od2.get("_model_used","") else (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if od2 and od2.get("_model_used") else ""))(json.loads(_ca["our_data_json"]) if _ca.get("our_data_json") else {})) +
                         f'</div></div>',
                         unsafe_allow_html=True)
                 with _cc3:
@@ -2585,7 +2587,6 @@ def page_history():
                         st.markdown(f'<div style="text-align:center;padding:8px 0"><div style="font-size:1.5rem;font-weight:800;color:{_csc_c}">{_csc}%</div><div style="font-size:0.7rem;color:{_csc_c}">{_csc_l}</div></div>', unsafe_allow_html=True)
                 with _cc4:
                     if st.button("Open", key=f"comp_hist_open_{_cidx2}", use_container_width=True, type="primary"):
-                        # Load competitor into session
                         if _ca.get("result_json"):
                             try: st.session_state["comp_ai_0"] = json.loads(_ca["result_json"])
                             except: pass
@@ -2600,7 +2601,6 @@ def page_history():
                             except: pass
                         if _ca.get("aplus_vision"):
                             st.session_state["comp_aplus_vision_0"] = _ca["aplus_vision"]
-                        # Need result to unlock pages
                         if "result" not in st.session_state:
                             st.session_state["result"] = {"overall_score": 0}
                         st.session_state["_hist_loaded"] = _ca["asin"]
@@ -2617,92 +2617,151 @@ def page_history():
                                 st.rerun()
                             except Exception as _de: st.error(f"{_de}")
                 st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # TAB: Наши
+    # ══════════════════════════════════════════════════════════════════════
     with _tab_our:
         st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
         import pandas as pd
 
         _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
 
-        # Extract ASIN from URL if pasted in search
         _search_asin = _search
         if _search and "/dp/" in _search:
             _sm2 = re.search(r'/dp/([A-Z0-9]{10})', _search, re.IGNORECASE)
             if _sm2: _search_asin = _sm2.group(1)
-        # Keep all versions but deduplicate for display (latest per ASIN)
+
+        # Deduplicate — latest per ASIN
         _seen_asins_d = set()
         _deduped_asins = []
         for _a in all_asins:
             if _a["asin"] not in _seen_asins_d:
                 _seen_asins_d.add(_a["asin"])
                 _deduped_asins.append(_a)
-        _all_versions_map = {}  # asin -> list of all versions
+        _all_versions_map = {}
         for _a in all_asins:
             _all_versions_map.setdefault(_a["asin"], []).append(_a)
+
         _filtered_asins = [a for a in _deduped_asins if not _search or
-        _search_asin.upper() in a["asin"].upper() or
-        _search.lower() in (a.get("title") or "").lower()]
+            _search_asin.upper() in a["asin"].upper() or
+            _search.lower() in (a.get("title") or "").lower()]
 
         if st.session_state.get("_hist_select_asin"):
             _pre_asin = st.session_state.pop("_hist_select_asin")
         else:
             _pre_asin = None
 
+        # ── MAIN LOOP: render each ASIN card ──────────────────────────────
         for _idx, _a in enumerate(_filtered_asins):
             _sc = _a.get("score") or 0
-        _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else ("#ef4444" if _sc>0 else "#94a3b8"))
-        _sc_lbl = "Strong" if _sc>=75 else ("Needs Work" if _sc>=50 else ("Critical" if _sc>0 else "—"))
-        _title = (_a.get("title") or "")[:60]
-        _asin = _a["asin"]
-        _date = _a["date"].strftime("%d.%m.%Y %H:%M") if _a.get("date") else "—"
-        _mp = _a.get("marketplace","com")
-        _mp_flag = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱","com.be":"🇧🇪","com.mx":"🇲🇽","com.au":"🇦🇺"}.get(_mp,"🌍")
-        _ph_c = "#dcfce7" if _sc>=75 else ("#fef9c3" if _sc>=50 else ("#fee2e2" if _sc>0 else "#f1f5f9"))
-        _ph_tc = "#15803d" if _sc>=75 else ("#d97706" if _sc>=50 else ("#dc2626" if _sc>0 else "#94a3b8"))
-        _ph_letter = (_title[0] if len(_title)>0 else (_asin[0] if len(_asin)>0 else "?")).upper()
+            _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else ("#ef4444" if _sc>0 else "#94a3b8"))
+            _sc_lbl = "Strong" if _sc>=75 else ("Needs Work" if _sc>=50 else ("Critical" if _sc>0 else "—"))
+            _title = (_a.get("title") or "")[:60]
+            _asin = _a["asin"]
+            _date = _a["date"].strftime("%d.%m.%Y %H:%M") if _a.get("date") else "—"
+            _mp = _a.get("marketplace","com")
+            _mp_flag = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱","com.be":"🇧🇪","com.mx":"🇲🇽","com.au":"🇦🇺"}.get(_mp,"🌍")
+            _ph_c = "#dcfce7" if _sc>=75 else ("#fef9c3" if _sc>=50 else ("#fee2e2" if _sc>0 else "#f1f5f9"))
+            _ph_tc = "#15803d" if _sc>=75 else ("#d97706" if _sc>=50 else ("#dc2626" if _sc>0 else "#94a3b8"))
+            _ph_letter = (_title[0] if len(_title)>0 else (_asin[0] if len(_asin)>0 else "?")).upper()
 
-        _ci1, _ci2, _ci3, _ci4, _ci5 = st.columns([1, 6, 2, 1.5, 0.8])
-        with _ci1:
-            _img_url = _a.get("img","")
-            if _img_url:
+            _ci1, _ci2, _ci3, _ci4, _ci5 = st.columns([1, 6, 2, 1.5, 0.8])
+
+            with _ci1:
+                _img_url = _a.get("img","")
+                if _img_url:
+                    st.markdown(
+                        f'<img src="{_img_url}" width="56" height="56" '
+                        f'style="object-fit:cover;border-radius:8px;border:1px solid #e2e8f0" '
+                        f'onerror="this.parentNode.innerHTML=\'<div style=&quot;width:56px;height:56px;background:{_ph_c};border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:800;color:{_ph_tc}&quot;>{_ph_letter}</div>\'">', 
+                        unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        f'<div style="width:56px;height:56px;background:{_ph_c};border-radius:8px;'
+                        f'display:flex;align-items:center;justify-content:center;'
+                        f'font-size:1.4rem;font-weight:800;color:{_ph_tc}">'
+                        f'{_ph_letter}</div>', unsafe_allow_html=True)
+
+            with _ci2:
+                _display_title = _title if _title else f"ASIN: {_asin}"
                 st.markdown(
-                    f'<img src="{_img_url}" width="56" height="56" '
-                    f'style="object-fit:cover;border-radius:8px;border:1px solid #e2e8f0" '
-                    f'onerror="this.parentNode.innerHTML=\'<div style=&quot;width:56px;height:56px;background:{_ph_c};border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:800;color:{_ph_tc}&quot;>{_ph_letter}</div>\'">', 
-                    unsafe_allow_html=True)
-            else:
-                st.markdown(
-                    f'<div style="width:56px;height:56px;background:{_ph_c};border-radius:8px;'
-                    f'display:flex;align-items:center;justify-content:center;'
-                    f'font-size:1.4rem;font-weight:800;color:{_ph_tc}">'
-                    f'{_ph_letter}</div>', unsafe_allow_html=True)
-        with _ci2:
-            _display_title = _title if _title else f"ASIN: {_asin}"
-            st.markdown(
-                f'<div style="padding:6px 0">'
-                f'<div style="font-size:0.9rem;font-weight:600;color:#0f172a;line-height:1.3">{_display_title}</div>'
-                f'<div style="font-size:0.78rem;color:#64748b;margin-top:3px">'
-                f'{_mp_flag} &nbsp;·&nbsp; '
-                f'<a href="https://www.amazon.com/dp/{_asin}" target="_blank" style="color:#3b82f6;text-decoration:none">{_asin} ↗</a>'
-                f' &nbsp;·&nbsp; {_date}' +
-                (f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if (_a.get("model_used","")).startswith("Gemini") else
-                 (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if (_a.get("model_used","")).startswith("Claude") else "")) +
-                (f' &nbsp;·&nbsp; <span style="color:#64748b">⏱ {_a["duration"]//60}м {_a["duration"]%60}с</span>' if _a.get("duration",0)>0 else "") +
-                f'</div>' +
-                (f'<div style="font-size:0.72rem;color:#64748b;margin-top:2px">🏆 {len(_a["competitors"])} конкурента</div>' if _a.get("competitors") else "") +
-                f'</div>', unsafe_allow_html=True)
-        with _ci3:
-            if _sc > 0:
-                st.markdown(
-                    f'<div style="text-align:center;padding:8px 0">'
-                    f'<div style="font-size:1.5rem;font-weight:800;color:{_sc_c}">{_sc}%</div>'
-                    f'<div style="font-size:0.7rem;color:{_sc_c};font-weight:600">{_sc_lbl}</div>'
+                    f'<div style="padding:6px 0">'
+                    f'<div style="font-size:0.9rem;font-weight:600;color:#0f172a;line-height:1.3">{_display_title}</div>'
+                    f'<div style="font-size:0.78rem;color:#64748b;margin-top:3px">'
+                    f'{_mp_flag} &nbsp;·&nbsp; '
+                    f'<a href="https://www.amazon.com/dp/{_asin}" target="_blank" style="color:#3b82f6;text-decoration:none">{_asin} ↗</a>'
+                    f' &nbsp;·&nbsp; {_date}' +
+                    (f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if (_a.get("model_used","")).startswith("Gemini") else
+                     (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if (_a.get("model_used","")).startswith("Claude") else "")) +
+                    (f' &nbsp;·&nbsp; <span style="color:#64748b">⏱ {_a["duration"]//60}м {_a["duration"]%60}с</span>' if _a.get("duration",0)>0 else "") +
+                    f'</div>' +
+                    (f'<div style="font-size:0.72rem;color:#64748b;margin-top:2px">🏆 {len(_a["competitors"])} конкурента</div>' if _a.get("competitors") else "") +
                     f'</div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div style="text-align:center;padding:10px 0;color:#94a3b8">—</div>', unsafe_allow_html=True)
-        # Check if this ASIN has multiple analyses
-        _all_versions = _all_versions_map.get(_asin, [])
-        if len(_all_versions) > 1:
-            with st.container():
+
+            with _ci3:
+                if _sc > 0:
+                    st.markdown(
+                        f'<div style="text-align:center;padding:8px 0">'
+                        f'<div style="font-size:1.5rem;font-weight:800;color:{_sc_c}">{_sc}%</div>'
+                        f'<div style="font-size:0.7rem;color:{_sc_c};font-weight:600">{_sc_lbl}</div>'
+                        f'</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="text-align:center;padding:10px 0;color:#94a3b8">—</div>', unsafe_allow_html=True)
+
+            with _ci4:
+                if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True, type="primary"):
+                    _conn_o = get_db()
+                    if _conn_o:
+                        try:
+                            _cur_o = _conn_o.cursor()
+                            _cur_o.execute("""
+                                SELECT result_json, vision_text, competitors_json, our_data_json,
+                                       images_json, aplus_img_urls_json, aplus_vision_text
+                                FROM listing_analysis WHERE asin=%s AND overall_score>0
+                                ORDER BY overall_score DESC, analyzed_at DESC LIMIT 1
+                            """, (_asin,))
+                            _row_o = _cur_o.fetchone()
+                            _conn_o.close()
+                            if _row_o:
+                                st.session_state["result"] = json.loads(_row_o[0]) if _row_o[0] else {}
+                                st.session_state["vision"] = _row_o[1] or ""
+                                st.session_state["images"] = []
+                                if _row_o[2]:
+                                    _comps_o = json.loads(_row_o[2])
+                                    for _ci2o, _ch2 in enumerate(_comps_o):
+                                        st.session_state[f"comp_ai_{_ci2o}"] = {"overall_score": f"{_ch2.get('overall',0)}%"}
+                                if _row_o[3]:
+                                    try: st.session_state["our_data"] = json.loads(_row_o[3])
+                                    except: pass
+                                if _row_o[4]:
+                                    try: st.session_state["images"] = json.loads(_row_o[4])
+                                    except: pass
+                                if _row_o[5]:
+                                    try: st.session_state["aplus_img_urls"] = json.loads(_row_o[5])
+                                    except: pass
+                                st.session_state["aplus_vision"] = _row_o[6] or "" if len(_row_o) > 6 else ""
+                                st.session_state["_hist_loaded"] = _asin
+                                st.session_state["page"] = "🏠 Обзор"
+                                st.rerun()
+                        except Exception as _oe:
+                            st.error(f"Ошибка: {_oe}")
+
+            with _ci5:
+                if st.button("🗑️", key=f"hist_del_{_idx}", use_container_width=True, help="Удалить все записи этого ASIN"):
+                    _conn_d = get_db()
+                    if _conn_d:
+                        try:
+                            _cur_d = _conn_d.cursor()
+                            _cur_d.execute("DELETE FROM listing_analysis WHERE asin=%s", (_asin,))
+                            _conn_d.commit(); _conn_d.close()
+                            st.rerun()
+                        except Exception as _de:
+                            st.error(f"{_de}")
+
+            # Multiple versions expander
+            _all_versions = _all_versions_map.get(_asin, [])
+            if len(_all_versions) > 1:
                 with st.expander(f"📅 {len(_all_versions)} анализа", expanded=False):
                     for _vi, _v in enumerate(_all_versions):
                         _vd = _v["date"].strftime("%d.%m.%Y %H:%M") if _v.get("date") else "—"
@@ -2731,73 +2790,25 @@ def page_history():
                                         _conn_del.commit(); _conn_del.close()
                                         st.rerun()
                                     except Exception as _de: st.error(str(_de)[:80])
-        if _a.get("competitors"):
-            with st.expander(f"🏆 {len(_a['competitors'])} конкурента в Benchmark", expanded=False):
-                for _ci in _a["competitors"]:
-                    _cn  = _ci.get("title","") if isinstance(_ci,dict) else str(_ci)
-                    _cas = _ci.get("asin","") if isinstance(_ci,dict) else ""
-                    _csc = _ci.get("score",0) if isinstance(_ci,dict) else 0
-                    _cmp = _ci.get("marketplace","com") if isinstance(_ci,dict) else "com"
-                    _cfl = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱"}.get(_cmp,"🌍")
-                    _csc_c = "#22c55e" if _csc>=75 else ("#f59e0b" if _csc>=50 else ("#ef4444" if _csc>0 else "#94a3b8"))
-                    _sc_str = f'<span style="font-weight:700;color:{_csc_c}">{_csc}%</span>' if _csc else ""
-                    _asin_link = f'<a href="https://www.amazon.{_cmp}/dp/{_cas}" target="_blank" style="color:#3b82f6;text-decoration:none;font-family:monospace;font-size:0.8rem">{_cas} ↗</a>' if _cas else ""
-                    st.markdown(
-                        f'{_cfl} • **{_cn}** {_asin_link}' + (f' — {_sc_str}' if _sc_str else ""),
-                        unsafe_allow_html=True)
-        with _ci4:
-            if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True, type="primary"):
-                _conn_o = get_db()
-                if _conn_o:
-                    try:
-                        _cur_o = _conn_o.cursor()
-                        # ── ФИКС: загружаем aplus_vision_text ────────────────
-                        _cur_o.execute("""
-                            SELECT result_json, vision_text, competitors_json, our_data_json,
-                                   images_json, aplus_img_urls_json, aplus_vision_text
-                            FROM listing_analysis WHERE asin=%s AND overall_score>0
-                            ORDER BY overall_score DESC, analyzed_at DESC LIMIT 1
-                        """, (_asin,))
-                        _row_o = _cur_o.fetchone()
-                        _conn_o.close()
-                        if _row_o:
-                            st.session_state["result"] = json.loads(_row_o[0]) if _row_o[0] else {}
-                            st.session_state["vision"] = _row_o[1] or ""
-                            st.session_state["images"] = []
-                            if _row_o[2]:
-                                _comps_o = json.loads(_row_o[2])
-                                for _ci2o, _ch2 in enumerate(_comps_o):
-                                    st.session_state[f"comp_ai_{_ci2o}"] = {"overall_score": f"{_ch2.get('overall',0)}%"}
-                            if _row_o[3]:
-                                try: st.session_state["our_data"] = json.loads(_row_o[3])
-                                except: pass
-                            if _row_o[4]:
-                                try: st.session_state["images"] = json.loads(_row_o[4])
-                                except: pass
-                            if _row_o[5]:
-                                try: st.session_state["aplus_img_urls"] = json.loads(_row_o[5])
-                                except: pass
-                            # ── NEW: восстанавливаем A+ Vision ───────────────
-                            st.session_state["aplus_vision"] = _row_o[6] or "" if len(_row_o) > 6 else ""
-                            st.session_state["_hist_loaded"] = _asin
-                            st.session_state["page"] = "🏠 Обзор"
-                            st.rerun()
-                    except Exception as _oe:
-                        st.error(f"Ошибка: {_oe}")
 
-        with _ci5:
-            if st.button("🗑️", key=f"hist_del_{_idx}", use_container_width=True, help="Удалить все записи этого ASIN"):
-                _conn_d = get_db()
-                if _conn_d:
-                    try:
-                        _cur_d = _conn_d.cursor()
-                        _cur_d.execute("DELETE FROM listing_analysis WHERE asin=%s", (_asin,))
-                        _conn_d.commit(); _conn_d.close()
-                        st.rerun()
-                    except Exception as _de:
-                        st.error(f"{_de}")
+            # Competitors expander
+            if _a.get("competitors"):
+                with st.expander(f"🏆 {len(_a['competitors'])} конкурента в Benchmark", expanded=False):
+                    for _ci in _a["competitors"]:
+                        _cn  = _ci.get("title","") if isinstance(_ci,dict) else str(_ci)
+                        _cas = _ci.get("asin","") if isinstance(_ci,dict) else ""
+                        _csc2 = _ci.get("score",0) if isinstance(_ci,dict) else 0
+                        _cmp2 = _ci.get("marketplace","com") if isinstance(_ci,dict) else "com"
+                        _cfl = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱"}.get(_cmp2,"🌍")
+                        _csc_c2 = "#22c55e" if _csc2>=75 else ("#f59e0b" if _csc2>=50 else ("#ef4444" if _csc2>0 else "#94a3b8"))
+                        _sc_str = f'<span style="font-weight:700;color:{_csc_c2}">{_csc2}%</span>' if _csc2 else ""
+                        _asin_link = f'<a href="https://www.amazon.{_cmp2}/dp/{_cas}" target="_blank" style="color:#3b82f6;text-decoration:none;font-family:monospace;font-size:0.8rem">{_cas} ↗</a>' if _cas else ""
+                        st.markdown(
+                            f'{_cfl} • **{_cn}** {_asin_link}' + (f' — {_sc_str}' if _sc_str else ""),
+                            unsafe_allow_html=True)
 
-        st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
+            st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
+        # ── END OF MAIN LOOP ──────────────────────────────────────────────
 
         st.divider()
 
@@ -2805,7 +2816,7 @@ def page_history():
             st.markdown('<div id="asin-details"></div>', unsafe_allow_html=True)
         st.components.v1.html('<script>document.getElementById("asin-details")?.scrollIntoView({behavior:"smooth"})</script>', height=0)
 
-        asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
+        asin_opts = [f"{'🔵' if a.get('type','наш')=='наш' else '🔴'} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
         _default_idx = 0
         if _pre_asin:
             _match = next((i for i,a in enumerate(all_asins) if a["asin"]==_pre_asin), 0)
@@ -2822,12 +2833,13 @@ def page_history():
         history = db_history(sel_asin, limit=20)
         if not history:
             st.warning("Нет данных для этого ASIN")
-        return
+            return
 
         latest = history[0]
         history_valid = [h for h in history if (h.get("overall") or 0) > 0]
         if not history_valid:
             st.info("Все записи в истории имеют Overall: 0% — это старые упавшие анализы. Запусти новый анализ.")
+
         st.subheader(f"Последний анализ: {latest['date'].strftime('%d.%m.%Y %H:%M')}")
 
         cols = st.columns(4)
@@ -2835,31 +2847,31 @@ def page_history():
         for col, (label, key) in zip(cols, metrics):
             val = latest[key] or 0
             delta = None
-        if len(history) > 1:
-            prev = history[1][key] or 0
-            delta = f"{val-prev:+d}%" if val != prev else None
-        col.metric(label, f"{val}%", delta=delta)
+            if len(history) > 1:
+                prev = history[1][key] or 0
+                delta = f"{val-prev:+d}%" if val != prev else None
+            col.metric(label, f"{val}%", delta=delta)
 
         cols2 = st.columns(3)
         for col, (label, key) in zip(cols2, [("A+","aplus"),("COSMO","cosmo"),("Rufus","rufus")]):
             val = latest[key] or 0
             delta = None
-        if len(history) > 1:
-            prev = history[1][key] or 0
-            delta = f"{val-prev:+d}%" if val != prev else None
-        col.metric(label, f"{val}%", delta=delta)
+            if len(history) > 1:
+                prev = history[1][key] or 0
+                delta = f"{val-prev:+d}%" if val != prev else None
+            col.metric(label, f"{val}%", delta=delta)
 
         if len(history) > 1:
             st.divider()
-        _hist_valid = [h for h in history if (h.get("overall") or 0) > 0]
-        if len(_hist_valid) >= 2:
-            st.subheader("📊 Динамика Overall Score")
-            import pandas as pd
-            _hist_rev = list(reversed(_hist_valid))
-            dates  = [h["date"].strftime("%d.%m %H:%M") for h in _hist_rev]
-            scores = [h["overall"] or 0 for h in _hist_rev]
-            df_chart = pd.DataFrame({"Overall %": scores}, index=dates)
-            st.area_chart(df_chart, color="#3b82f6")
+            _hist_valid = [h for h in history if (h.get("overall") or 0) > 0]
+            if len(_hist_valid) >= 2:
+                st.subheader("📊 Динамика Overall Score")
+                import pandas as pd
+                _hist_rev = list(reversed(_hist_valid))
+                dates  = [h["date"].strftime("%d.%m %H:%M") for h in _hist_rev]
+                scores = [h["overall"] or 0 for h in _hist_rev]
+                df_chart = pd.DataFrame({"Overall %": scores}, index=dates)
+                st.area_chart(df_chart, color="#3b82f6")
 
         _zero_count = len([h for h in history if (h.get("overall") or 0) == 0])
         if _zero_count > 0:
@@ -2882,7 +2894,6 @@ def page_history():
         st.markdown(f"🔗 [Открыть листинг на Amazon ↗]({amz_url})")
 
         st.subheader("Все запуски")
-        import pandas as pd
         history_show = [h for h in history if (h.get("overall") or 0) > 0]
         if not history_show:
             st.info("Нет успешных анализов — все записи с Overall 0% скрыты. Запусти новый анализ.")
@@ -2890,17 +2901,17 @@ def page_history():
             def _fmt(v):
                 if not v: return "—"
                 return f"{v}%"
-        df = pd.DataFrame([{
-            "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
-            "Overall": _fmt(h["overall"]),
-            "Title":   _fmt(h["title"]),
-            "Bullets": _fmt(h["bullets"]),
-            "Images":  _fmt(h["images"]),
-            "A+":      _fmt(h["aplus"]),
-            "COSMO":   _fmt(h["cosmo"]),
-            "Rufus":   _fmt(h["rufus"]),
-        } for h in history_show])
-        st.dataframe(df, use_container_width=True, hide_index=True)
+            df = pd.DataFrame([{
+                "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
+                "Overall": _fmt(h["overall"]),
+                "Title":   _fmt(h["title"]),
+                "Bullets": _fmt(h["bullets"]),
+                "Images":  _fmt(h["images"]),
+                "A+":      _fmt(h["aplus"]),
+                "COSMO":   _fmt(h["cosmo"]),
+                "Rufus":   _fmt(h["rufus"]),
+            } for h in history_show])
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
         st.divider()
         st.subheader("🔍 Загрузить полный анализ из истории")
@@ -2914,8 +2925,8 @@ def page_history():
         hist_opts = []
         for h in history_sorted:
             _ov = h.get("overall") or 0
-        _prefix = "✅" if _ov > 0 else "❌"
-        hist_opts.append(f"{_prefix} {h['date'].strftime('%d.%m.%Y %H:%M')} — Overall: {_ov}%")
+            _prefix = "✅" if _ov > 0 else "❌"
+            hist_opts.append(f"{_prefix} {h['date'].strftime('%d.%m.%Y %H:%M')} — Overall: {_ov}%")
 
         sel_hist = st.selectbox("Выбери запуск", hist_opts, key="hist_sel")
         sel_hist_idx_sorted = hist_opts.index(sel_hist)
@@ -2924,86 +2935,86 @@ def page_history():
 
         if st.button("📂 Открыть этот анализ", type="primary", use_container_width=True):
             conn_h = get_db()
-        if conn_h:
-            try:
-                cur_h = conn_h.cursor()
+            if conn_h:
                 try:
-                    cur_h.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS competitors_json TEXT")
-                    conn_h.commit()
-                except Exception: pass
-                # ── ФИКС: загружаем aplus_vision_text ────────────────────────
-                cur_h.execute("""
-                    SELECT result_json, vision_text, competitors_json, our_data_json,
-                           images_json, aplus_img_urls_json, aplus_vision_text
-                    FROM listing_analysis
-                    WHERE asin = %s
-                    ORDER BY analyzed_at DESC
-                    LIMIT %s
-                """, (sel_asin, len(history)))
-                rows_h = cur_h.fetchall()
-                conn_h.close()
-                row_h = rows_h[sel_hist_idx]
-                st.session_state["result"]  = json.loads(row_h[0]) if row_h[0] else {}
-                st.session_state["vision"]  = row_h[1] or ""
-                st.session_state["images"]  = []
-                if row_h[2]:
-                    comps_h = json.loads(row_h[2])
-                    for _ci, _ch in enumerate(comps_h):
-                        st.session_state[f"comp_ai_{_ci}"] = {"overall_score": f"{_ch.get('overall',0)}%"}
-                if row_h[3]:
-                    try: st.session_state["our_data"] = json.loads(row_h[3])
-                    except: pass
-                if row_h[4]:
-                    try: st.session_state["images"] = json.loads(row_h[4])
-                    except: pass
-                if row_h[5]:
-                    try: st.session_state["aplus_img_urls"] = json.loads(row_h[5])
-                    except: pass
-                # ── NEW: восстанавливаем A+ Vision ───────────────────────────
-                st.session_state["aplus_vision"] = row_h[6] or "" if len(row_h) > 6 else ""
-                st.session_state["_hist_loaded"] = sel_hist
-                st.session_state["page"] = "🏠 Обзор"
-                st.success(f"✅ Загружен анализ от {sel_hist}")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Ошибка: {e}")
+                    cur_h = conn_h.cursor()
+                    try:
+                        cur_h.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS competitors_json TEXT")
+                        conn_h.commit()
+                    except Exception: pass
+                    cur_h.execute("""
+                        SELECT result_json, vision_text, competitors_json, our_data_json,
+                               images_json, aplus_img_urls_json, aplus_vision_text
+                        FROM listing_analysis
+                        WHERE asin = %s
+                        ORDER BY analyzed_at DESC
+                        LIMIT %s
+                    """, (sel_asin, len(history)))
+                    rows_h = cur_h.fetchall()
+                    conn_h.close()
+                    row_h = rows_h[sel_hist_idx]
+                    st.session_state["result"]  = json.loads(row_h[0]) if row_h[0] else {}
+                    st.session_state["vision"]  = row_h[1] or ""
+                    st.session_state["images"]  = []
+                    if row_h[2]:
+                        comps_h = json.loads(row_h[2])
+                        for _ci, _ch in enumerate(comps_h):
+                            st.session_state[f"comp_ai_{_ci}"] = {"overall_score": f"{_ch.get('overall',0)}%"}
+                    if row_h[3]:
+                        try: st.session_state["our_data"] = json.loads(row_h[3])
+                        except: pass
+                    if row_h[4]:
+                        try: st.session_state["images"] = json.loads(row_h[4])
+                        except: pass
+                    if row_h[5]:
+                        try: st.session_state["aplus_img_urls"] = json.loads(row_h[5])
+                        except: pass
+                    st.session_state["aplus_vision"] = row_h[6] or "" if len(row_h) > 6 else ""
+                    st.session_state["_hist_loaded"] = sel_hist
+                    st.session_state["page"] = "🏠 Обзор"
+                    st.success(f"✅ Загружен анализ от {sel_hist}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Ошибка: {e}")
 
         if st.session_state.get("_hist_loaded"):
             _hl = st.session_state["_hist_loaded"]
-        st.info(f"📅 Просматриваешь: {_hl}")
-        if st.button("↩️ Вернуться к текущему анализу", type="primary", use_container_width=True):
-            st.session_state.pop("_hist_loaded", None)
-            st.session_state["page"] = "🏠 Обзор"
-            st.rerun()
+            st.info(f"📅 Просматриваешь: {_hl}")
+            if st.button("↩️ Вернуться к текущему анализу", type="primary", use_container_width=True):
+                st.session_state.pop("_hist_loaded", None)
+                st.session_state["page"] = "🏠 Обзор"
+                st.rerun()
 
         if history:
             conn2 = get_db()
-        if conn2:
-            try:
-                cur2 = conn2.cursor()
-                cur2.execute("SELECT competitors_json FROM listing_analysis WHERE asin=%s ORDER BY analyzed_at DESC LIMIT 1", (sel_asin,))
-                row = cur2.fetchone()
-                conn2.close()
-                if row and row[0]:
-                    comps = json.loads(row[0])
-                    if comps:
-                        st.divider()
-                        st.subheader("🔴 Конкуренты на момент последнего анализа")
-                        import pandas as pd
-                        cdf = pd.DataFrame([{
-                            "ASIN": c.get("asin",""), "Title": c.get("title",""),
-                            "Overall": c.get("overall",0), "Цена": c.get("price",""),
-                            "Рейтинг": c.get("rating",""), "Отзывы": c.get("reviews",""),
-                        } for c in comps])
-                        st.dataframe(cdf, use_container_width=True, hide_index=True)
-            except Exception:
-                pass
+            if conn2:
+                try:
+                    cur2 = conn2.cursor()
+                    cur2.execute("SELECT competitors_json FROM listing_analysis WHERE asin=%s ORDER BY analyzed_at DESC LIMIT 1", (sel_asin,))
+                    row = cur2.fetchone()
+                    conn2.close()
+                    if row and row[0]:
+                        comps = json.loads(row[0])
+                        if comps:
+                            st.divider()
+                            st.subheader("🔴 Конкуренты на момент последнего анализа")
+                            import pandas as pd
+                            cdf = pd.DataFrame([{
+                                "ASIN": c.get("asin",""), "Title": c.get("title",""),
+                                "Overall": c.get("overall",0), "Цена": c.get("price",""),
+                                "Рейтинг": c.get("rating",""), "Отзывы": c.get("reviews",""),
+                            } for c in comps])
+                            st.dataframe(cdf, use_container_width=True, hide_index=True)
+                except Exception:
+                    pass
 
+    # ══════════════════════════════════════════════════════════════════════
+    # TAB: AI Benchmark
+    # ══════════════════════════════════════════════════════════════════════
     with _tab_bench:
         st.markdown("### 📊 Сравнение результатов: Claude vs Gemini")
         st.caption("Одни и те же ASINы — разные модели. Показывает реальную разницу в оценках.")
 
-        # Group by ASIN, collect scores per model
         _bench_data = {}
         for _a in all_asins:
             _asin = _a["asin"]
@@ -3017,9 +3028,8 @@ def page_history():
             elif "Claude" in _mu:
                 _bench_data[_asin]["claude"].append(_sc)
             else:
-                _bench_data[_asin]["claude"].append(_sc)  # assume Claude if unknown
+                _bench_data[_asin]["claude"].append(_sc)
 
-        # Filter ASINs with both models
         _both = {k:v for k,v in _bench_data.items() if v["claude"] and v["gemini"]}
         _only_one = {k:v for k,v in _bench_data.items() if not (v["claude"] and v["gemini"])}
 
@@ -3062,9 +3072,6 @@ def page_history():
                 _sc_avg = sum(_sc_list) / len(_sc_list)
                 st.markdown(f"- {_mu_label} &nbsp; **{_sc_avg:.0f}%** &nbsp; `{_asin}` {_d['title']}")
 
-
-
-
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Tips row
@@ -3076,7 +3083,6 @@ def page_history():
 
     st.divider()
 
-    # What you get
     st.markdown("#### 📊 Что получишь после анализа")
     _f1,_f2,_f3,_f4,_f5 = st.columns(5)
     _feat_names = ["Overall Score\n17 метрик","Vision AI\nФото 1-10","COSMO/Rufus\nAI-видимость","VPC/JTBD\nЯзык покупателя","Mobile Score\nМоб. конверсия"]
@@ -3087,28 +3093,15 @@ def page_history():
 </div>''', unsafe_allow_html=True)
 
 
-
-# ── Handle sidebar refresh trigger ────────────────────────────────────────────
-if st.session_state.pop("_trigger_rerun", False):
-        _saved_url = st.session_state.get("our_url_saved","")
-        _saved_comps = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
-        if _saved_url:
-            _ph_refresh = st.empty()
-        _lines_r = []
-        def _log_r(msg): _lines_r.append(msg); _ph_refresh.markdown("\n\n".join(_lines_r[-8:]))
-        _prog_r = st.progress(0, text="🔄 Обновляю анализ...")
-        try:
-            _r2, _v2 = run_analysis(_saved_url, _saved_comps, _log_r, prog=_prog_r)
-            st.session_state.update({"result": _r2, "vision": _v2})
-            st.session_state["page"] = "🏠 Обзор"
-            _prog_r.empty(); _ph_refresh.empty()
-            st.rerun()
-        except Exception as _e:
-            st.error(f"Ошибка: {_e}")
-            st.stop()
-
 # ── Pages ─────────────────────────────────────────────────────────────────────
 page = st.session_state.get("page", "🏠 Обзор")
+r  = st.session_state.get("result", {})
+v  = st.session_state.get("vision", "")
+od = st.session_state.get("our_data", {})
+pi = od.get("product_information", {})
+cd = st.session_state.get("comp_data_list", [])
+imgs = st.session_state.get("images", [])
+
 if page == "📈 История": page_history(); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
 
