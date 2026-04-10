@@ -2704,17 +2704,33 @@ def page_history():
         if len(_all_versions) > 1:
             with st.container():
                 with st.expander(f"📅 {len(_all_versions)} анализа", expanded=False):
-                    for _v in _all_versions:
+                    for _vi, _v in enumerate(_all_versions):
                         _vd = _v["date"].strftime("%d.%m.%Y %H:%M") if _v.get("date") else "—"
                         _vmu = _v.get("model_used","")
                         _vsc = _v.get("score",0) or 0
                         _vsc_c = "#22c55e" if _vsc>=75 else ("#f59e0b" if _vsc>=50 else "#ef4444")
                         _vm_badge = f'<span style="color:#22c55e">⬤ Gemini</span>' if "Gemini" in _vmu else f'<span style="color:#a78bfa">⚡ Claude</span>' if "Claude" in _vmu else ""
-                        st.markdown(
-                            f'<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #f1f5f9">' +
-                            f'<span style="font-size:0.75rem;color:#64748b">{_vd} &nbsp; {_vm_badge}</span>' +
-                            f'<span style="font-size:0.8rem;font-weight:700;color:{_vsc_c}">{_vsc}%</span>' +
-                            f'</div>', unsafe_allow_html=True)
+                        _vc1, _vc2, _vc3 = st.columns([5, 2, 1])
+                        with _vc1:
+                            st.markdown(
+                                f'<div style="padding:4px 0">' +
+                                f'<span style="font-size:0.75rem;color:#64748b">{_vd} &nbsp; {_vm_badge}</span>' +
+                                f'</div>', unsafe_allow_html=True)
+                        with _vc2:
+                            st.markdown(f'<div style="text-align:right;padding:4px 0"><span style="font-size:0.8rem;font-weight:700;color:{_vsc_c}">{_vsc}%</span></div>', unsafe_allow_html=True)
+                        with _vc3:
+                            if st.button("🗑", key=f"del_ver_{_asin}_{_vi}", help="Удалить этот анализ"):
+                                _conn_del = get_db()
+                                if _conn_del:
+                                    try:
+                                        _cur_del = _conn_del.cursor()
+                                        _cur_del.execute(
+                                            "DELETE FROM listing_analysis WHERE asin=%s AND analyzed_at=%s",
+                                            (_asin, _v["date"])
+                                        )
+                                        _conn_del.commit(); _conn_del.close()
+                                        st.rerun()
+                                    except Exception as _de: st.error(str(_de)[:80])
         if _a.get("competitors"):
             with st.expander(f"🏆 {len(_a['competitors'])} конкурента в Benchmark", expanded=False):
                 for _ci in _a["competitors"]:
