@@ -2619,36 +2619,36 @@ def page_history():
                 st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
     with _tab_our:
         st.subheader(f"📋 Все листинги в базе — {len(all_asins)} шт.")
-    import pandas as pd
+        import pandas as pd
 
-    _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
+        _search = st.text_input("🔍 Поиск по ASIN или названию", placeholder="B08M3D... или merino gaiter", key="hist_search", label_visibility="collapsed")
 
-    # Extract ASIN from URL if pasted in search
-    _search_asin = _search
-    if _search and "/dp/" in _search:
-        _sm2 = re.search(r'/dp/([A-Z0-9]{10})', _search, re.IGNORECASE)
-        if _sm2: _search_asin = _sm2.group(1)
-    # Keep all versions but deduplicate for display (latest per ASIN)
-    _seen_asins_d = set()
-    _deduped_asins = []
-    for _a in all_asins:
-        if _a["asin"] not in _seen_asins_d:
-            _seen_asins_d.add(_a["asin"])
-            _deduped_asins.append(_a)
-    _all_versions_map = {}  # asin -> list of all versions
-    for _a in all_asins:
-        _all_versions_map.setdefault(_a["asin"], []).append(_a)
-    _filtered_asins = [a for a in _deduped_asins if not _search or
+        # Extract ASIN from URL if pasted in search
+        _search_asin = _search
+        if _search and "/dp/" in _search:
+            _sm2 = re.search(r'/dp/([A-Z0-9]{10})', _search, re.IGNORECASE)
+            if _sm2: _search_asin = _sm2.group(1)
+        # Keep all versions but deduplicate for display (latest per ASIN)
+        _seen_asins_d = set()
+        _deduped_asins = []
+        for _a in all_asins:
+            if _a["asin"] not in _seen_asins_d:
+                _seen_asins_d.add(_a["asin"])
+                _deduped_asins.append(_a)
+        _all_versions_map = {}  # asin -> list of all versions
+        for _a in all_asins:
+            _all_versions_map.setdefault(_a["asin"], []).append(_a)
+        _filtered_asins = [a for a in _deduped_asins if not _search or
         _search_asin.upper() in a["asin"].upper() or
         _search.lower() in (a.get("title") or "").lower()]
 
-    if st.session_state.get("_hist_select_asin"):
-        _pre_asin = st.session_state.pop("_hist_select_asin")
-    else:
-        _pre_asin = None
+        if st.session_state.get("_hist_select_asin"):
+            _pre_asin = st.session_state.pop("_hist_select_asin")
+        else:
+            _pre_asin = None
 
-    for _idx, _a in enumerate(_filtered_asins):
-        _sc = _a.get("score") or 0
+        for _idx, _a in enumerate(_filtered_asins):
+            _sc = _a.get("score") or 0
         _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else ("#ef4444" if _sc>0 else "#94a3b8"))
         _sc_lbl = "Strong" if _sc>=75 else ("Needs Work" if _sc>=50 else ("Critical" if _sc>0 else "—"))
         _title = (_a.get("title") or "")[:60]
@@ -2799,58 +2799,58 @@ def page_history():
 
         st.markdown('<hr style="margin:4px 0;border-color:#f1f5f9">', unsafe_allow_html=True)
 
-    st.divider()
+        st.divider()
 
-    if _pre_asin:
-        st.markdown('<div id="asin-details"></div>', unsafe_allow_html=True)
+        if _pre_asin:
+            st.markdown('<div id="asin-details"></div>', unsafe_allow_html=True)
         st.components.v1.html('<script>document.getElementById("asin-details")?.scrollIntoView({behavior:"smooth"})</script>', height=0)
 
-    asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
-    _default_idx = 0
-    if _pre_asin:
-        _match = next((i for i,a in enumerate(all_asins) if a["asin"]==_pre_asin), 0)
-        _default_idx = _match
-    sel = st.selectbox("ASIN", asin_opts, index=_default_idx)
-    sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
+        asin_opts = [f"{"🔵" if a.get("type","наш")=="наш" else "🔴"} {a['asin']} — {(a['title'] or '')[:40]}" for a in all_asins]
+        _default_idx = 0
+        if _pre_asin:
+            _match = next((i for i,a in enumerate(all_asins) if a["asin"]==_pre_asin), 0)
+            _default_idx = _match
+        sel = st.selectbox("ASIN", asin_opts, index=_default_idx)
+        sel_asin = sel.split(" — ")[0].strip().lstrip("🔵🔴 ")
 
-    _sel_data = next((a for a in all_asins if a["asin"] == sel_asin), {})
-    _full_title = _sel_data.get("title","")
-    if _full_title:
-        st.caption(f"📦 {_full_title}")
-    st.markdown(f'<a href="https://www.amazon.com/dp/{sel_asin}" target="_blank" style="color:#93c5fd;font-size:0.85rem">🔗 amazon.com/dp/{sel_asin} ↗</a>', unsafe_allow_html=True)
+        _sel_data = next((a for a in all_asins if a["asin"] == sel_asin), {})
+        _full_title = _sel_data.get("title","")
+        if _full_title:
+            st.caption(f"📦 {_full_title}")
+        st.markdown(f'<a href="https://www.amazon.com/dp/{sel_asin}" target="_blank" style="color:#93c5fd;font-size:0.85rem">🔗 amazon.com/dp/{sel_asin} ↗</a>', unsafe_allow_html=True)
 
-    history = db_history(sel_asin, limit=20)
-    if not history:
-        st.warning("Нет данных для этого ASIN")
+        history = db_history(sel_asin, limit=20)
+        if not history:
+            st.warning("Нет данных для этого ASIN")
         return
 
-    latest = history[0]
-    history_valid = [h for h in history if (h.get("overall") or 0) > 0]
-    if not history_valid:
-        st.info("Все записи в истории имеют Overall: 0% — это старые упавшие анализы. Запусти новый анализ.")
-    st.subheader(f"Последний анализ: {latest['date'].strftime('%d.%m.%Y %H:%M')}")
+        latest = history[0]
+        history_valid = [h for h in history if (h.get("overall") or 0) > 0]
+        if not history_valid:
+            st.info("Все записи в истории имеют Overall: 0% — это старые упавшие анализы. Запусти новый анализ.")
+        st.subheader(f"Последний анализ: {latest['date'].strftime('%d.%m.%Y %H:%M')}")
 
-    cols = st.columns(4)
-    metrics = [("Overall", "overall"), ("Title", "title"), ("Bullets", "bullets"), ("Images", "images")]
-    for col, (label, key) in zip(cols, metrics):
-        val = latest[key] or 0
-        delta = None
+        cols = st.columns(4)
+        metrics = [("Overall", "overall"), ("Title", "title"), ("Bullets", "bullets"), ("Images", "images")]
+        for col, (label, key) in zip(cols, metrics):
+            val = latest[key] or 0
+            delta = None
         if len(history) > 1:
             prev = history[1][key] or 0
             delta = f"{val-prev:+d}%" if val != prev else None
         col.metric(label, f"{val}%", delta=delta)
 
-    cols2 = st.columns(3)
-    for col, (label, key) in zip(cols2, [("A+","aplus"),("COSMO","cosmo"),("Rufus","rufus")]):
-        val = latest[key] or 0
-        delta = None
+        cols2 = st.columns(3)
+        for col, (label, key) in zip(cols2, [("A+","aplus"),("COSMO","cosmo"),("Rufus","rufus")]):
+            val = latest[key] or 0
+            delta = None
         if len(history) > 1:
             prev = history[1][key] or 0
             delta = f"{val-prev:+d}%" if val != prev else None
         col.metric(label, f"{val}%", delta=delta)
 
-    if len(history) > 1:
-        st.divider()
+        if len(history) > 1:
+            st.divider()
         _hist_valid = [h for h in history if (h.get("overall") or 0) > 0]
         if len(_hist_valid) >= 2:
             st.subheader("📊 Динамика Overall Score")
@@ -2877,19 +2877,19 @@ def page_history():
                     except Exception as _ce:
                         st.error(f"Ошибка: {_ce}")
 
-    st.divider()
-    amz_url = f"https://www.amazon.com/dp/{sel_asin}"
-    st.markdown(f"🔗 [Открыть листинг на Amazon ↗]({amz_url})")
+        st.divider()
+        amz_url = f"https://www.amazon.com/dp/{sel_asin}"
+        st.markdown(f"🔗 [Открыть листинг на Amazon ↗]({amz_url})")
 
-    st.subheader("Все запуски")
-    import pandas as pd
-    history_show = [h for h in history if (h.get("overall") or 0) > 0]
-    if not history_show:
-        st.info("Нет успешных анализов — все записи с Overall 0% скрыты. Запусти новый анализ.")
-    else:
-        def _fmt(v):
-            if not v: return "—"
-            return f"{v}%"
+        st.subheader("Все запуски")
+        import pandas as pd
+        history_show = [h for h in history if (h.get("overall") or 0) > 0]
+        if not history_show:
+            st.info("Нет успешных анализов — все записи с Overall 0% скрыты. Запусти новый анализ.")
+        else:
+            def _fmt(v):
+                if not v: return "—"
+                return f"{v}%"
         df = pd.DataFrame([{
             "Дата": h["date"].strftime("%d.%m.%Y %H:%M"),
             "Overall": _fmt(h["overall"]),
@@ -2902,28 +2902,28 @@ def page_history():
         } for h in history_show])
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.subheader("🔍 Загрузить полный анализ из истории")
-    history_ok   = [h for h in history if (h.get("overall") or 0) > 0]
-    history_zero = [h for h in history if (h.get("overall") or 0) == 0]
-    history_sorted = history_ok + history_zero
+        st.divider()
+        st.subheader("🔍 Загрузить полный анализ из истории")
+        history_ok   = [h for h in history if (h.get("overall") or 0) > 0]
+        history_zero = [h for h in history if (h.get("overall") or 0) == 0]
+        history_sorted = history_ok + history_zero
 
-    if not history_ok:
-        st.warning("⚠️ Все записи имеют Overall: 0% — это старые упавшие анализы. Запусти новый анализ.")
+        if not history_ok:
+            st.warning("⚠️ Все записи имеют Overall: 0% — это старые упавшие анализы. Запусти новый анализ.")
 
-    hist_opts = []
-    for h in history_sorted:
-        _ov = h.get("overall") or 0
+        hist_opts = []
+        for h in history_sorted:
+            _ov = h.get("overall") or 0
         _prefix = "✅" if _ov > 0 else "❌"
         hist_opts.append(f"{_prefix} {h['date'].strftime('%d.%m.%Y %H:%M')} — Overall: {_ov}%")
 
-    sel_hist = st.selectbox("Выбери запуск", hist_opts, key="hist_sel")
-    sel_hist_idx_sorted = hist_opts.index(sel_hist)
-    sel_hist_date = history_sorted[sel_hist_idx_sorted]["date"]
-    sel_hist_idx = next((i for i, h in enumerate(history) if h["date"] == sel_hist_date), 0)
+        sel_hist = st.selectbox("Выбери запуск", hist_opts, key="hist_sel")
+        sel_hist_idx_sorted = hist_opts.index(sel_hist)
+        sel_hist_date = history_sorted[sel_hist_idx_sorted]["date"]
+        sel_hist_idx = next((i for i, h in enumerate(history) if h["date"] == sel_hist_date), 0)
 
-    if st.button("📂 Открыть этот анализ", type="primary", use_container_width=True):
-        conn_h = get_db()
+        if st.button("📂 Открыть этот анализ", type="primary", use_container_width=True):
+            conn_h = get_db()
         if conn_h:
             try:
                 cur_h = conn_h.cursor()
@@ -2968,16 +2968,16 @@ def page_history():
             except Exception as e:
                 st.error(f"❌ Ошибка: {e}")
 
-    if st.session_state.get("_hist_loaded"):
-        _hl = st.session_state["_hist_loaded"]
+        if st.session_state.get("_hist_loaded"):
+            _hl = st.session_state["_hist_loaded"]
         st.info(f"📅 Просматриваешь: {_hl}")
         if st.button("↩️ Вернуться к текущему анализу", type="primary", use_container_width=True):
             st.session_state.pop("_hist_loaded", None)
             st.session_state["page"] = "🏠 Обзор"
             st.rerun()
 
-    if history:
-        conn2 = get_db()
+        if history:
+            conn2 = get_db()
         if conn2:
             try:
                 cur2 = conn2.cursor()
@@ -2998,28 +2998,6 @@ def page_history():
                         st.dataframe(cdf, use_container_width=True, hide_index=True)
             except Exception:
                 pass
-
-# Init DB on startup
-db_init()
-
-# ── Handle sidebar refresh trigger ────────────────────────────────────────────
-if st.session_state.pop("_trigger_rerun", False):
-    _saved_url = st.session_state.get("our_url_saved","")
-    _saved_comps = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
-    if _saved_url:
-        _ph_refresh = st.empty()
-        _lines_r = []
-        def _log_r(msg): _lines_r.append(msg); _ph_refresh.markdown("\n\n".join(_lines_r[-8:]))
-        _prog_r = st.progress(0, text="🔄 Обновляю анализ...")
-        try:
-            _r2, _v2 = run_analysis(_saved_url, _saved_comps, _log_r, prog=_prog_r)
-            st.session_state.update({"result": _r2, "vision": _v2})
-            st.session_state["page"] = "🏠 Обзор"
-            _prog_r.empty(); _ph_refresh.empty()
-            st.rerun()
-        except Exception as _e:
-            st.error(f"Ошибка: {_e}")
-            st.stop()
 
     with _tab_bench:
         st.markdown("### 📊 Сравнение результатов: Claude vs Gemini")
@@ -3107,6 +3085,28 @@ if st.session_state.pop("_trigger_rerun", False):
 <div style="font-size:1.5rem">{_ficon}</div>
 <div style="font-weight:600;color:#1e293b;margin-top:4px;white-space:pre-line">{_fname}</div>
 </div>''', unsafe_allow_html=True)
+
+
+
+# ── Handle sidebar refresh trigger ────────────────────────────────────────────
+if st.session_state.pop("_trigger_rerun", False):
+        _saved_url = st.session_state.get("our_url_saved","")
+        _saved_comps = [st.session_state.get(f"c{i}_saved","") for i in range(5)]
+        if _saved_url:
+            _ph_refresh = st.empty()
+        _lines_r = []
+        def _log_r(msg): _lines_r.append(msg); _ph_refresh.markdown("\n\n".join(_lines_r[-8:]))
+        _prog_r = st.progress(0, text="🔄 Обновляю анализ...")
+        try:
+            _r2, _v2 = run_analysis(_saved_url, _saved_comps, _log_r, prog=_prog_r)
+            st.session_state.update({"result": _r2, "vision": _v2})
+            st.session_state["page"] = "🏠 Обзор"
+            _prog_r.empty(); _ph_refresh.empty()
+            st.rerun()
+        except Exception as _e:
+            st.error(f"Ошибка: {_e}")
+            st.stop()
+
 # ── Pages ─────────────────────────────────────────────────────────────────────
 page = st.session_state.get("page", "🏠 Обзор")
 if page == "📈 История": page_history(); st.stop()
