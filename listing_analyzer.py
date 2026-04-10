@@ -251,11 +251,13 @@ def db_all_asins():
                 try:
                     _comps = json.loads(r[7])
                     _comp_names = []
-                    for c in _comps[:3]:
+                    for c in _comps[:5]:
                         if isinstance(c, dict):
-                            _ct = (c.get("title","") or "")[:30]
+                            _ct = (c.get("title","") or "")[:35]
                             _ca2 = c.get("asin","")
-                            _comp_names.append({"title": _ct, "asin": _ca2})
+                            _csc = c.get("overall_score", c.get("score", 0)) or 0
+                            _cmp2 = c.get("marketplace","com") or "com"
+                            _comp_names.append({"title": _ct, "asin": _ca2, "score": _csc, "marketplace": _cmp2})
                 except: pass
             result.append({"asin": r[0], "title": r[1], "score": r[2], "date": r[3],
                            "type": r[4], "marketplace": r[5], "img": _img, "model_used": _model_used,
@@ -2716,9 +2718,16 @@ def page_history():
         if _a.get("competitors"):
             with st.expander(f"🏆 {len(_a['competitors'])} конкурента в Benchmark", expanded=False):
                 for _ci in _a["competitors"]:
-                    _cn = _ci.get("title","") if isinstance(_ci,dict) else str(_ci)
+                    _cn  = _ci.get("title","") if isinstance(_ci,dict) else str(_ci)
                     _cas = _ci.get("asin","") if isinstance(_ci,dict) else ""
-                    st.markdown(f"• **{_cn}**" + (f" `{_cas}`" if _cas else ""))
+                    _csc = _ci.get("score",0) if isinstance(_ci,dict) else 0
+                    _cmp = _ci.get("marketplace","com") if isinstance(_ci,dict) else "com"
+                    _cfl = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱"}.get(_cmp,"🌍")
+                    _csc_c = "#22c55e" if _csc>=75 else ("#f59e0b" if _csc>=50 else ("#ef4444" if _csc>0 else "#94a3b8"))
+                    _sc_str = f'<span style="font-weight:700;color:{_csc_c}">{_csc}%</span>' if _csc else ""
+                    st.markdown(
+                        f'{_cfl} • **{_cn}**' + (f' `{_cas}`' if _cas else "") + (f' — {_sc_str}' if _sc_str else ""),
+                        unsafe_allow_html=True)
         with _ci4:
             if st.button("Open", key=f"hist_open_{_idx}", use_container_width=True, type="primary"):
                 _conn_o = get_db()
