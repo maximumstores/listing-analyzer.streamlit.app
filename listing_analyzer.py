@@ -1146,19 +1146,18 @@ APLUS_BLOCK_{{i}}
             for _ai, _aimg in enumerate(images):
                 if _ai > 0: _ta.sleep(8)
                 log(f"  👁️ A+ баннер {_ai+1}/{len(images)}...")
-                _ap_fmt = sys_prompt + f"""
-
-Сейчас анализируй ТОЛЬКО этот баннер #{_ai+1}.
-Ответь СТРОГО в формате:
-APLUS_BLOCK_{_ai+1}
-{'Модуль' if lang!='en' else 'Module'}: [тип]
-{'Содержание' if lang!='en' else 'Summary'}: [1-2 предложения]
-{'Оценка' if lang!='en' else 'Score'}: X/10
-{'Сильная сторона' if lang!='en' else 'Strength'}: [1 конкретная]
-{'Слабость' if lang!='en' else 'Weakness'}: [1 конкретная проблема]
-{'Действие' if lang!='en' else 'Action'}: [1 конкретный фикс с глагола]
-{'Конверсия' if lang!='en' else 'Conversion'}: [1 инсайт психологии покупателя]"""
-                _apr = gemini_vision_call(_ap_fmt, image_b64_list=[(_aimg["b64"], _aimg["media_type"])], max_tokens=1000)
+                _ap_fmt = sys_prompt + (
+                    f"\n\nAnalyze ONLY banner #{_ai+1}. ALL 7 lines mandatory:\n"
+                    f"APLUS_BLOCK_{_ai+1}\n"
+                    f"Модуль: [тип баннера]\n"
+                    f"Содержание: [1-2 предложения что показывает]\n"
+                    f"Оценка: X/10\n"
+                    f"Сильная сторона: [1 конкретная сильная сторона для конверсии]\n"
+                    f"Слабость: [1 конкретная проблема которую видишь]\n"
+                    f"Действие: [1 конкретный фикс начиная с глагола]\n"
+                    f"Конверсия: [1 инсайт психологии покупателя что заставит купить]\n"
+                    "\nDo NOT skip any line. Be critical and specific.")
+                _apr = gemini_vision_call(_ap_fmt, image_b64_list=[(_aimg["b64"], _aimg["media_type"])], max_tokens=1500)
                 _ap_results.append(_apr)
             result = "\n\n".join(_ap_results)
         else:
