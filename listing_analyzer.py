@@ -1741,6 +1741,7 @@ def db_get_prev_analysis(asin):
 
 
 def run_analysis(our_url, competitor_urls, log, prog=None):
+    _t_analysis_begin = __import__("time").time()
     _steps_done = []
     def _prog(pct, text):
         if prog:
@@ -3109,6 +3110,14 @@ if st.session_state.pop("_trigger_rerun", False):
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
 page = st.session_state.get("page", "🏠 Обзор")
+
+r  = st.session_state.get("result", {})
+v  = st.session_state.get("vision", "")
+od = st.session_state.get("our_data", {})
+pi = od.get("product_information", {})
+cd = st.session_state.get("comp_data_list", [])
+imgs = st.session_state.get("images", [])
+
 if page == "📈 История": page_history(); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
 
