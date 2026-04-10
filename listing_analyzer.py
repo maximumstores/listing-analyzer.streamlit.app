@@ -239,8 +239,15 @@ def db_all_asins():
                     if _imgs and isinstance(_imgs, list):
                         _img = next((u for u in _imgs if isinstance(u,str) and u.startswith("http") and "_SR" not in u and "_SS4" not in u), "")
                 except: pass
+            # Extract model used from our_data_json
+            _model_used = ""
+            if r[6]:
+                try:
+                    _od2 = json.loads(r[6])
+                    _model_used = _od2.get("_model_used","")
+                except: pass
             result.append({"asin": r[0], "title": r[1], "score": r[2], "date": r[3],
-                           "type": r[4], "marketplace": r[5], "img": _img})
+                           "type": r[4], "marketplace": r[5], "img": _img, "model_used": _model_used})
         return result
     except Exception:
         return []
@@ -2498,7 +2505,7 @@ def page_history():
     if not all_asins and not all_comps:
         st.info("История пуста — запусти первый анализ")
         return
-    _tab_our, _tab_comp = st.tabs([f"🔵 Наши ({len(all_asins)})", f"🔴 Конкуренты ({len(all_comps)})"])
+    _tab_our, _tab_comp, _tab_bench = st.tabs([f"🔵 Наши ({len(all_asins)})", f"🔴 Конкуренты ({len(all_comps)})", "📊 AI Benchmark"])
     with _tab_comp:
         if not all_comps:
             st.info("Конкуренты появятся после анализа с конкурентами")
@@ -2639,8 +2646,8 @@ def page_history():
                 f'{_mp_flag} &nbsp;·&nbsp; '
                 f'<a href="https://www.amazon.com/dp/{_asin}" target="_blank" style="color:#3b82f6;text-decoration:none">{_asin} ↗</a>'
                 f' &nbsp;·&nbsp; {_date}' +
-                (f' &nbsp;·&nbsp; 🟢 Gemini' if (_a.get("our_data") or {}).get("_model_used","").startswith("Gemini") else
-                 (f' &nbsp;·&nbsp; ⚡ Claude' if (_a.get("our_data") or {}).get("_model_used","").startswith("Claude") else "")) +
+                (f' &nbsp;·&nbsp; 🟢 Gemini' if (_a.get("model_used","")).startswith("Gemini") else
+                 (f' &nbsp;·&nbsp; ⚡ Claude' if (_a.get("model_used","")).startswith("Claude") else "")) +
                 f'</div></div>', unsafe_allow_html=True)
         with _ci3:
             if _sc > 0:
@@ -3940,9 +3947,29 @@ SCORE: [0-100]%
                     _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
                     st.image(_img_bytes, width=120)
 
+            # Показываем рекомендацию из Vision анализа для выбранного фото
+            _picked_idx = st.session_state.get("_claid_picked_idx", 0)
+            if _picked_idx and st.session_state.get("vision"):
+                import re as _re_v
+                _v_text = st.session_state.get("vision","")
+                _blk_m = _re_v.search(rf"PHOTO_BLOCK_{_picked_idx}\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _v_text, _re_v.DOTALL)
+                if _blk_m:
+                    _blk = _blk_m.group(1)
+                    _act_m = _re_v.search(r"(?:Действие|Action)\s*[:\-]\s*(.{10,})", _blk)
+                    _wk_m  = _re_v.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{10,})", _blk)
+                    if _act_m or _wk_m:
+                        st.markdown("**🤖 AI рекомендует исправить:**")
+                        if _wk_m:  st.warning(f"⚠️ {_wk_m.group(1).strip()[:150]}")
+                        if _act_m:
+                            _ai_action = _act_m.group(1).strip()[:200]
+                            st.info(f"→ {_ai_action}")
+                            # Авто-подставляем рекомендацию как сцену
+                            if st.checkbox("🎯 Использовать рекомендацию AI как сцену", value=True, key="use_ai_scene"):
+                                _claid_scene = _ai_action
+
             if _img_b64_claid:
-                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
-                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                if st.button("🎨 Генерировать улучшенное фото", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Gemini генерирует..."):
                         _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
@@ -4352,9 +4379,29 @@ SCORE: [0-100]%
                     _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
                     st.image(_img_bytes, width=120)
 
+            # Показываем рекомендацию из Vision анализа для выбранного фото
+            _picked_idx = st.session_state.get("_claid_picked_idx", 0)
+            if _picked_idx and st.session_state.get("vision"):
+                import re as _re_v
+                _v_text = st.session_state.get("vision","")
+                _blk_m = _re_v.search(rf"PHOTO_BLOCK_{_picked_idx}\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _v_text, _re_v.DOTALL)
+                if _blk_m:
+                    _blk = _blk_m.group(1)
+                    _act_m = _re_v.search(r"(?:Действие|Action)\s*[:\-]\s*(.{10,})", _blk)
+                    _wk_m  = _re_v.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{10,})", _blk)
+                    if _act_m or _wk_m:
+                        st.markdown("**🤖 AI рекомендует исправить:**")
+                        if _wk_m:  st.warning(f"⚠️ {_wk_m.group(1).strip()[:150]}")
+                        if _act_m:
+                            _ai_action = _act_m.group(1).strip()[:200]
+                            st.info(f"→ {_ai_action}")
+                            # Авто-подставляем рекомендацию как сцену
+                            if st.checkbox("🎯 Использовать рекомендацию AI как сцену", value=True, key="use_ai_scene"):
+                                _claid_scene = _ai_action
+
             if _img_b64_claid:
-                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
-                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                if st.button("🎨 Генерировать улучшенное фото", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Gemini генерирует..."):
                         _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
@@ -4703,9 +4750,29 @@ SCORE: [0-100]%
                     _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
                     st.image(_img_bytes, width=120)
 
+            # Показываем рекомендацию из Vision анализа для выбранного фото
+            _picked_idx = st.session_state.get("_claid_picked_idx", 0)
+            if _picked_idx and st.session_state.get("vision"):
+                import re as _re_v
+                _v_text = st.session_state.get("vision","")
+                _blk_m = _re_v.search(rf"PHOTO_BLOCK_{_picked_idx}\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _v_text, _re_v.DOTALL)
+                if _blk_m:
+                    _blk = _blk_m.group(1)
+                    _act_m = _re_v.search(r"(?:Действие|Action)\s*[:\-]\s*(.{10,})", _blk)
+                    _wk_m  = _re_v.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{10,})", _blk)
+                    if _act_m or _wk_m:
+                        st.markdown("**🤖 AI рекомендует исправить:**")
+                        if _wk_m:  st.warning(f"⚠️ {_wk_m.group(1).strip()[:150]}")
+                        if _act_m:
+                            _ai_action = _act_m.group(1).strip()[:200]
+                            st.info(f"→ {_ai_action}")
+                            # Авто-подставляем рекомендацию как сцену
+                            if st.checkbox("🎯 Использовать рекомендацию AI как сцену", value=True, key="use_ai_scene"):
+                                _claid_scene = _ai_action
+
             if _img_b64_claid:
-                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
-                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                if st.button("🎨 Генерировать улучшенное фото", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Gemini генерирует..."):
                         _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
@@ -5139,9 +5206,29 @@ SCORE: [0-100]%
                     _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
                     st.image(_img_bytes, width=120)
 
+            # Показываем рекомендацию из Vision анализа для выбранного фото
+            _picked_idx = st.session_state.get("_claid_picked_idx", 0)
+            if _picked_idx and st.session_state.get("vision"):
+                import re as _re_v
+                _v_text = st.session_state.get("vision","")
+                _blk_m = _re_v.search(rf"PHOTO_BLOCK_{_picked_idx}\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _v_text, _re_v.DOTALL)
+                if _blk_m:
+                    _blk = _blk_m.group(1)
+                    _act_m = _re_v.search(r"(?:Действие|Action)\s*[:\-]\s*(.{10,})", _blk)
+                    _wk_m  = _re_v.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{10,})", _blk)
+                    if _act_m or _wk_m:
+                        st.markdown("**🤖 AI рекомендует исправить:**")
+                        if _wk_m:  st.warning(f"⚠️ {_wk_m.group(1).strip()[:150]}")
+                        if _act_m:
+                            _ai_action = _act_m.group(1).strip()[:200]
+                            st.info(f"→ {_ai_action}")
+                            # Авто-подставляем рекомендацию как сцену
+                            if st.checkbox("🎯 Использовать рекомендацию AI как сцену", value=True, key="use_ai_scene"):
+                                _claid_scene = _ai_action
+
             if _img_b64_claid:
-                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
-                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                if st.button("🎨 Генерировать улучшенное фото", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Gemini генерирует..."):
                         _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
@@ -5785,9 +5872,29 @@ SCORE: [0-100]%
                     _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
                     st.image(_img_bytes, width=120)
 
+            # Показываем рекомендацию из Vision анализа для выбранного фото
+            _picked_idx = st.session_state.get("_claid_picked_idx", 0)
+            if _picked_idx and st.session_state.get("vision"):
+                import re as _re_v
+                _v_text = st.session_state.get("vision","")
+                _blk_m = _re_v.search(rf"PHOTO_BLOCK_{_picked_idx}\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _v_text, _re_v.DOTALL)
+                if _blk_m:
+                    _blk = _blk_m.group(1)
+                    _act_m = _re_v.search(r"(?:Действие|Action)\s*[:\-]\s*(.{10,})", _blk)
+                    _wk_m  = _re_v.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{10,})", _blk)
+                    if _act_m or _wk_m:
+                        st.markdown("**🤖 AI рекомендует исправить:**")
+                        if _wk_m:  st.warning(f"⚠️ {_wk_m.group(1).strip()[:150]}")
+                        if _act_m:
+                            _ai_action = _act_m.group(1).strip()[:200]
+                            st.info(f"→ {_ai_action}")
+                            # Авто-подставляем рекомендацию как сцену
+                            if st.checkbox("🎯 Использовать рекомендацию AI как сцену", value=True, key="use_ai_scene"):
+                                _claid_scene = _ai_action
+
             if _img_b64_claid:
-                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
-                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                if st.button("🎨 Генерировать улучшенное фото", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Gemini генерирует..."):
                         _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
@@ -6809,9 +6916,29 @@ SCORE: [0-100]%
                     _img_mt_claid = "image/jpeg" if _claid_upload.name.lower().endswith(("jpg","jpeg")) else "image/png"
                     st.image(_img_bytes, width=120)
 
+            # Показываем рекомендацию из Vision анализа для выбранного фото
+            _picked_idx = st.session_state.get("_claid_picked_idx", 0)
+            if _picked_idx and st.session_state.get("vision"):
+                import re as _re_v
+                _v_text = st.session_state.get("vision","")
+                _blk_m = _re_v.search(rf"PHOTO_BLOCK_{_picked_idx}\s*(.*?)(?=PHOTO_BLOCK_\d+|$)", _v_text, _re_v.DOTALL)
+                if _blk_m:
+                    _blk = _blk_m.group(1)
+                    _act_m = _re_v.search(r"(?:Действие|Action)\s*[:\-]\s*(.{10,})", _blk)
+                    _wk_m  = _re_v.search(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{10,})", _blk)
+                    if _act_m or _wk_m:
+                        st.markdown("**🤖 AI рекомендует исправить:**")
+                        if _wk_m:  st.warning(f"⚠️ {_wk_m.group(1).strip()[:150]}")
+                        if _act_m:
+                            _ai_action = _act_m.group(1).strip()[:200]
+                            st.info(f"→ {_ai_action}")
+                            # Авто-подставляем рекомендацию как сцену
+                            if st.checkbox("🎯 Использовать рекомендацию AI как сцену", value=True, key="use_ai_scene"):
+                                _claid_scene = _ai_action
+
             if _img_b64_claid:
-                if st.button("🎨 Генерировать lifestyle фото", type="primary", key="btn_claid_gen"):
-                    with st.spinner(f"🎨 Claid AI: {_claid_scene}..."):
+                if st.button("🎨 Генерировать улучшенное фото", type="primary", key="btn_claid_gen"):
+                    with st.spinner(f"🎨 Gemini генерирует..."):
                         _urls, _err = claid_generate_lifestyle(_img_b64_claid, scene=_claid_scene, media_type=_img_mt_claid)
                         if _err:
                             st.error(f"❌ {_err}")
@@ -7425,6 +7552,71 @@ Title · Bullets · Описание · Фото · A+ · Отзывы · BSR ·
 - Для ежедневных ретестов → используй Gemini
 - Для клиентских отчётов → используй Claude
 """)
+
+    with _tab_bench:
+        st.markdown("### 📊 Сравнение результатов: Claude vs Gemini")
+        st.caption("Одни и те же ASINы — разные модели. Показывает реальную разницу в оценках.")
+
+        # Group by ASIN, collect scores per model
+        _bench_data = {}
+        for _a in all_asins:
+            _asin = _a["asin"]
+            _mu = _a.get("model_used","")
+            _sc = _a.get("score", 0) or 0
+            if _sc == 0: continue
+            if _asin not in _bench_data:
+                _bench_data[_asin] = {"title": (_a.get("title") or "")[:40], "claude": [], "gemini": []}
+            if "Gemini" in _mu:
+                _bench_data[_asin]["gemini"].append(_sc)
+            elif "Claude" in _mu:
+                _bench_data[_asin]["claude"].append(_sc)
+            else:
+                _bench_data[_asin]["claude"].append(_sc)  # assume Claude if unknown
+
+        # Filter ASINs with both models
+        _both = {k:v for k,v in _bench_data.items() if v["claude"] and v["gemini"]}
+        _only_one = {k:v for k,v in _bench_data.items() if not (v["claude"] and v["gemini"])}
+
+        if _both:
+            st.markdown("#### 🆚 Анализировали обеими моделями:")
+            _total_diff = []
+            for _asin, _d in _both.items():
+                _c_avg = sum(_d["claude"]) / len(_d["claude"])
+                _g_avg = sum(_d["gemini"]) / len(_d["gemini"])
+                _diff = _c_avg - _g_avg
+                _total_diff.append(_diff)
+                _diff_c = "#22c55e" if abs(_diff) < 5 else ("#f59e0b" if abs(_diff) < 15 else "#ef4444")
+                _diff_str = f"+{_diff:.0f}%" if _diff > 0 else f"{_diff:.0f}%"
+                st.markdown(
+                    f'<div style="background:#0f172a;border-radius:8px;padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">' +
+                    f'<div style="font-size:0.82rem;color:#e2e8f0">{_d["title"]}<br><span style="color:#64748b;font-size:0.72rem">{_asin}</span></div>' +
+                    f'<div style="display:flex;gap:20px;align-items:center">' +
+                    f'<div style="text-align:center"><div style="font-size:0.7rem;color:#64748b">⚡ Claude</div><div style="font-size:1.1rem;font-weight:700;color:#a78bfa">{_c_avg:.0f}%</div></div>' +
+                    f'<div style="text-align:center"><div style="font-size:0.7rem;color:#64748b">🟢 Gemini</div><div style="font-size:1.1rem;font-weight:700;color:#34d399">{_g_avg:.0f}%</div></div>' +
+                    f'<div style="text-align:center;min-width:60px"><div style="font-size:0.7rem;color:#64748b">Разница</div><div style="font-size:1.1rem;font-weight:700;color:{_diff_c}">{_diff_str}</div></div>' +
+                    f'</div></div>',
+                    unsafe_allow_html=True)
+            if _total_diff:
+                _avg_diff = sum(_total_diff) / len(_total_diff)
+                st.markdown("---")
+                if abs(_avg_diff) < 3:
+                    st.success(f"✅ Модели дают похожие результаты — разница {_avg_diff:+.1f}% в среднем")
+                elif _avg_diff > 0:
+                    st.info(f"⚡ Claude даёт на **{_avg_diff:.1f}%** выше оценку чем Gemini в среднем")
+                else:
+                    st.info(f"🟢 Gemini даёт на **{abs(_avg_diff):.1f}%** выше оценку чем Claude в среднем")
+        else:
+            st.info("Нет ASINов проанализированных обеими моделями. Запусти один и тот же листинг через Claude и Gemini для сравнения.")
+
+        if _only_one:
+            st.markdown("#### 📋 Только одной моделью:")
+            for _asin, _d in list(_only_one.items())[:10]:
+                _mu_label = "⚡ Claude" if _d["claude"] else "🟢 Gemini"
+                _sc_list = _d["claude"] or _d["gemini"]
+                _sc_avg = sum(_sc_list) / len(_sc_list)
+                st.markdown(f"- {_mu_label} &nbsp; **{_sc_avg:.0f}%** &nbsp; `{_asin}` {_d['title']}")
+
+
 
 # ══ Workflow ══════════════════════════════════════════════════════════════════
 elif page == "📋 Workflow":
