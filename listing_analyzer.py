@@ -1584,7 +1584,7 @@ def db_lookup_asin(asin):
         # Search by main asin column AND inside our_data_json (handles parent/child ASIN differences)
         cur.execute("""
             SELECT asin, our_title, overall_score, analyzed_at, listing_type,
-                   COALESCE(marketplace,'com') as marketplace
+                   COALESCE(marketplace,'com') as marketplace, our_data_json
             FROM listing_analysis
             WHERE asin = %s
                OR our_data_json::text ILIKE %s
@@ -1595,14 +1595,23 @@ def db_lookup_asin(asin):
             # Also try searching in our_title for ASIN
             cur.execute("""
                 SELECT asin, our_title, overall_score, analyzed_at, listing_type,
-                       COALESCE(marketplace,'com') as marketplace
+                       COALESCE(marketplace,'com') as marketplace, our_data_json
                 FROM listing_analysis
                 WHERE our_data_json::text ILIKE %s
                 ORDER BY analyzed_at DESC LIMIT 5
             """, (f'%{asin}%',))
             rows = cur.fetchall()
         conn.close()
-        return [{"asin":r[0],"title":r[1],"score":r[2],"date":r[3],"type":r[4],"marketplace":r[5]} for r in rows]
+        result_list = []
+        for r in rows:
+            _mu = ""
+            try:
+                import json as _jl
+                _od = _jl.loads(r[6]) if r[6] else {}
+                _mu = _od.get("_model_used","")
+            except: pass
+            result_list.append({"asin":r[0],"title":r[1],"score":r[2],"date":r[3],"type":r[4],"marketplace":r[5],"model_used":_mu})
+        return result_list
     except Exception as e:
         return []
 
@@ -2141,7 +2150,7 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
                         f'padding:8px 12px;display:flex;justify-content:space-between;align-items:center">'
                         f'<div style="font-size:0.8rem">'
                         f'<b style="color:{_afc}">{_aft}</b> · {_mp_flags3.get(_af.get("marketplace","com"),"🌍")} {_auto_asin} · {_afdate}' +
-                        (f' · 🟢 Gemini' if _af.get("model_used","").startswith("Gemini") else (f' · ⚡ Claude' if _af.get("model_used","").startswith("Claude") else "")) +
+                        (f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if _af.get("model_used","").startswith("Gemini") else (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if _af.get("model_used","").startswith("Claude") else "")) +
                         f'<br><span style="color:#475569">{(_af.get("title") or "")[:60]}</span></div>'
                         f'<div style="font-size:1.2rem;font-weight:800;color:{_afsc}">{_afs}%</div>'
                         f'</div>',
@@ -2550,7 +2559,7 @@ def page_history():
                         (f' · ⭐{_ca["rating"]}' if _ca.get("rating") else "") +
                         (f' · ({_ca["reviews"]} отз.)' if _ca.get("reviews") else "") +
                         f' · {_cdate}' +
-                        (_model_hist_badge if (_model_hist_badge := (lambda od: " · 🟢 Gemini " + od.get("_model_used","").split("/")[-1] if od and "Gemini" in od.get("_model_used","") else (" · ⚡ Claude" if od and od.get("_model_used") else ""))(json.loads(_ca["our_data_json"]) if _ca.get("our_data_json") else {})) else "") +
+                        ((lambda od: f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if od and "Gemini" in od.get("_model_used","") else (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if od and od.get("_model_used") else ""))(json.loads(_ca["our_data_json"]) if _ca.get("our_data_json") else {})) +
                         f'</div></div>',
                         unsafe_allow_html=True)
                 with _cc3:
@@ -2647,8 +2656,8 @@ def page_history():
                 f'{_mp_flag} &nbsp;·&nbsp; '
                 f'<a href="https://www.amazon.com/dp/{_asin}" target="_blank" style="color:#3b82f6;text-decoration:none">{_asin} ↗</a>'
                 f' &nbsp;·&nbsp; {_date}' +
-                (f' &nbsp;·&nbsp; 🟢 Gemini' if (_a.get("model_used","")).startswith("Gemini") else
-                 (f' &nbsp;·&nbsp; ⚡ Claude' if (_a.get("model_used","")).startswith("Claude") else "")) +
+                (f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if (_a.get("model_used","")).startswith("Gemini") else
+                 (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if (_a.get("model_used","")).startswith("Claude") else "")) +
                 f'</div></div>', unsafe_allow_html=True)
         with _ci3:
             if _sc > 0:
