@@ -3484,6 +3484,526 @@ def health_card():
             col.markdown(f'<div style="background:#f1f5f9;border-radius:8px;padding:8px 4px;text-align:center;border-left:3px solid {cc}"><div style="font-size:1.2rem;font-weight:700;color:{cc}">{p2}%</div><div style="font-size:0.68rem;color:#64748b">{lbl}</div></div>', unsafe_allow_html=True)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 🎯 LISTING OPPORTUNITY OPERATOR + RENDER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def listing_opportunity_operator(r, od, vision_text=""):
+    """Internal decision block: missed revenue + priority actions for our listing vs competitors."""
+    if not od or not od.get("title"):
+        return
+
+    st.divider()
+
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
+        '<div style="font-size:1.45rem">🎯</div>'
+        '<div>'
+        '<div style="font-size:1.15rem;font-weight:800;color:#e2e8f0">Listing Opportunity Operator</div>'
+        '<div style="font-size:0.76rem;color:#64748b">Что мешает листингу добирать выручку и что делать первым</div>'
+        '</div></div>',
+        unsafe_allow_html=True
+    )
+
+    _c1, _c2, _c3 = st.columns(3)
+
+    with _c1:
+        _sessions = st.number_input(
+            "📊 Sessions / мес",
+            value=st.session_state.get("_lo_sessions", 3000),
+            min_value=100,
+            max_value=500000,
+            step=500,
+            key="lo_sessions",
+            help="Detail Page Sessions / Sessions из Business Reports"
+        )
+
+    with _c2:
+        _cvr = st.number_input(
+            "📈 CVR %",
+            value=st.session_state.get("_lo_cvr", 8.0),
+            min_value=0.5,
+            max_value=50.0,
+            step=0.5,
+            key="lo_cvr",
+            help="Unit Session Percentage / Conversion Rate"
+        )
+
+    with _c3:
+        _price_default = 29.99
+        try:
+            _price_default = float(
+                str(od.get("price", ""))
+                .replace("$", "")
+                .replace("€", "")
+                .replace("£", "")
+                .replace(",", ".")
+                .strip()
+                .split()[0]
+            )
+        except Exception:
+            pass
+
+        _price = st.number_input(
+            "💰 Price",
+            value=st.session_state.get("_lo_price", _price_default),
+            min_value=1.0,
+            max_value=9999.0,
+            step=1.0,
+            key="lo_price"
+        )
+
+    st.session_state["_lo_sessions"] = _sessions
+    st.session_state["_lo_cvr"] = _cvr
+    st.session_state["_lo_price"] = _price
+
+    _current_orders = _sessions * (_cvr / 100)
+    _current_revenue = _current_orders * _price
+
+    st.markdown(
+        f'<div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:10px 14px;margin:8px 0 14px 0">'
+        f'<div style="font-size:0.68rem;color:#64748b;letter-spacing:0.08em;font-weight:700">CURRENT BASELINE</div>'
+        f'<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px">'
+        f'<div style="font-size:0.85rem;color:#e2e8f0">Orders/month: <b>{int(_current_orders)}</b></div>'
+        f'<div style="font-size:0.85rem;color:#e2e8f0">Revenue/month: <b>${_current_revenue:,.0f}</b></div>'
+        f'<div style="font-size:0.85rem;color:#e2e8f0">CVR base: <b>{_cvr:.1f}%</b></div>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+
+    if st.button("🧠 Построить Opportunity Plan", type="primary", use_container_width=True, key="btn_listing_opportunity"):
+        with st.spinner("AI анализирует недореализованный потенциал листинга..."):
+            _title = od.get("title", "")
+            _bullets = od.get("feature_bullets", [])
+            _pi = od.get("product_information", {})
+            _rating = od.get("average_rating", "")
+            _reviews = _pi.get("Customer Reviews", {}).get("ratings_count", "")
+            _has_aplus = bool(od.get("aplus") or od.get("aplus_content"))
+            _has_video = int(od.get("number_of_videos", 0) or 0) > 0
+            _n_images = len(od.get("images", []))
+            _coupon = od.get("coupon_text", "") or od.get("is_coupon_exists", False)
+            _colors = len(od.get("customization_options", {}).get("color", []))
+            _sizes = len(od.get("customization_options", {}).get("size", []))
+            _bsr = str(_pi.get("Best Sellers Rank", ""))[:120]
+            _is_returned = od.get("is_frequently_returned", False)
+
+            _scores = {
+                k: pct(r.get(k, 0)) for k in [
+                    "overall_score",
+                    "title_score",
+                    "bullets_score",
+                    "images_score",
+                    "aplus_score",
+                    "description_score",
+                    "reviews_score",
+                    "bsr_score",
+                    "price_score",
+                    "customization_score",
+                    "prime_score"
+                ]
+            }
+
+            _cosmo = pct(r.get("cosmo_analysis", {}).get("score", 0)) if isinstance(r.get("cosmo_analysis"), dict) else 0
+            _rufus = pct(r.get("rufus_analysis", {}).get("score", 0)) if isinstance(r.get("rufus_analysis"), dict) else 0
+            _jtbd = pct(r.get("jtbd_analysis", {}).get("alignment_score", 0)) if isinstance(r.get("jtbd_analysis"), dict) else 0
+            _vpc_verdict = r.get("vpc_analysis", {}).get("vpc_verdict", "") if isinstance(r.get("vpc_analysis"), dict) else ""
+            _job_story = r.get("jtbd_analysis", {}).get("job_story", "") if isinstance(r.get("jtbd_analysis"), dict) else ""
+
+            _vision_summary = ""
+            if vision_text:
+                import re as _rev
+                _photo_scores = [int(_m.group(1)) for _m in _rev.finditer(r"(\d+)/10", vision_text)]
+                _weaknesses = [
+                    _m.group(1).strip()[:120]
+                    for _m in _rev.finditer(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{10,140})", vision_text)
+                ]
+                _actions_v = [
+                    _m.group(1).strip()[:120]
+                    for _m in _rev.finditer(r"(?:Действие|Action)\s*[:\-]\s*(.{10,140})", vision_text)
+                ]
+                _vision_summary = (
+                    f"Photo scores: {_photo_scores[:8]}. "
+                    f"Weaknesses: {'; '.join(_weaknesses[:4])}. "
+                    f"Suggested fixes: {'; '.join(_actions_v[:3])}"
+                )
+
+            _title_gaps = r.get("title_gaps", [])
+            _bullets_gaps = r.get("bullets_gaps", [])
+            _images_gaps = r.get("images_gaps", [])
+            _aplus_gaps = r.get("aplus_gaps", [])
+            _missing_chars = r.get("missing_chars", [])
+
+            _comp_summary = ""
+            _cd = st.session_state.get("comp_data_list", [])
+            if _cd:
+                _comp_lines = []
+                for _ci, _c in enumerate(_cd[:3]):
+                    _cai = st.session_state.get(f"comp_ai_{_ci}", {})
+                    _cov = pct(_cai.get("overall_score", 0)) if _cai else 0
+                    _comp_lines.append(
+                        f"Comp{_ci+1}: {_c.get('title','')[:60]} | "
+                        f"ASIN: {get_asin_from_data(_c)} | "
+                        f"Price: {_c.get('price','')} | "
+                        f"Rating: {_c.get('average_rating','')}★ | "
+                        f"Score: {_cov}%"
+                    )
+                _comp_summary = "\n".join(_comp_lines)
+
+            _lang = "Russian" if st.session_state.get("analysis_lang", "ru") == "ru" else "English"
+
+            _prompt = f"""You are a senior Amazon internal growth operator.
+This is NOT a public SaaS output. This is an INTERNAL decision-support tool for the team.
+
+Your task:
+1. Estimate where the listing is underperforming vs its current potential
+2. Compare our listing to competitors
+3. Convert gaps into priority actions
+4. Show MISSED REVENUE / RECOVERY POTENTIAL, not "guaranteed future revenue"
+5. Be conservative, specific, and operational
+
+BUSINESS BASELINE:
+Sessions: {_sessions}/month
+CVR: {_cvr}%
+Price: ${_price}
+Current revenue: ${_current_revenue:,.0f}/month
+Current orders: {int(_current_orders)}/month
+
+OUR LISTING:
+Title ({len(_title)} chars): {_title[:180]}
+Bullets ({len(_bullets)}): {chr(10).join([f"- {b[:180]}" for b in _bullets[:5]])}
+Images: {_n_images}
+Video: {"YES" if _has_video else "NO"}
+A+: {"YES" if _has_aplus else "NO"}
+Coupon: {"YES" if _coupon else "NO"}
+Variants: {_colors} colors / {_sizes} sizes
+Rating: {_rating}
+Reviews: {_reviews}
+BSR: {_bsr}
+Frequently returned: {"YES" if _is_returned else "NO"}
+
+ANALYSIS SCORES:
+Overall: {_scores['overall_score']}%
+Title: {_scores['title_score']}%
+Bullets: {_scores['bullets_score']}%
+Images: {_scores['images_score']}%
+A+: {_scores['aplus_score']}%
+Description: {_scores['description_score']}%
+Reviews: {_scores['reviews_score']}%
+BSR: {_scores['bsr_score']}%
+Price: {_scores['price_score']}%
+Customization: {_scores['customization_score']}%
+Prime: {_scores['prime_score']}%
+COSMO: {_cosmo}%
+Rufus: {_rufus}%
+JTBD: {_jtbd}%
+
+PHOTO VISION:
+{_vision_summary}
+
+KNOWN GAPS:
+Title gaps: {_title_gaps[:4]}
+Bullets gaps: {_bullets_gaps[:4]}
+Images gaps: {_images_gaps[:4]}
+A+ gaps: {_aplus_gaps[:4]}
+Missing characteristics: {[c.get('name','') for c in _missing_chars[:5]] if _missing_chars else 'none'}
+VPC verdict: {_vpc_verdict}
+JTBD story: {_job_story}
+
+COMPETITORS:
+{_comp_summary if _comp_summary else "No competitor snapshots available"}
+
+OUTPUT JSON ONLY.
+All text in {_lang}.
+
+JSON FORMAT:
+{{
+  "mode": "internal_decision_tool",
+  "headline": "short headline",
+  "goal_text": "one-sentence operational summary",
+  "current_issue": "main reason why listing underperforms",
+  "missed_revenue_low": 1200,
+  "missed_revenue_high": 3500,
+  "recovery_potential_pct_low": 8,
+  "recovery_potential_pct_high": 22,
+  "confidence": 76,
+  "confidence_based_on": ["source 1", "source 2"],
+  "actions": [
+    {{
+      "rank": 1,
+      "tag": "CRITICAL",
+      "title": "specific action title",
+      "effort": "15 min",
+      "effort_type": "quick",
+      "problem": "what exactly is wrong now",
+      "action_steps": ["step 1", "step 2"],
+      "why_works": "why this should improve conversion",
+      "cvr_low": 4,
+      "cvr_high": 8,
+      "revenue_low": 600,
+      "revenue_high": 1200,
+      "competitor_ref": "how competitor does it better, if relevant"
+    }}
+  ],
+  "execution_order": [
+    "first thing to do",
+    "second thing to do",
+    "third thing to do"
+  ]
+}}
+
+STRICT RULES:
+- 3-5 actions max
+- Use only real evidence from the listing data, scores, photo analysis and competitor comparison
+- Do NOT present estimates as guaranteed revenue
+- Think in terms of missed revenue / recoverable value / underperformance
+- Single action uplift should usually stay realistic
+- Prioritize actions by impact / effort
+- Use competitor references only when relevant
+- Return ONLY valid JSON
+"""
+
+            _raw = ai_call(
+                "You are an internal Amazon listing opportunity analyst. Return ONLY valid JSON.",
+                _prompt,
+                max_tokens=3200
+            )
+
+            try:
+                import json as _json
+                import re as _re_g
+
+                _raw_clean = _raw.strip()
+                _raw_clean = _re_g.sub(r"^```[a-zA-Z]*\s*", "", _raw_clean, flags=_re_g.MULTILINE)
+                _raw_clean = _re_g.sub(r"```\s*$", "", _raw_clean, flags=_re_g.MULTILINE)
+
+                _start = _raw_clean.find("{")
+                _end = _raw_clean.rfind("}")
+                if _start >= 0 and _end > _start:
+                    _raw_clean = _raw_clean[_start:_end+1]
+
+                _raw_clean = _re_g.sub(r",\s*([}\]])", r"\1", _raw_clean)
+
+                _plan = _json.loads(_raw_clean)
+                st.session_state["_listing_opportunity_plan"] = _plan
+                st.session_state.pop("_listing_opportunity_raw", None)
+
+            except Exception as _je:
+                st.session_state["_listing_opportunity_plan"] = None
+                st.session_state["_listing_opportunity_raw"] = _raw
+                st.warning(f"⚠️ JSON parse error — показываю raw output: {str(_je)[:80]}")
+
+    _plan = st.session_state.get("_listing_opportunity_plan")
+    _raw_fallback = st.session_state.get("_listing_opportunity_raw")
+
+    if _plan:
+        _render_listing_opportunity_plan(_plan, _current_revenue, _sessions, _cvr, _price)
+    elif _raw_fallback:
+        st.markdown(
+            f'<div style="background:#0f172a;border-radius:10px;padding:16px 20px;'
+            f'color:#e2e8f0;font-size:0.9rem;line-height:1.8;white-space:pre-wrap">{_raw_fallback}</div>',
+            unsafe_allow_html=True
+        )
+        if st.button("🗑️ Очистить raw", key="clear_listing_opportunity_raw"):
+            st.session_state.pop("_listing_opportunity_raw", None)
+            st.rerun()
+
+
+def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price):
+    """Render internal decision-support plan."""
+
+    _headline = plan.get("headline", "Listing opportunity detected")
+    _goal_text = plan.get("goal_text", "")
+    _current_issue = plan.get("current_issue", "")
+    _actions = plan.get("actions", [])
+
+    _missed_low = plan.get("missed_revenue_low", 0)
+    _missed_high = plan.get("missed_revenue_high", 0)
+    _rp_low = plan.get("recovery_potential_pct_low", 0)
+    _rp_high = plan.get("recovery_potential_pct_high", 0)
+
+    _confidence = plan.get("confidence", 70)
+    _conf_based = plan.get("confidence_based_on", [])
+    _exec_order = plan.get("execution_order", [])
+
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#1a1208,#2b1d0d);border:2px solid #f59e0b;'
+        f'border-radius:16px;padding:24px 28px;margin:8px 0 14px 0">'
+        f'<div style="font-size:0.65rem;color:#f59e0b;font-weight:700;letter-spacing:0.2em">⚠️ MISSED REVENUE</div>'
+        f'<div style="font-size:1.55rem;font-weight:800;color:#f8fafc;margin-top:6px">${_missed_low:,}–${_missed_high:,} / month</div>'
+        f'<div style="font-size:0.88rem;color:#cbd5e1;margin-top:6px">{_headline}</div>'
+        f'<div style="font-size:0.82rem;color:#94a3b8;margin-top:8px">Recovery potential: +{_rp_low}% to +{_rp_high}% vs current baseline</div>'
+        + (f'<div style="font-size:0.8rem;color:#fbbf24;margin-top:8px;border-top:1px solid #f59e0b33;padding-top:8px">Main issue: {_current_issue}</div>' if _current_issue else '')
+        + (f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:8px">{_goal_text}</div>' if _goal_text else '')
+        + f'</div>',
+        unsafe_allow_html=True
+    )
+
+    _tag_styles = {
+        "CRITICAL":   {"color": "#ef4444", "bg": "#1a0a0a", "border": "#ef4444", "icon": "🔥"},
+        "QUICK WIN":  {"color": "#22c55e", "bg": "#0a1a0a", "border": "#22c55e", "icon": "⚡"},
+        "QUICK":      {"color": "#22c55e", "bg": "#0a1a0a", "border": "#22c55e", "icon": "⚡"},
+        "STRUCTURAL": {"color": "#3b82f6", "bg": "#0a0f1a", "border": "#3b82f6", "icon": "🏗"},
+        "MEDIUM":     {"color": "#f59e0b", "bg": "#1a1a0a", "border": "#f59e0b", "icon": "🔧"},
+    }
+
+    if _actions:
+        st.markdown(
+            '<div style="font-size:0.7rem;color:#64748b;font-weight:700;letter-spacing:0.12em;margin:14px 0 8px 0">PRIORITY ACTIONS</div>',
+            unsafe_allow_html=True
+        )
+
+    for _a in _actions:
+        _rank = _a.get("rank", 0)
+        _tag = str(_a.get("tag", "MEDIUM")).upper()
+        _style = _tag_styles.get(_tag, _tag_styles["MEDIUM"])
+        _effort = _a.get("effort", "")
+        _problem = _a.get("problem", "")
+        _steps = _a.get("action_steps", [])
+        _why = _a.get("why_works", "")
+        _cvr_l = _a.get("cvr_low", 0)
+        _cvr_h = _a.get("cvr_high", 0)
+        _rev_l = _a.get("revenue_low", 0)
+        _rev_h = _a.get("revenue_high", 0)
+        _comp_ref = _a.get("competitor_ref", "")
+
+        _steps_html = ""
+        for _s in _steps:
+            _steps_html += (
+                f'<div style="font-size:0.84rem;color:#e2e8f0;padding:4px 0 4px 12px;'
+                f'border-left:2px solid {_style["color"]}40">✓ {_s}</div>'
+            )
+
+        _max_rev = max((x.get("revenue_high", 0) for x in _actions), default=1)
+        _bar_width = int((_rev_h / max(_max_rev, 1)) * 100)
+
+        st.markdown(
+            f'<div style="background:{_style["bg"]};border-left:5px solid {_style["border"]};'
+            f'border-radius:12px;padding:18px 22px;margin:10px 0">'
+            f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+            f'<span style="font-size:1.45rem;font-weight:900;color:{_style["color"]}">#{_rank}</span>'
+            f'<span style="background:{_style["color"]}22;border:1px solid {_style["color"]};'
+            f'color:{_style["color"]};border-radius:4px;padding:2px 10px;font-size:0.72rem;font-weight:700">{_style["icon"]} {_tag}</span>'
+            f'<span style="font-size:1.02rem;font-weight:700;color:#e2e8f0;flex:1">{_a.get("title","")}</span>'
+            f'<span style="font-size:0.78rem;color:#64748b;background:#1e293b;border-radius:4px;padding:3px 10px">⏱ {_effort}</span>'
+            f'</div>'
+            + (f'<div style="font-size:0.85rem;color:#fca5a5;margin-top:10px;padding:8px 12px;background:#ef444410;border-radius:6px">❌ {_problem}</div>' if _problem else '')
+            + f'<div style="margin-top:10px">'
+              f'<div style="font-size:0.7rem;color:#64748b;font-weight:700;margin-bottom:4px">→ WHAT TO DO:</div>'
+              f'{_steps_html}'
+              f'</div>'
+            + (f'<div style="font-size:0.8rem;color:#94a3b8;margin-top:8px;font-style:italic">💡 {_why}</div>' if _why else '')
+            + (f'<div style="font-size:0.78rem;color:#f59e0b;margin-top:6px">🏆 {_comp_ref}</div>' if _comp_ref else '')
+            + f'<div style="margin-top:12px;background:#0f172a;border-radius:8px;padding:10px 14px">'
+              f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+              f'<span style="font-size:0.78rem;color:#64748b">RECOVERABLE VALUE</span>'
+              f'<div style="display:flex;gap:16px;flex-wrap:wrap">'
+              f'<span style="font-size:0.85rem;color:#f59e0b;font-weight:700">CVR +{_cvr_l}–{_cvr_h}%</span>'
+              f'<span style="font-size:0.95rem;color:#22c55e;font-weight:800">${_rev_l:,}–${_rev_h:,}/month</span>'
+              f'</div></div>'
+              f'<div style="background:#1e293b;border-radius:4px;height:8px">'
+              f'<div style="background:linear-gradient(90deg,{_style["color"]},{_style["color"]}88);width:{_bar_width}%;height:8px;border-radius:4px"></div>'
+              f'</div>'
+              f'</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    _recoverable_revenue_low = current_revenue + _missed_low
+    _recoverable_revenue_high = current_revenue + _missed_high
+
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#0a1320,#111c2d);border:2px solid #3b82f6;'
+        f'border-radius:14px;padding:22px 26px;margin:14px 0">'
+        f'<div style="font-size:0.65rem;color:#3b82f6;font-weight:700;letter-spacing:0.2em;margin-bottom:10px">📊 RECOVERY SCENARIO</div>'
+        f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">'
+        f'<div style="text-align:center">'
+        f'<div style="font-size:0.68rem;color:#64748b">RECOVERY POTENTIAL</div>'
+        f'<div style="font-size:1.6rem;font-weight:800;color:#3b82f6">+{_rp_low}%–+{_rp_high}%</div>'
+        f'<div style="font-size:0.75rem;color:#94a3b8">vs current listing performance</div>'
+        f'</div>'
+        f'<div style="text-align:center">'
+        f'<div style="font-size:0.68rem;color:#64748b">MISSED / MONTH</div>'
+        f'<div style="font-size:1.6rem;font-weight:800;color:#f59e0b">${_missed_low:,}–${_missed_high:,}</div>'
+        f'<div style="font-size:0.75rem;color:#94a3b8">recoverable estimate</div>'
+        f'</div>'
+        f'<div style="text-align:center">'
+        f'<div style="font-size:0.68rem;color:#64748b">IF FIXED WELL</div>'
+        f'<div style="font-size:1.6rem;font-weight:800;color:#22c55e">${_recoverable_revenue_low:,.0f}–${_recoverable_revenue_high:,.0f}</div>'
+        f'<div style="font-size:0.75rem;color:#94a3b8">possible monthly run-rate</div>'
+        f'</div>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+
+    _chart_data = [{"label": "Current", "value": current_revenue}]
+    _cum = current_revenue
+    for _a in _actions:
+        _mid = (_a.get("revenue_low", 0) + _a.get("revenue_high", 0)) / 2
+        _cum += _mid
+        _chart_data.append({"label": f"+ #{_a.get('rank', '?')}", "value": _cum})
+
+    _max_val = max((d["value"] for d in _chart_data), default=1)
+
+    st.markdown(
+        '<div style="background:#0f172a;border-radius:10px;padding:16px 20px;margin:10px 0">'
+        '<div style="font-size:0.7rem;color:#64748b;font-weight:700;letter-spacing:0.1em;margin-bottom:12px">📈 VALUE RECOVERY PATH</div>',
+        unsafe_allow_html=True
+    )
+
+    _bars_html = '<div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding:0 10px">'
+    for _i, _cd in enumerate(_chart_data):
+        _h = int((_cd["value"] / max(_max_val, 1)) * 100)
+        _c = "#ef4444" if _i == 0 else "#22c55e"
+        _opacity = 1.0 if _i == 0 else 0.65 + (_i / max(len(_chart_data)-1, 1)) * 0.35
+        _bars_html += (
+            f'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">'
+            f'<div style="font-size:0.68rem;font-weight:700;color:{_c};margin-bottom:4px">${_cd["value"]:,.0f}</div>'
+            f'<div style="width:100%;height:{max(_h,5)}px;background:{_c};opacity:{_opacity};border-radius:4px 4px 0 0"></div>'
+            f'<div style="font-size:0.62rem;color:#64748b;margin-top:4px;text-align:center">{_cd["label"]}</div>'
+            f'</div>'
+        )
+    _bars_html += '</div>'
+    st.markdown(_bars_html + '</div>', unsafe_allow_html=True)
+
+    _conf_c = "#22c55e" if _confidence >= 75 else ("#f59e0b" if _confidence >= 50 else "#ef4444")
+    _conf_label = "Высокая" if _confidence >= 75 else ("Средняя" if _confidence >= 50 else "Низкая")
+    _conf_sources = " · ".join(_conf_based[:4]) if _conf_based else "listing data"
+
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:1fr 1.4fr;gap:12px;margin-top:12px">'
+        f'<div style="background:#0f172a;border-radius:10px;padding:14px 18px;border-top:3px solid {_conf_c}">'
+        f'<div style="font-size:0.65rem;color:#64748b;font-weight:700;letter-spacing:0.1em;margin-bottom:6px">CONFIDENCE</div>'
+        f'<div style="font-size:1.35rem;font-weight:800;color:{_conf_c}">{_confidence}%</div>'
+        f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:4px">{_conf_label}</div>'
+        f'<div style="font-size:0.68rem;color:#475569;margin-top:6px">Based on: {_conf_sources}</div>'
+        f'</div>'
+        f'<div style="background:#0f172a;border-radius:10px;padding:14px 18px;border-top:3px solid #3b82f6">'
+        f'<div style="font-size:0.65rem;color:#64748b;font-weight:700;letter-spacing:0.1em;margin-bottom:8px">🎯 EXECUTION ORDER</div>',
+        unsafe_allow_html=True
+    )
+
+    for _ei, _step in enumerate(_exec_order):
+        _step_c = "#22c55e" if _ei == 0 else ("#f59e0b" if _ei == 1 else "#3b82f6")
+        _timeline = "TODAY" if _ei < 2 else ("THIS WEEK" if _ei < 4 else "NEXT")
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #1e293b">'
+            f'<span style="font-size:1rem;font-weight:800;color:{_step_c};min-width:28px">{_ei+1}.</span>'
+            f'<span style="font-size:0.85rem;color:#e2e8f0;flex:1">{_step}</span>'
+            f'<span style="font-size:0.65rem;color:{_step_c};background:{_step_c}15;border-radius:3px;padding:2px 6px;font-weight:700">{_timeline}</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown('</div></div>', unsafe_allow_html=True)
+
+    if st.button("🗑️ Очистить Opportunity Plan", key="clear_listing_opportunity_plan"):
+        st.session_state.pop("_listing_opportunity_plan", None)
+        st.session_state.pop("_listing_opportunity_raw", None)
+        st.rerun()
+
+
 # ── Pages dispatch ────────────────────────────────────────────────────────────
 if page == "🏠 Обзор":
     _rc1, _rc2 = st.columns([8,1])
@@ -3518,6 +4038,7 @@ if page == "🏠 Обзор":
                 st.rerun()
         st.stop()
     health_card()
+    listing_opportunity_operator(r, od, st.session_state.get("vision",""))
 
     if od.get("is_frequently_returned"):
         st.markdown('<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:10px;padding:14px 18px;margin:8px 0"><div style="font-size:1.1rem;font-weight:800;color:#fca5a5">🔴 ВНИМАНИЕ: Amazon пометил листинг как "Часто возвращают"</div><div style="color:#fca5a5;font-size:0.88rem;margin-top:6px;line-height:1.7">Исправь фото/описание, размерную сетку, добавь видео распаковки. Снизи % возвратов ниже ~10% за 30 дней.</div></div>', unsafe_allow_html=True)
