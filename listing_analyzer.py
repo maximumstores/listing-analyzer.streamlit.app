@@ -4175,13 +4175,7 @@ def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price
 
     _max_val = max((d["value"] for d in _chart_data), default=1)
 
-    st.markdown(
-        '<div style="background:#0f172a;border-radius:10px;padding:16px 20px;margin:10px 0">'
-        '<div style="font-size:0.7rem;color:#64748b;font-weight:700;letter-spacing:0.1em;margin-bottom:12px">📈 VALUE RECOVERY PATH</div>',
-        unsafe_allow_html=True
-    )
-
-    _bars_html = '<div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding:0 10px">'
+    _bars_html = '<div style="display:flex;align-items:flex-end;gap:6px;height:140px;padding:0 10px">'
     for _i, _cd in enumerate(_chart_data):
         _h = int((_cd["value"] / max(_max_val, 1)) * 100)
         _c = "#ef4444" if _i == 0 else "#22c55e"
@@ -4190,11 +4184,18 @@ def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price
             f'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">'
             f'<div style="font-size:0.68rem;font-weight:700;color:{_c};margin-bottom:4px">${_cd["value"]:,.0f}</div>'
             f'<div style="width:100%;height:{max(_h,5)}px;background:{_c};opacity:{_opacity};border-radius:4px 4px 0 0"></div>'
-            f'<div style="font-size:0.62rem;color:#64748b;margin-top:4px;text-align:center">{_cd["label"]}</div>'
+            f'<div style="font-size:0.62rem;color:#94a3b8;margin-top:6px;text-align:center">{_cd["label"]}</div>'
             f'</div>'
         )
     _bars_html += '</div>'
-    st.markdown(_bars_html + '</div>', unsafe_allow_html=True)
+
+    st.markdown(
+        '<div style="background:#0f172a;border-radius:10px;padding:16px 20px;margin:10px 0">'
+        '<div style="font-size:0.7rem;color:#94a3b8;font-weight:700;letter-spacing:0.12em;margin-bottom:12px">📈 VALUE RECOVERY PATH</div>'
+        + _bars_html +
+        '</div>',
+        unsafe_allow_html=True
+    )
 
     _conf_c = "#22c55e" if _confidence >= 75 else ("#f59e0b" if _confidence >= 50 else "#ef4444")
     _conf_label = "Высокая" if _confidence >= 75 else ("Средняя" if _confidence >= 50 else "Низкая")
