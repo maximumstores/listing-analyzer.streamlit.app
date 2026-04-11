@@ -4200,32 +4200,33 @@ def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price
     _conf_label = "Высокая" if _confidence >= 75 else ("Средняя" if _confidence >= 50 else "Низкая")
     _conf_sources = " · ".join(_conf_based[:4]) if _conf_based else "listing data"
 
-    st.markdown(
-        f'<div style="display:grid;grid-template-columns:1fr 1.4fr;gap:12px;margin-top:12px">'
-        f'<div style="background:#0f172a;border-radius:10px;padding:14px 18px;border-top:3px solid {_conf_c}">'
-        f'<div style="font-size:0.65rem;color:#64748b;font-weight:700;letter-spacing:0.1em;margin-bottom:6px">CONFIDENCE</div>'
-        f'<div style="font-size:1.35rem;font-weight:800;color:{_conf_c}">{_confidence}%</div>'
-        f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:4px">{_conf_label}</div>'
-        f'<div style="font-size:0.68rem;color:#475569;margin-top:6px">Based on: {_conf_sources}</div>'
-        f'</div>'
-        f'<div style="background:#0f172a;border-radius:10px;padding:14px 18px;border-top:3px solid #3b82f6">'
-        f'<div style="font-size:0.65rem;color:#64748b;font-weight:700;letter-spacing:0.1em;margin-bottom:8px">🎯 EXECUTION ORDER</div>',
-        unsafe_allow_html=True
-    )
-
+    _exec_html = ""
     for _ei, _step in enumerate(_exec_order):
         _step_c = "#22c55e" if _ei == 0 else ("#f59e0b" if _ei == 1 else "#3b82f6")
         _timeline = "TODAY" if _ei < 2 else ("THIS WEEK" if _ei < 4 else "NEXT")
-        st.markdown(
-            f'<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #1e293b">'
+        _exec_html += (
+            f'<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #1e293b">'
             f'<span style="font-size:1rem;font-weight:800;color:{_step_c};min-width:28px">{_ei+1}.</span>'
-            f'<span style="font-size:0.85rem;color:#e2e8f0;flex:1">{_step}</span>'
-            f'<span style="font-size:0.65rem;color:{_step_c};background:{_step_c}15;border-radius:3px;padding:2px 6px;font-weight:700">{_timeline}</span>'
-            f'</div>',
-            unsafe_allow_html=True
+            f'<span style="font-size:0.85rem;color:#e2e8f0;flex:1;line-height:1.4">{_step}</span>'
+            f'<span style="font-size:0.62rem;color:{_step_c};background:{_step_c}22;border:1px solid {_step_c}55;border-radius:4px;padding:2px 8px;font-weight:700;white-space:nowrap">{_timeline}</span>'
+            f'</div>'
         )
 
-    st.markdown('</div></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:1fr 1.6fr;gap:12px;margin-top:12px">'
+        f'<div style="background:#0f172a;border-radius:10px;padding:16px 20px;border-top:3px solid {_conf_c}">'
+        f'<div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.12em;margin-bottom:6px">CONFIDENCE</div>'
+        f'<div style="font-size:1.6rem;font-weight:800;color:{_conf_c}">{_confidence}%</div>'
+        f'<div style="font-size:0.8rem;color:#e2e8f0;margin-top:4px;font-weight:600">{_conf_label}</div>'
+        f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Based on: {_conf_sources}</div>'
+        f'</div>'
+        f'<div style="background:#0f172a;border-radius:10px;padding:16px 20px;border-top:3px solid #3b82f6">'
+        f'<div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.12em;margin-bottom:10px">🎯 EXECUTION ORDER</div>'
+        f'{_exec_html}'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
     if st.button("🗑️ Очистить Opportunity Plan", key="clear_listing_opportunity_plan"):
         st.session_state.pop("_listing_opportunity_plan", None)
