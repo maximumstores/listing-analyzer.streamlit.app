@@ -2042,11 +2042,12 @@ with st.sidebar:
     if st.session_state.get("use_gemini"):
         _key_for_check = st.secrets.get("GEMINI_API_KEY","")
         if _key_for_check:
-            _actual_model = get_best_gemini_model(_key_for_check, prefer_pro=False)
+            get_best_gemini_model.clear()
+            _actual_model = get_best_gemini_model(_key_for_check, prefer_pro=True)
             st.session_state["gemini_model"] = _actual_model
             st.caption(f"✅ Авто: `{_actual_model}`")
         else:
-            st.session_state["gemini_model"] = "gemini-2.5-flash"
+            st.session_state["gemini_model"] = "gemini-3.1-pro-preview"
             st.caption("⚠️ Добавь GEMINI_API_KEY в Secrets")
 
     st.divider()
