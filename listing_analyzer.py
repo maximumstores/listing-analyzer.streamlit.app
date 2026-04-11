@@ -3519,6 +3519,458 @@ if page == "🏠 Обзор":
         st.stop()
     health_card()
 
+
+    def growth_operator(r, od, vision_text=""):
+    """AI Growth Operator — план роста выручки с визуализацией"""
+    if not od or not od.get("title"):
+        return
+ 
+    st.divider()
+ 
+    # ── Header ────────────────────────────────────────────────────────────
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'
+        '<div style="font-size:1.5rem">🎯</div>'
+        '<div>'
+        '<div style="font-size:1.2rem;font-weight:800;color:#e2e8f0">AI Growth Operator</div>'
+        '<div style="font-size:0.75rem;color:#64748b">Скажи что делать и сколько это принесёт</div>'
+        '</div></div>',
+        unsafe_allow_html=True
+    )
+ 
+    # ── Inputs row ────────────────────────────────────────────────────────
+    _rc1, _rc2, _rc3 = st.columns(3)
+    with _rc1:
+        _sessions = st.number_input("📊 Сессии/мес", value=st.session_state.get("_go_sessions", 3000),
+                                     min_value=100, max_value=500000, step=500, key="go_sessions",
+                                     help="Sessions из Business Reports → Detail Page Sessions")
+    with _rc2:
+        _cvr = st.number_input("📈 CVR %", value=st.session_state.get("_go_cvr", 8.0),
+                                min_value=0.5, max_value=50.0, step=0.5, key="go_cvr",
+                                help="Unit Session Percentage из Business Reports")
+    with _rc3:
+        _price_default = 29.99
+        try:
+            _price_default = float(str(od.get("price","")).replace("$","").replace("€","").replace("£","").replace(",",".").strip().split()[0])
+        except: pass
+        _price = st.number_input("💰 Цена $", value=st.session_state.get("_go_price", _price_default),
+                                  min_value=1.0, max_value=9999.0, step=1.0, key="go_price")
+ 
+    st.session_state["_go_sessions"] = _sessions
+    st.session_state["_go_cvr"] = _cvr
+    st.session_state["_go_price"] = _price
+ 
+    _current_orders = _sessions * (_cvr / 100)
+    _current_revenue = _current_orders * _price
+ 
+    # ── Generate ──────────────────────────────────────────────────────────
+    if st.button("🎯 Построить Growth Plan", type="primary", use_container_width=True, key="btn_growth"):
+        with st.spinner("🧠 AI строит план роста..."):
+            _title = od.get("title","")
+            _bullets = od.get("feature_bullets",[])
+            _pi = od.get("product_information",{})
+            _rating = od.get("average_rating","")
+            _reviews = _pi.get("Customer Reviews",{}).get("ratings_count","")
+            _has_aplus = bool(od.get("aplus") or od.get("aplus_content"))
+            _has_video = int(od.get("number_of_videos",0) or 0) > 0
+            _n_images = len(od.get("images",[]))
+            _coupon = od.get("coupon_text","") or od.get("is_coupon_exists",False)
+            _colors = len(od.get("customization_options",{}).get("color",[]))
+            _sizes = len(od.get("customization_options",{}).get("size",[]))
+            _bsr = str(_pi.get("Best Sellers Rank",""))[:80]
+            _is_returned = od.get("is_frequently_returned", False)
+ 
+            _scores = {k: pct(r.get(k,0)) for k in [
+                "overall_score","title_score","bullets_score","images_score",
+                "aplus_score","description_score","reviews_score","bsr_score",
+                "price_score","customization_score","prime_score"
+            ]}
+            _cosmo = pct(r.get("cosmo_analysis",{}).get("score",0)) if isinstance(r.get("cosmo_analysis"),dict) else 0
+            _rufus = pct(r.get("rufus_analysis",{}).get("score",0)) if isinstance(r.get("rufus_analysis"),dict) else 0
+            _jtbd = pct(r.get("jtbd_analysis",{}).get("alignment_score",0)) if isinstance(r.get("jtbd_analysis"),dict) else 0
+            _vpc_verdict = r.get("vpc_analysis",{}).get("vpc_verdict","") if isinstance(r.get("vpc_analysis"),dict) else ""
+            _job_story = r.get("jtbd_analysis",{}).get("job_story","") if isinstance(r.get("jtbd_analysis"),dict) else ""
+ 
+            _vision_summary = ""
+            if vision_text:
+                import re as _rev
+                _photo_scores = []
+                for _m in _rev.finditer(r"(\d+)/10", vision_text):
+                    _photo_scores.append(int(_m.group(1)))
+                _weaknesses = [_m.group(1).strip()[:80] for _m in _rev.finditer(r"(?:Слабость|Weakness)\s*[:\-]\s*(.{10,100})", vision_text)]
+                _actions_v = [_m.group(1).strip()[:80] for _m in _rev.finditer(r"(?:Действие|Action)\s*[:\-]\s*(.{10,100})", vision_text)]
+                _vision_summary = f"Photo scores: {_photo_scores[:7]}. Weaknesses: {'; '.join(_weaknesses[:3])}. Suggested: {'; '.join(_actions_v[:2])}"
+ 
+            _title_gaps = r.get("title_gaps",[])
+            _bullets_gaps = r.get("bullets_gaps",[])
+            _images_gaps = r.get("images_gaps",[])
+            _aplus_gaps = r.get("aplus_gaps",[])
+            _missing_chars = r.get("missing_chars",[])
+ 
+            _comp_summary = ""
+            _cd = st.session_state.get("comp_data_list",[])
+            if _cd:
+                _comp_lines = []
+                for _ci, _c in enumerate(_cd[:3]):
+                    _cai = st.session_state.get(f"comp_ai_{_ci}",{})
+                    _cov = pct(_cai.get("overall_score",0)) if _cai else 0
+                    _comp_lines.append(f"Comp{_ci+1}: {_c.get('title','')[:40]} | {_c.get('price','')} | {_c.get('average_rating','')}★ | Score:{_cov}%")
+                _comp_summary = "\n".join(_comp_lines)
+ 
+            _lang = "Russian" if st.session_state.get("analysis_lang","ru") == "ru" else "English"
+ 
+            _prompt = f"""You are an AI Growth Operator — a premium Amazon CRO consultant.
+You produce structured growth plans that sell for $1K+.
+ 
+BUSINESS METRICS:
+Sessions: {_sessions}/month | CVR: {_cvr}% | Price: ${_price} | Revenue: ${_current_revenue:,.0f}/month | Orders: {int(_current_orders)}/month
+ 
+LISTING:
+Title ({len(_title)}ch): {_title[:120]}
+Bullets ({len(_bullets)}): {chr(10).join([f'  B{i+1} ({len(b)}ch): {b[:100]}' for i,b in enumerate(_bullets[:5])])}
+Images: {_n_images} | Video: {"YES" if _has_video else "NO"} | A+: {"YES" if _has_aplus else "NO"}
+Rating: {_rating} ({_reviews} reviews) | BSR: {_bsr}
+Coupon: {"YES" if _coupon else "NO"} | Variants: {_colors}col/{_sizes}sz
+Frequently returned: {"⚠️ YES" if _is_returned else "No"}
+ 
+ANALYSIS SCORES:
+Overall:{_scores['overall_score']}% Title:{_scores['title_score']}% Bullets:{_scores['bullets_score']}% Images:{_scores['images_score']}% A+:{_scores['aplus_score']}% Reviews:{_scores['reviews_score']}%
+COSMO:{_cosmo}% Rufus:{_rufus}% JTBD:{_jtbd}%
+ 
+PHOTO VISION: {_vision_summary}
+ 
+GAPS: Title:{_title_gaps[:3]} | Bullets:{_bullets_gaps[:3]} | Images:{_images_gaps[:2]} | A+:{_aplus_gaps[:2]}
+Missing chars: {[c.get('name','') for c in _missing_chars[:3]] if _missing_chars else 'none'}
+VPC: {_vpc_verdict}
+JTBD: {_job_story}
+ 
+COMPETITORS: {_comp_summary if _comp_summary else 'none'}
+ 
+OUTPUT FORMAT (respond EXACTLY in this JSON structure, nothing else):
+ 
+{{
+  "goal_pct": 20,
+  "goal_text": "short goal statement",
+  "current_issue": "1 sentence: why listing underperforms",
+  "actions": [
+    {{
+      "rank": 1,
+      "tag": "CRITICAL",
+      "title": "Fix Main Image",
+      "effort": "15min",
+      "effort_type": "quick",
+      "problem": "Product visibility = 32%. Model wearing jacket hides core product.",
+      "action_steps": ["Shoot clean image on white background", "No outerwear on model", "Product fills >85% of frame"],
+      "why_works": "Main image drives 40% of click-through rate on mobile",
+      "cvr_low": 12,
+      "cvr_high": 18,
+      "revenue_low": 1800,
+      "revenue_high": 2700,
+      "competitor_ref": "Woolcano shows clean product shot → 4.7★ rating"
+    }},
+    {{
+      "rank": 2,
+      "tag": "QUICK WIN",
+      "title": "Rewrite Bullet #1",
+      "effort": "15min",
+      "effort_type": "quick",
+      "problem": "Current: feature-only '100% Merino Wool'. No outcome for buyer.",
+      "action_steps": ["Change to: 'Stay Dry 8+ Hours — 100% Merino Wool regulates moisture so you perform longer'"],
+      "why_works": "Shifts from material → outcome. Rufus can answer 'will this keep me dry?'",
+      "cvr_low": 5,
+      "cvr_high": 8,
+      "revenue_low": 750,
+      "revenue_high": 1200,
+      "competitor_ref": ""
+    }}
+  ],
+  "total_cvr_low": 21,
+  "total_cvr_high": 32,
+  "total_revenue_low": 3150,
+  "total_revenue_high": 4800,
+  "confidence": 78,
+  "confidence_based_on": ["image analysis", "competitor benchmark", "listing structure gaps"],
+  "execution_order": ["Fix main image (today)", "Rewrite bullet #1 (today)", "Build A+ comparison (week 1-2)"]
+}}
+ 
+RULES:
+- 3-5 actions maximum. Quality over quantity.
+- Use REAL data from listing. Quote actual text. Reference actual photo numbers.
+- CVR estimates realistic for Amazon (single fix rarely >20%)
+- revenue_low/high = sessions × (cvr/100 × cvr_change/100) × price. CALCULATE CORRECTLY.
+- effort_type: "quick" (≤15min, free), "medium" (1-3 days), "structural" (1-2 weeks)
+- If competitor does X and we don't → include in competitor_ref
+- All text in {_lang}
+- Return ONLY valid JSON. No markdown. No explanation."""
+ 
+            _raw = ai_call(
+                "You are an AI Growth Operator. Return ONLY valid JSON.",
+                _prompt, max_tokens=3000
+            )
+ 
+            # Parse JSON
+            try:
+                import re as _re_g
+                _raw_clean = _raw.strip()
+                _raw_clean = _re_g.sub(r"^```[a-z]*\s*", "", _raw_clean, flags=_re_g.MULTILINE)
+                _raw_clean = _re_g.sub(r"```\s*$", "", _raw_clean, flags=_re_g.MULTILINE)
+                _start = _raw_clean.find("{")
+                _end = _raw_clean.rfind("}")
+                if _start >= 0 and _end > _start:
+                    _raw_clean = _raw_clean[_start:_end+1]
+                _raw_clean = _re_g.sub(r",\s*([}\]])", r"\1", _raw_clean)
+                _plan = json.loads(_raw_clean)
+                st.session_state["_growth_plan"] = _plan
+            except Exception as _je:
+                # Fallback: show raw text
+                st.session_state["_growth_plan"] = None
+                st.session_state["_growth_raw"] = _raw
+                st.warning(f"⚠️ JSON parse error — показываю текст: {str(_je)[:60]}")
+ 
+    # ── Render plan ───────────────────────────────────────────────────────
+    _plan = st.session_state.get("_growth_plan")
+    _raw_fallback = st.session_state.get("_growth_raw")
+ 
+    if _plan:
+        _render_growth_plan(_plan, _current_revenue, _sessions, _cvr, _price)
+    elif _raw_fallback:
+        st.markdown(
+            f'<div style="background:#0f172a;border-radius:10px;padding:16px 20px;'
+            f'color:#e2e8f0;font-size:0.9rem;line-height:1.8;white-space:pre-wrap">{_raw_fallback}</div>',
+            unsafe_allow_html=True
+        )
+        if st.button("🗑️ Очистить", key="clear_growth_raw"):
+            st.session_state.pop("_growth_raw", None)
+            st.rerun()
+ 
+ 
+def _render_growth_plan(plan, current_revenue, sessions, cvr, price):
+    """Render the structured growth plan with visuals"""
+ 
+    _goal_pct = plan.get("goal_pct", 20)
+    _goal_text = plan.get("goal_text", "")
+    _current_issue = plan.get("current_issue", "")
+    _actions = plan.get("actions", [])
+    _total_cvr_low = plan.get("total_cvr_low", 0)
+    _total_cvr_high = plan.get("total_cvr_high", 0)
+    _total_rev_low = plan.get("total_revenue_low", 0)
+    _total_rev_high = plan.get("total_revenue_high", 0)
+    _confidence = plan.get("confidence", 70)
+    _conf_based = plan.get("confidence_based_on", [])
+    _exec_order = plan.get("execution_order", [])
+ 
+    # ── GOAL banner ───────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#0a1f0a,#1a3a1a);border:2px solid #22c55e;'
+        f'border-radius:16px;padding:24px 28px;margin:8px 0">'
+        f'<div style="font-size:0.65rem;color:#22c55e;font-weight:700;letter-spacing:0.2em">🎯 GROWTH PLAN</div>'
+        f'<div style="font-size:1.6rem;font-weight:800;color:#22c55e;margin-top:6px">+{_goal_pct}% revenue за 30 дней</div>'
+        f'<div style="font-size:0.88rem;color:#94a3b8;margin-top:6px">{_goal_text}</div>'
+        + (f'<div style="font-size:0.8rem;color:#f59e0b;margin-top:8px;border-top:1px solid #22c55e33;padding-top:8px">'
+           f'⚠️ Current issue: {_current_issue}</div>' if _current_issue else '') +
+        f'</div>',
+        unsafe_allow_html=True
+    )
+ 
+    # ── ACTIONS ───────────────────────────────────────────────────────────
+    _tag_styles = {
+        "CRITICAL":    {"color": "#ef4444", "bg": "#1a0a0a", "border": "#ef4444", "icon": "🔥"},
+        "QUICK WIN":   {"color": "#22c55e", "bg": "#0a1a0a", "border": "#22c55e", "icon": "⚡"},
+        "QUICK":       {"color": "#22c55e", "bg": "#0a1a0a", "border": "#22c55e", "icon": "⚡"},
+        "STRUCTURAL":  {"color": "#3b82f6", "bg": "#0a0f1a", "border": "#3b82f6", "icon": "🏗"},
+        "MEDIUM":      {"color": "#f59e0b", "bg": "#1a1a0a", "border": "#f59e0b", "icon": "🔧"},
+    }
+ 
+    for _a in _actions:
+        _rank = _a.get("rank", 0)
+        _tag = _a.get("tag", "").upper()
+        _style = _tag_styles.get(_tag, _tag_styles.get("MEDIUM"))
+        _effort = _a.get("effort", "")
+        _problem = _a.get("problem", "")
+        _steps = _a.get("action_steps", [])
+        _why = _a.get("why_works", "")
+        _cvr_l = _a.get("cvr_low", 0)
+        _cvr_h = _a.get("cvr_high", 0)
+        _rev_l = _a.get("revenue_low", 0)
+        _rev_h = _a.get("revenue_high", 0)
+        _comp_ref = _a.get("competitor_ref", "")
+ 
+        # Steps HTML
+        _steps_html = ""
+        for _s in _steps:
+            _steps_html += f'<div style="font-size:0.85rem;color:#e2e8f0;padding:3px 0;padding-left:12px;border-left:2px solid {_style["color"]}40">✓ {_s}</div>'
+ 
+        # Impact bar width (relative to max action)
+        _max_rev = max(a.get("revenue_high",0) for a in _actions) if _actions else 1
+        _bar_width = int((_rev_h / max(_max_rev, 1)) * 100)
+ 
+        st.markdown(
+            f'<div style="background:{_style["bg"]};border-left:5px solid {_style["border"]};'
+            f'border-radius:12px;padding:18px 22px;margin:10px 0">'
+ 
+            # Header row: rank + tag + title + effort
+            f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+            f'<span style="font-size:1.5rem;font-weight:900;color:{_style["color"]}">#{_rank}</span>'
+            f'<span style="background:{_style["color"]}22;border:1px solid {_style["color"]};color:{_style["color"]};'
+            f'border-radius:4px;padding:2px 10px;font-size:0.72rem;font-weight:700">{_style["icon"]} {_tag}</span>'
+            f'<span style="font-size:1.05rem;font-weight:700;color:#e2e8f0;flex:1">{_a.get("title","")}</span>'
+            f'<span style="font-size:0.78rem;color:#64748b;background:#1e293b;border-radius:4px;padding:3px 10px">⏱ {_effort}</span>'
+            f'</div>'
+ 
+            # Problem
+            + (f'<div style="font-size:0.85rem;color:#f87171;margin-top:10px;padding:8px 12px;'
+               f'background:#ef444410;border-radius:6px">❌ {_problem}</div>' if _problem else '') +
+ 
+            # Action steps
+            f'<div style="margin-top:10px">'
+            f'<div style="font-size:0.7rem;color:#64748b;font-weight:700;margin-bottom:4px">→ ДЕЙСТВИЕ:</div>'
+            f'{_steps_html}'
+            f'</div>'
+ 
+            # Why it works
+            + (f'<div style="font-size:0.8rem;color:#94a3b8;margin-top:8px;font-style:italic">💡 {_why}</div>' if _why else '') +
+ 
+            # Competitor reference
+            + (f'<div style="font-size:0.78rem;color:#f59e0b;margin-top:6px">🏆 {_comp_ref}</div>' if _comp_ref else '') +
+ 
+            # Impact bar
+            f'<div style="margin-top:12px;background:#0f172a;border-radius:8px;padding:10px 14px">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+            f'<span style="font-size:0.78rem;color:#64748b">IMPACT</span>'
+            f'<div style="display:flex;gap:16px">'
+            f'<span style="font-size:0.85rem;color:#f59e0b;font-weight:700">CVR +{_cvr_l}–{_cvr_h}%</span>'
+            f'<span style="font-size:0.95rem;color:#22c55e;font-weight:800">+${_rev_l:,}–{_rev_h:,}/мес</span>'
+            f'</div></div>'
+            # Visual bar
+            f'<div style="background:#1e293b;border-radius:4px;height:8px">'
+            f'<div style="background:linear-gradient(90deg,{_style["color"]},{_style["color"]}88);'
+            f'width:{_bar_width}%;height:8px;border-radius:4px"></div>'
+            f'</div>'
+            f'</div>'
+ 
+            f'</div>',
+            unsafe_allow_html=True
+        )
+ 
+    # ── TOTAL IMPACT ──────────────────────────────────────────────────────
+    _new_revenue_low = current_revenue + _total_rev_low
+    _new_revenue_high = current_revenue + _total_rev_high
+ 
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#1a1a0a,#2a2a0a);border:2px solid #f59e0b;'
+        f'border-radius:14px;padding:22px 26px;margin:14px 0">'
+        f'<div style="font-size:0.65rem;color:#f59e0b;font-weight:700;letter-spacing:0.2em;margin-bottom:10px">💰 TOTAL IMPACT</div>'
+        f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">'
+        # CVR change
+        f'<div style="text-align:center">'
+        f'<div style="font-size:0.68rem;color:#64748b">ΔCVR</div>'
+        f'<div style="font-size:1.6rem;font-weight:800;color:#f59e0b">+{_total_cvr_low}–{_total_cvr_high}%</div>'
+        f'<div style="font-size:0.75rem;color:#94a3b8">{cvr:.1f}% → {cvr*(1+_total_cvr_high/100):.1f}%</div>'
+        f'</div>'
+        # Revenue change
+        f'<div style="text-align:center">'
+        f'<div style="font-size:0.68rem;color:#64748b">+ВЫРУЧКА/мес</div>'
+        f'<div style="font-size:1.6rem;font-weight:800;color:#22c55e">+${_total_rev_low:,}–{_total_rev_high:,}</div>'
+        f'<div style="font-size:0.75rem;color:#94a3b8">${current_revenue:,.0f} → ${_new_revenue_high:,.0f}</div>'
+        f'</div>'
+        # Annual
+        f'<div style="text-align:center">'
+        f'<div style="font-size:0.68rem;color:#64748b">+ГОДОВОЙ ПРИРОСТ</div>'
+        f'<div style="font-size:1.6rem;font-weight:800;color:#8b5cf6">+${_total_rev_low*12:,}–{_total_rev_high*12:,}</div>'
+        f'<div style="font-size:0.75rem;color:#94a3b8">за 12 месяцев</div>'
+        f'</div>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+ 
+    # ── REVENUE CHART ─────────────────────────────────────────────────────
+    # Before/After visual bar chart
+    _chart_data = [
+        {"label": "Сейчас", "value": current_revenue, "color": "#ef4444"},
+    ]
+    _cumulative = current_revenue
+    for _a in _actions:
+        _mid_rev = (_a.get("revenue_low",0) + _a.get("revenue_high",0)) / 2
+        _cumulative += _mid_rev
+        _chart_data.append({"label": f"+ #{_a['rank']}", "value": _cumulative, "color": "#22c55e"})
+ 
+    _max_val = max(d["value"] for d in _chart_data) if _chart_data else 1
+ 
+    st.markdown(
+        '<div style="background:#0f172a;border-radius:10px;padding:16px 20px;margin:10px 0">'
+        '<div style="font-size:0.7rem;color:#64748b;font-weight:700;letter-spacing:0.1em;margin-bottom:12px">📈 REVENUE WATERFALL</div>',
+        unsafe_allow_html=True
+    )
+ 
+    _bars_html = '<div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding:0 10px">'
+    for _i, _cd in enumerate(_chart_data):
+        _h = int((_cd["value"] / max(_max_val, 1)) * 100)
+        _c = "#ef4444" if _i == 0 else "#22c55e"
+        _opacity = 0.5 + (_i / max(len(_chart_data)-1, 1)) * 0.5 if _i > 0 else 1.0
+        _bars_html += (
+            f'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">'
+            f'<div style="font-size:0.68rem;font-weight:700;color:{_c};margin-bottom:4px">${_cd["value"]:,.0f}</div>'
+            f'<div style="width:100%;height:{max(_h,5)}px;background:{_c};opacity:{_opacity};border-radius:4px 4px 0 0"></div>'
+            f'<div style="font-size:0.62rem;color:#64748b;margin-top:4px;text-align:center">{_cd["label"]}</div>'
+            f'</div>'
+        )
+    _bars_html += '</div>'
+ 
+    st.markdown(_bars_html + '</div>', unsafe_allow_html=True)
+ 
+    # ── CONFIDENCE ────────────────────────────────────────────────────────
+    _conf_c = "#22c55e" if _confidence >= 75 else ("#f59e0b" if _confidence >= 50 else "#ef4444")
+    _conf_label = "Высокая" if _confidence >= 75 else ("Средняя" if _confidence >= 50 else "Низкая")
+    _conf_sources = " · ".join(_conf_based[:4]) if _conf_based else "listing analysis"
+ 
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin:10px 0">'
+ 
+        # Confidence card
+        f'<div style="background:#0f172a;border-radius:10px;padding:14px 18px;border-top:3px solid {_conf_c}">'
+        f'<div style="font-size:0.65rem;color:#64748b;font-weight:700;letter-spacing:0.1em">🧠 CONFIDENCE</div>'
+        f'<div style="font-size:2.2rem;font-weight:800;color:{_conf_c};margin-top:4px">{_confidence}%</div>'
+        f'<div style="font-size:0.72rem;color:{_conf_c};font-weight:600">{_conf_label}</div>'
+        f'<div style="background:#1e293b;border-radius:4px;height:6px;margin-top:8px">'
+        f'<div style="background:{_conf_c};width:{_confidence}%;height:6px;border-radius:4px"></div></div>'
+        f'<div style="font-size:0.68rem;color:#475569;margin-top:6px">Based on: {_conf_sources}</div>'
+        f'</div>'
+ 
+        # Execution order
+        f'<div style="background:#0f172a;border-radius:10px;padding:14px 18px;border-top:3px solid #3b82f6">'
+        f'<div style="font-size:0.65rem;color:#64748b;font-weight:700;letter-spacing:0.1em;margin-bottom:8px">🎯 EXECUTION ORDER</div>',
+        unsafe_allow_html=True
+    )
+ 
+    for _ei, _step in enumerate(_exec_order):
+        _step_c = "#22c55e" if _ei == 0 else ("#f59e0b" if _ei == 1 else "#3b82f6")
+        _timeline = "TODAY" if _ei < 2 else ("THIS WEEK" if _ei < 4 else "NEXT WEEK")
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #1e293b">'
+            f'<span style="font-size:1rem;font-weight:800;color:{_step_c};min-width:28px">{_ei+1}.</span>'
+            f'<span style="font-size:0.85rem;color:#e2e8f0;flex:1">{_step}</span>'
+            f'<span style="font-size:0.65rem;color:{_step_c};background:{_step_c}15;border-radius:3px;padding:2px 6px;font-weight:700">{_timeline}</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+ 
+    st.markdown('</div></div>', unsafe_allow_html=True)
+ 
+    # ── Quick summary for copy/share ──────────────────────────────────────
+    _summary_lines = [f"🎯 GROWTH PLAN: +{_goal_pct}% revenue"]
+    for _a in _actions:
+        _summary_lines.append(f"#{_a['rank']} {_a['title']} → +${_a.get('revenue_low',0):,}-{_a.get('revenue_high',0):,}/мес")
+    _summary_lines.append(f"💰 TOTAL: +${_total_rev_low:,}-{_total_rev_high:,}/мес")
+    _summary_text = "\n".join(_summary_lines)
+ 
+    _sc1, _sc2 = st.columns([3,1])
+    with _sc2:
+        if st.button("🗑️ Очистить", key="clear_growth"):
+            st.session_state.pop("_growth_plan", None)
+            st.session_state.pop("_growth_raw", None)
+            st.rerun()
+
     if od.get("is_frequently_returned"):
         st.markdown('<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:10px;padding:14px 18px;margin:8px 0"><div style="font-size:1.1rem;font-weight:800;color:#fca5a5">🔴 ВНИМАНИЕ: Amazon пометил листинг как "Часто возвращают"</div><div style="color:#fca5a5;font-size:0.88rem;margin-top:6px;line-height:1.7">Исправь фото/описание, размерную сетку, добавь видео распаковки. Снизи % возвратов ниже ~10% за 30 дней.</div></div>', unsafe_allow_html=True)
 
