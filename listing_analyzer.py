@@ -3764,34 +3764,84 @@ STRICT RULES:
 """
 
             _raw = ai_call(
-                "You are an internal Amazon listing opportunity analyst. Return ONLY valid JSON.",
+                "You are an internal Amazon listing opportunity analyst. Return ONLY valid JSON. Be concise in text fields.",
                 _prompt,
-                max_tokens=3200
+                max_tokens=6000
             )
 
-            try:
-                import json as _json
-                import re as _re_g
+            import json as _json
+            import re as _re_g
 
-                _raw_clean = _raw.strip()
-                _raw_clean = _re_g.sub(r"^```[a-zA-Z]*\s*", "", _raw_clean, flags=_re_g.MULTILINE)
-                _raw_clean = _re_g.sub(r"```\s*$", "", _raw_clean, flags=_re_g.MULTILINE)
+            def _try_parse_plan(_raw_text):
+                _rc = _raw_text.strip()
+                _rc = _re_g.sub(r"^```[a-zA-Z]*\s*", "", _rc, flags=_re_g.MULTILINE)
+                _rc = _re_g.sub(r"```\s*$", "", _rc, flags=_re_g.MULTILINE)
+                _s = _rc.find("{")
+                if _s < 0:
+                    return None
+                _rc = _rc[_s:]
+                _e = _rc.rfind("}")
+                if _e > 0:
+                    _candidate = _re_g.sub(r",\s*([}\]])", r"\1", _rc[:_e+1])
+                    try:
+                        return _json.loads(_candidate)
+                    except Exception:
+                        pass
 
-                _start = _raw_clean.find("{")
-                _end = _raw_clean.rfind("}")
-                if _start >= 0 and _end > _start:
-                    _raw_clean = _raw_clean[_start:_end+1]
+                _in_str = False
+                _esc = False
+                _stack = []
+                _last_safe = -1
+                for _idx, _ch in enumerate(_rc):
+                    if _esc:
+                        _esc = False
+                        continue
+                    if _ch == "\\":
+                        _esc = True
+                        continue
+                    if _ch == '"':
+                        _in_str = not _in_str
+                        continue
+                    if _in_str:
+                        continue
+                    if _ch in "{[":
+                        _stack.append("}" if _ch == "{" else "]")
+                    elif _ch in "}]":
+                        if _stack and _stack[-1] == _ch:
+                            _stack.pop()
+                            if not _stack:
+                                _last_safe = _idx
 
-                _raw_clean = _re_g.sub(r",\s*([}\]])", r"\1", _raw_clean)
+                if _in_str:
+                    _rc_fix = _rc + '"'
+                else:
+                    _rc_fix = _rc
+                _rc_fix = _re_g.sub(r",\s*$", "", _rc_fix.rstrip())
+                _rc_fix = _re_g.sub(r":\s*$", ': ""', _rc_fix)
+                _stack2 = list(_stack)
+                while _stack2:
+                    _rc_fix += _stack2.pop()
+                _rc_fix = _re_g.sub(r",\s*([}\]])", r"\1", _rc_fix)
+                try:
+                    return _json.loads(_rc_fix)
+                except Exception:
+                    pass
 
-                _plan = _json.loads(_raw_clean)
-                st.session_state["_listing_opportunity_plan"] = _plan
+                if _last_safe > 0:
+                    try:
+                        return _json.loads(_re_g.sub(r",\s*([}\]])", r"\1", _rc[:_last_safe+1]))
+                    except Exception:
+                        return None
+                return None
+
+            _plan_parsed = _try_parse_plan(_raw)
+            if _plan_parsed and isinstance(_plan_parsed, dict) and _plan_parsed.get("actions"):
+                st.session_state["_listing_opportunity_plan"] = _plan_parsed
                 st.session_state.pop("_listing_opportunity_raw", None)
-
-            except Exception as _je:
+            else:
                 st.session_state["_listing_opportunity_plan"] = None
                 st.session_state["_listing_opportunity_raw"] = _raw
-                st.warning(f"⚠️ JSON parse error — показываю raw output: {str(_je)[:80]}")
+                st.warning("⚠️ AI вернул обрезанный ответ — показываю красивую текстовую версию.")
 
     _plan = st.session_state.get("_listing_opportunity_plan")
     _raw_fallback = st.session_state.get("_listing_opportunity_raw")
@@ -3799,14 +3849,193 @@ STRICT RULES:
     if _plan:
         _render_listing_opportunity_plan(_plan, _current_revenue, _sessions, _cvr, _price)
     elif _raw_fallback:
-        st.markdown(
-            f'<div style="background:#0f172a;border-radius:10px;padding:16px 20px;'
-            f'color:#e2e8f0;font-size:0.9rem;line-height:1.8;white-space:pre-wrap">{_raw_fallback}</div>',
-            unsafe_allow_html=True
-        )
-        if st.button("🗑️ Очистить raw", key="clear_listing_opportunity_raw"):
+        _render_listing_opportunity_text(_raw_fallback, _current_revenue)
+        if st.button("🗑️ Очистить результат", key="clear_listing_opportunity_raw"):
             st.session_state.pop("_listing_opportunity_raw", None)
             st.rerun()
+
+
+def _render_listing_opportunity_text(raw_text, current_revenue):
+    """Pretty-render a (possibly truncated) Opportunity Plan output as styled cards."""
+    import re as _ret
+    import json as _jt
+
+    _rc = raw_text.strip()
+    _rc = _ret.sub(r"^```[a-zA-Z]*\s*", "", _rc, flags=_ret.MULTILINE)
+    _rc = _ret.sub(r"```\s*$", "", _rc, flags=_ret.MULTILINE)
+
+    def _grab_str(_key):
+        _m = _ret.search(rf'"{_key}"\s*:\s*"((?:[^"\\]|\\.)*)"', _rc)
+        if not _m:
+            return ""
+        return _m.group(1).encode("utf-8").decode("unicode_escape", errors="ignore")
+
+    def _grab_num(_key):
+        _m = _ret.search(rf'"{_key}"\s*:\s*(-?\d+(?:\.\d+)?)', _rc)
+        if not _m:
+            return 0
+        try:
+            _v = float(_m.group(1))
+            return int(_v) if _v == int(_v) else _v
+        except Exception:
+            return 0
+
+    _headline = _grab_str("headline")
+    _goal = _grab_str("goal_text")
+    _issue = _grab_str("current_issue")
+    _ml = _grab_num("missed_revenue_low")
+    _mh = _grab_num("missed_revenue_high")
+    _rl = _grab_num("recovery_potential_pct_low")
+    _rh = _grab_num("recovery_potential_pct_high")
+    _conf = _grab_num("confidence") or 70
+
+    _actions = []
+    _am = _ret.search(r'"actions"\s*:\s*\[', _rc)
+    if _am:
+        _depth = 0
+        _in_str = False
+        _esc = False
+        _start = _am.end()
+        _i = _start
+        _obj_start = -1
+        while _i < len(_rc):
+            _ch = _rc[_i]
+            if _esc:
+                _esc = False
+            elif _ch == "\\":
+                _esc = True
+            elif _ch == '"':
+                _in_str = not _in_str
+            elif not _in_str:
+                if _ch == "{":
+                    if _depth == 0:
+                        _obj_start = _i
+                    _depth += 1
+                elif _ch == "}":
+                    _depth -= 1
+                    if _depth == 0 and _obj_start >= 0:
+                        _chunk = _rc[_obj_start:_i+1]
+                        _chunk_clean = _ret.sub(r",\s*([}\]])", r"\1", _chunk)
+                        try:
+                            _actions.append(_jt.loads(_chunk_clean))
+                        except Exception:
+                            _a = {
+                                "rank": len(_actions) + 1,
+                                "tag": "MEDIUM",
+                                "title": "",
+                                "effort": "",
+                                "problem": "",
+                                "why_works": "",
+                                "action_steps": [],
+                                "revenue_low": 0,
+                                "revenue_high": 0,
+                                "cvr_low": 0,
+                                "cvr_high": 0,
+                                "competitor_ref": "",
+                            }
+                            for _k in ("rank","tag","title","effort","problem","why_works","competitor_ref"):
+                                _mm = _ret.search(rf'"{_k}"\s*:\s*"?((?:[^"\\]|\\.)*?)"?\s*[,}}]', _chunk)
+                                if _mm:
+                                    _val = _mm.group(1)
+                                    if _k == "rank":
+                                        try: _a[_k] = int(_val)
+                                        except: pass
+                                    else:
+                                        _a[_k] = _val.encode("utf-8").decode("unicode_escape", errors="ignore")
+                            for _k in ("revenue_low","revenue_high","cvr_low","cvr_high"):
+                                _mm = _ret.search(rf'"{_k}"\s*:\s*(-?\d+(?:\.\d+)?)', _chunk)
+                                if _mm:
+                                    try: _a[_k] = int(float(_mm.group(1)))
+                                    except: pass
+                            _sm = _ret.search(r'"action_steps"\s*:\s*\[(.*?)\]', _chunk, _ret.DOTALL)
+                            if _sm:
+                                _a["action_steps"] = [
+                                    _s.encode("utf-8").decode("unicode_escape", errors="ignore")
+                                    for _s in _ret.findall(r'"((?:[^"\\]|\\.)*)"', _sm.group(1))
+                                ]
+                            _actions.append(_a)
+                        _obj_start = -1
+                elif _ch == "]" and _depth == 0:
+                    break
+            _i += 1
+
+    if _headline or _actions or _ml or _mh:
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,#1a1208,#2b1d0d);border:2px solid #f59e0b;'
+            f'border-radius:16px;padding:24px 28px;margin:8px 0 14px 0">'
+            f'<div style="font-size:0.65rem;color:#f59e0b;font-weight:700;letter-spacing:0.2em">⚠️ MISSED REVENUE</div>'
+            + (f'<div style="font-size:1.55rem;font-weight:800;color:#f8fafc;margin-top:6px">${_ml:,}–${_mh:,} / month</div>' if (_ml or _mh) else '')
+            + (f'<div style="font-size:0.88rem;color:#cbd5e1;margin-top:6px">{_headline}</div>' if _headline else '')
+            + (f'<div style="font-size:0.82rem;color:#94a3b8;margin-top:8px">Recovery potential: +{_rl}% to +{_rh}% vs current baseline</div>' if (_rl or _rh) else '')
+            + (f'<div style="font-size:0.8rem;color:#fbbf24;margin-top:8px;border-top:1px solid #f59e0b33;padding-top:8px">Main issue: {_issue}</div>' if _issue else '')
+            + (f'<div style="font-size:0.78rem;color:#94a3b8;margin-top:8px">{_goal}</div>' if _goal else '')
+            + '</div>',
+            unsafe_allow_html=True
+        )
+
+    _tag_styles = {
+        "CRITICAL":   {"color": "#ef4444", "bg": "#1a0a0a", "icon": "🔥"},
+        "HIGH":       {"color": "#ef4444", "bg": "#1a0a0a", "icon": "🔥"},
+        "QUICK WIN":  {"color": "#22c55e", "bg": "#0a1a0a", "icon": "⚡"},
+        "QUICK":      {"color": "#22c55e", "bg": "#0a1a0a", "icon": "⚡"},
+        "STRUCTURAL": {"color": "#3b82f6", "bg": "#0a0f1a", "icon": "🏗"},
+        "MEDIUM":     {"color": "#f59e0b", "bg": "#1a1a0a", "icon": "🔧"},
+    }
+
+    if _actions:
+        st.markdown(
+            '<div style="font-size:0.7rem;color:#64748b;font-weight:700;letter-spacing:0.12em;margin:14px 0 8px 0">PRIORITY ACTIONS</div>',
+            unsafe_allow_html=True
+        )
+
+    for _a in _actions:
+        _tag = str(_a.get("tag","MEDIUM")).upper()
+        _style = _tag_styles.get(_tag, _tag_styles["MEDIUM"])
+        _rank = _a.get("rank", 0)
+        _title = _a.get("title","")
+        _effort = _a.get("effort","")
+        _problem = _a.get("problem","")
+        _why = _a.get("why_works","")
+        _comp_ref = _a.get("competitor_ref","")
+        _rev_l = _a.get("revenue_low",0)
+        _rev_h = _a.get("revenue_high",0)
+        _cvr_l = _a.get("cvr_low",0)
+        _cvr_h = _a.get("cvr_high",0)
+        _steps = _a.get("action_steps",[]) or []
+
+        _steps_html = "".join(
+            f'<div style="font-size:0.84rem;color:#e2e8f0;padding:4px 0 4px 12px;border-left:2px solid {_style["color"]}40">✓ {_s}</div>'
+            for _s in _steps
+        )
+
+        st.markdown(
+            f'<div style="background:{_style["bg"]};border-left:5px solid {_style["color"]};'
+            f'border-radius:12px;padding:18px 22px;margin:10px 0">'
+            f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+            f'<span style="font-size:1.45rem;font-weight:900;color:{_style["color"]}">#{_rank}</span>'
+            f'<span style="background:{_style["color"]}22;border:1px solid {_style["color"]};'
+            f'color:{_style["color"]};border-radius:4px;padding:2px 10px;font-size:0.72rem;font-weight:700">{_style["icon"]} {_tag}</span>'
+            f'<span style="font-size:1.02rem;font-weight:700;color:#e2e8f0;flex:1">{_title}</span>'
+            + (f'<span style="font-size:0.78rem;color:#64748b;background:#1e293b;border-radius:4px;padding:3px 10px">⏱ {_effort}</span>' if _effort else '')
+            + '</div>'
+            + (f'<div style="font-size:0.85rem;color:#fca5a5;margin-top:10px;padding:8px 12px;background:#ef444410;border-radius:6px">❌ {_problem}</div>' if _problem else '')
+            + (f'<div style="margin-top:10px"><div style="font-size:0.7rem;color:#64748b;font-weight:700;margin-bottom:4px">→ WHAT TO DO:</div>{_steps_html}</div>' if _steps_html else '')
+            + (f'<div style="font-size:0.8rem;color:#94a3b8;margin-top:8px;font-style:italic">💡 {_why}</div>' if _why else '')
+            + (f'<div style="font-size:0.78rem;color:#f59e0b;margin-top:6px">🏆 {_comp_ref}</div>' if _comp_ref else '')
+            + (f'<div style="margin-top:12px;background:#0f172a;border-radius:8px;padding:10px 14px">'
+               f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">'
+               f'<span style="font-size:0.78rem;color:#64748b">RECOVERABLE VALUE</span>'
+               f'<div style="display:flex;gap:16px;flex-wrap:wrap">'
+               f'<span style="font-size:0.85rem;color:#f59e0b;font-weight:700">CVR +{_cvr_l}–{_cvr_h}%</span>'
+               f'<span style="font-size:0.95rem;color:#22c55e;font-weight:800">${_rev_l:,}–${_rev_h:,}/month</span>'
+               f'</div></div></div>' if (_rev_l or _rev_h or _cvr_l or _cvr_h) else '')
+            + '</div>',
+            unsafe_allow_html=True
+        )
+
+    if not (_headline or _actions):
+        with st.expander("📄 Сырой вывод AI (fallback)"):
+            st.code(raw_text, language="json")
 
 
 def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price):
