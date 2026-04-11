@@ -3521,7 +3521,7 @@ if page == "🏠 Обзор":
     health_card()
 
   
-def _render_growth_plan(plan, current_revenue, sessions, cvr, price):
+    def _render_growth_plan(plan, current_revenue, sessions, cvr, price):
     """Render the structured growth plan with visuals"""
  
     _goal_pct = plan.get("goal_pct", 20)
