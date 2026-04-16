@@ -1992,8 +1992,7 @@ with st.sidebar:
                     st.rerun()
             else:
                 st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
-
-    st.divider()
+st.divider()
     _cur3 = st.session_state.get("page","")
     _h_col1, _h_col2 = st.columns([2,1])
     if _h_col1.button("📈  История", key="nav_history", use_container_width=True,
@@ -2004,11 +2003,18 @@ with st.sidebar:
                  type="primary" if _cur3=="📋 Workflow" else "secondary"):
         st.session_state["page"] = "📋 Workflow"
         st.rerun()
+
+    # ── ADMIN ───────────────────────────────────────────────────────────────
+    if st.session_state.get("user", {}).get("role") == "admin":
+        if st.button("👑 Admin", key="nav_admin", use_container_width=True,
+                     type="primary" if _cur3=="👑 Admin" else "secondary"):
+            st.session_state["page"] = "👑 Admin"
+            st.rerun()
+
     if st.session_state.get("our_url_saved") and "result" in st.session_state:
         if st.button("🔄 Обновить анализ", use_container_width=True, key="sidebar_refresh"):
             st.session_state["_trigger_rerun"] = True
             st.rerun()
-
     if "result" in st.session_state and "our_data" in st.session_state:
         _asin_s = st.session_state["our_data"].get("parent_asin","")
         _sc_s = st.session_state["result"].get("overall_score","—")
@@ -2020,7 +2026,6 @@ with st.sidebar:
             '<button style="width:100%;padding:6px 2px;background:#0088cc;color:white;' +
             'border:none;border-radius:6px;cursor:pointer;font-size:0.75rem">📤 TG</button></a>',
             unsafe_allow_html=True)
-
     if st.session_state.get("_hist_loaded"):
         if st.sidebar.button("↩️ Новый анализ", type="primary", use_container_width=True):
             for _k in ["_hist_loaded", "result", "vision", "images", "our_data",
@@ -2028,7 +2033,6 @@ with st.sidebar:
                 st.session_state.pop(_k, None)
             st.session_state["page"] = "🏠 Обзор"
             st.rerun()
-
     st.divider()
     st.markdown("**🗄️ DB**")
     if st.button("🧪 Тест БД", key="db_test"):
