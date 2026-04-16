@@ -3118,7 +3118,6 @@ def page_history():
 <div style="font-weight:600;color:#1e293b;margin-top:4px;white-space:pre-line">{_fname}</div>
 </div>''', unsafe_allow_html=True)
 
-
 # ── Pages ─────────────────────────────────────────────────────────────────────
 page = st.session_state.get("page", "🏠 Обзор")
 r  = st.session_state.get("result", {})
@@ -3128,9 +3127,12 @@ pi = od.get("product_information", {})
 cd = st.session_state.get("comp_data_list", [])
 imgs = st.session_state.get("images", [])
 
+if page == "👑 Admin":
+    show_admin_panel()
+    st.stop()
+
 if page == "📈 История": page_history(); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
-
 if "result" not in st.session_state and page not in ["🔥 Топ ниши", "📱 Mobile Score", "ℹ️ О инструменте", "📖 Документация"]:
     # ── Onboarding для новых пользователей ──────────────────────────────────
     st.markdown("""
