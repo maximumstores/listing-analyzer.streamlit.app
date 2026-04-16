@@ -10,7 +10,7 @@ import streamlit as st
 from datetime import datetime
 from urllib.parse import urlparse
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+
 
 # Всі доступні звіти
 ALL_REPORTS = [
@@ -30,10 +30,14 @@ ALL_REPORTS = [
 # ─── DB ───────────────────────────────────────────────────────────────────────
 
 def get_conn():
-    r = urlparse(DATABASE_URL)
+    try:
+        db_url = st.secrets.get("DATABASE_URL", "") or os.getenv("DATABASE_URL", "")
+    except:
+        db_url = os.getenv("DATABASE_URL", "")
+    r = urlparse(db_url)
     return psycopg2.connect(
         database=r.path[1:], user=r.username, password=r.password,
-        host=r.hostname, port=r.port, connect_timeout=10
+        host=r.hostname, port=r.port, sslmode="require", connect_timeout=10
     )
 
 
