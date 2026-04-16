@@ -4,10 +4,18 @@ import json, re, base64, requests, streamlit as st
 from PIL import Image
 import io
 from datetime import datetime
+# Верх файла
 from auth import (
     show_login, logout, show_admin_panel,
     ensure_tables, create_admin_if_not_exists
 )
+
+# После st.set_page_config
+ensure_tables()
+create_admin_if_not_exists()
+if "user" not in st.session_state:
+    show_login()
+    st.stop()
 # ── PostgreSQL history ─────────────────────────────────────────────────────────
 def safe_float_rating(val):
     """Safely convert rating string like '4.5 out of 5 stars' to float"""
