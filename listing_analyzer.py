@@ -1880,7 +1880,6 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Listing Analyzer", page_icon="https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260", layout="wide")
-
 with st.sidebar:
     _logo_col, _refresh_col = st.columns([4,1])
     with _logo_col:
@@ -1890,8 +1889,20 @@ with st.sidebar:
         st.markdown("<br><br>", unsafe_allow_html=True)
         if st.button("🔄", key="refresh_sidebar", help="Обновить страницу"):
             st.rerun()
-    st.divider()
 
+    # ── USER BADGE ──────────────────────────────────────────────────────────
+    _u = st.session_state.get("user", {})
+    if _u:
+        _role_icon = "👑" if _u.get("role") == "admin" else "👤"
+        st.markdown(
+            f'<div style="background:#1e293b;border-radius:8px;padding:8px 12px;margin-bottom:4px">'
+            f'<div style="font-size:0.78rem;font-weight:700;color:#e2e8f0">{_role_icon} {_u.get("name","")}</div>'
+            f'<div style="font-size:0.68rem;color:#64748b">{_u.get("email","")}</div>'
+            f'</div>', unsafe_allow_html=True)
+        if st.button("🚪 Выйти", key="la_logout", use_container_width=True):
+            logout()
+
+    st.divider()
     if st.session_state.get("_api_balance_error"):
         st.markdown("""
 <div style="background:#fef2f2;border:1.5px solid #ef4444;border-radius:8px;padding:10px 12px;margin-bottom:8px">
