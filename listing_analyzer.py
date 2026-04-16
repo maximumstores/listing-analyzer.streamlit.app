@@ -4,6 +4,11 @@ from PIL import Image
 import io
 from datetime import datetime
 
+from auth_listing import (
+    auth_db_init, auth_show_login, auth_show_sidebar_user,
+    auth_can_see_asin, auth_current_user_email, auth_is_admin,
+    auth_user_badge_html, auth_show_admin_panel
+)
 # ── PostgreSQL history ─────────────────────────────────────────────────────────
 def safe_float_rating(val):
     """Safely convert rating string like '4.5 out of 5 stars' to float"""
@@ -30,6 +35,7 @@ def get_db():
         return None
 
 def db_init():
+    auth_db_init()    
     conn = get_db()
     if not conn: return
     try:
@@ -77,7 +83,6 @@ def db_init():
         conn.close()
     except Exception:
         pass
-
 def db_save(asin, result, vision_text, our_title):
     conn = get_db()
     if not conn: return False
@@ -102,9 +107,8 @@ def db_save(asin, result, vision_text, our_title):
                 "rating": _cd.get("average_rating",""),
                 "reviews": _cd.get("reviews_count",""),
             })
-        # ── Сохраняем до 5 фото (thumbnails ~30KB) ──────────────────────────
         _imgs_to_save = []
-        for _img_d in st.session_state.get("images", [])[:5]:   # ← было [:3]
+        for _img_d in st.session_state.get("images", [])[:5]:
             try:
                 _ib = base64.b64decode(_img_d["b64"])
                 _pil = Image.open(io.BytesIO(_ib)).convert("RGB")
@@ -113,16 +117,15 @@ def db_save(asin, result, vision_text, our_title):
                 _imgs_to_save.append({"b64": base64.b64encode(_tb.read()).decode(), "media_type": "image/jpeg"})
             except: pass
         _aplus_urls_save = st.session_state.get("aplus_img_urls", [])
-        _aplus_vision_save = st.session_state.get("aplus_vision", "")   # ← NEW
-
+        _aplus_vision_save = st.session_state.get("aplus_vision", "")
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO listing_analysis
               (asin, overall_score, title_score, bullets_score, images_score,
                aplus_score, cosmo_score, rufus_score, result_json, vision_text,
                our_title, competitors_json, our_data_json, marketplace,
-               images_json, aplus_img_urls_json, aplus_vision_text)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               images_json, aplus_img_urls_json, aplus_vision_text, analyzed_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (asin,
               pct(result.get("overall_score",0)),
               pct(result.get("title_score",0)),
@@ -138,14 +141,15 @@ def db_save(asin, result, vision_text, our_title):
               st.session_state.get("_marketplace","com"),
               json.dumps(_imgs_to_save, ensure_ascii=False),
               json.dumps(_aplus_urls_save, ensure_ascii=False),
-              _aplus_vision_save))       # ← NEW
+              _aplus_vision_save,
+              auth_current_user_email()))   # ← NEW
         conn.commit()
         conn.close()
         return True
     except Exception as _e:
         st.session_state["_db_save_err"] = str(_e)
         return False
-
+        
 WORKFLOW_STATUSES = [
     ("🆕", "new_audit",      "Новый аудит"),
     ("✏️", "needs_rewrite",  "Нужен рерайт"),
