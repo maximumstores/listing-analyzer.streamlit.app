@@ -1880,6 +1880,7 @@ def run_analysis(our_url, competitor_urls, log, prog=None):
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Listing Analyzer", page_icon="https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260", layout="wide")
+
 with st.sidebar:
     _logo_col, _refresh_col = st.columns([4,1])
     with _logo_col:
@@ -1991,8 +1992,9 @@ with st.sidebar:
                     st.session_state["page"] = full
                     st.rerun()
             else:
-                st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
-st.divider()
+st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
+    st.divider()
+
     _cur3 = st.session_state.get("page","")
     _h_col1, _h_col2 = st.columns([2,1])
     if _h_col1.button("📈  История", key="nav_history", use_container_width=True,
@@ -2003,14 +2005,12 @@ st.divider()
                  type="primary" if _cur3=="📋 Workflow" else "secondary"):
         st.session_state["page"] = "📋 Workflow"
         st.rerun()
-
     # ── ADMIN ───────────────────────────────────────────────────────────────
     if st.session_state.get("user", {}).get("role") == "admin":
         if st.button("👑 Admin", key="nav_admin", use_container_width=True,
                      type="primary" if _cur3=="👑 Admin" else "secondary"):
             st.session_state["page"] = "👑 Admin"
             st.rerun()
-
     if st.session_state.get("our_url_saved") and "result" in st.session_state:
         if st.button("🔄 Обновить анализ", use_container_width=True, key="sidebar_refresh"):
             st.session_state["_trigger_rerun"] = True
