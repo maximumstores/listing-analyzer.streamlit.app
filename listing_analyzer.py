@@ -10,6 +10,12 @@ from auth import (
     ensure_tables, create_admin_if_not_exists
 )
 
+from auth_listing import (
+    auth_db_init, auth_show_login, auth_show_sidebar_user,
+    auth_can_see_asin, auth_current_user_email, auth_is_admin,
+    auth_user_badge_html, auth_show_admin_panel
+)
+
 # После st.set_page_config
 ensure_tables()
 create_admin_if_not_exists()
