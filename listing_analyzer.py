@@ -1741,6 +1741,8 @@ def db_get_prev_analysis(asin):
 
 
 def run_analysis(our_url, competitor_urls, log, prog=None):
+    import time as _time_mod
+    _t_analysis_begin = _time_mod.time()
     _steps_done = []
     def _prog(pct, text):
         if prog:
