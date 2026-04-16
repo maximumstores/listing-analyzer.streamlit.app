@@ -231,7 +231,7 @@ def show_login():
         <div style="text-align:center;padding:32px 0 20px">
             <img src="https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260"
                  style="max-width:220px">
-            <div style="font-size:12px;color:#aaa;margin-top:8px">Business Intelligence Hub</div>
+            <div style="font-size:12px;color:#aaa;margin-top:8px">Listing Analyzer — Internal Tool</div>
         </div>
         """, unsafe_allow_html=True)
 
