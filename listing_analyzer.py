@@ -2017,7 +2017,9 @@ with st.sidebar:
         st.session_state["page"] = "📋 Workflow"
         st.rerun()
     # ── ADMIN ───────────────────────────────────────────────────────────────
-    if st.session_state.get("user", {}).get("role") == "admin":
+    _u = st.session_state.get("user", {})
+    _is_la_admin = _u.get("listing_role") == "admin" or (_u.get("listing_role") is None and _u.get("role") == "admin")
+    if _is_la_admin:
         if st.button("👑 Admin", key="nav_admin", use_container_width=True,
                      type="primary" if _cur3=="👑 Admin" else "secondary"):
             st.session_state["page"] = "👑 Admin"
@@ -4276,12 +4278,12 @@ def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price
 def show_listing_admin_panel():
     st.title("👑 Admin — Listing Analyzer")
     
-    # Убедимся что колонка существует
     conn = get_db()
     if conn:
         try:
             cur = conn.cursor()
             cur.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS analyzed_by TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS listing_role TEXT DEFAULT NULL")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS listing_user_asins (
                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -4301,14 +4303,16 @@ def show_listing_admin_panel():
         if not conn: st.error("Нет БД"); return
         cur = conn.cursor()
         cur.execute("""
-            SELECT u.id, u.email, u.name, u.role, u.is_active, u.created_at,
-                   NULL as last_login,
+            SELECT u.id, u.email, u.name,
+                   COALESCE(u.listing_role, u.role) as role,
+                   u.is_active, u.created_at,
+                   u.last_login,
                    COUNT(DISTINCT la.asin) as asin_count,
                    COUNT(la.id) as analysis_count,
                    MAX(la.analyzed_at) as last_analysis
             FROM users u
-            LEFT JOIN listing_analysis la ON la.analyzed_by IS NOT NULL AND la.analyzed_by = u.email
-            GROUP BY u.id, u.email, u.name, u.role, u.is_active, u.created_at
+            LEFT JOIN listing_analysis la ON la.analyzed_by = u.email
+            GROUP BY u.id, u.email, u.name, u.role, u.listing_role, u.is_active, u.created_at, u.last_login
             ORDER BY u.created_at DESC
         """)
         users = cur.fetchall(); cur.close(); conn.close()
