@@ -1979,6 +1979,7 @@ with st.sidebar:
                     st.session_state["page"] = full
                     st.rerun()
                 st.caption(f"  {_casin2}  {_ct2_short}")
+                
     else:
         st.caption("Запусти анализ чтобы открыть все страницы")
         cur_no_result = st.session_state.get("page","")
@@ -1992,7 +1993,7 @@ with st.sidebar:
                     st.session_state["page"] = full
                     st.rerun()
             else:
-st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
+                 st.markdown(f'<div style="padding:7px 10px;color:#94a3b8;font-size:0.9rem">{icon} {label}</div>', unsafe_allow_html=True)
     st.divider()
 
     _cur3 = st.session_state.get("page","")
