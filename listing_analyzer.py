@@ -4272,8 +4272,19 @@ def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price
         st.session_state.pop("_listing_opportunity_raw", None)
         st.rerun()
 
+
 def show_listing_admin_panel():
     st.title("👑 Admin — Listing Analyzer")
+    
+    # Убедимся что колонка существует
+    conn = get_db()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS analyzed_by TEXT DEFAULT ''")
+            conn.commit()
+            conn.close()
+        except: pass
     
     tab_users, tab_create = st.tabs(["👥 Пользователи", "➕ Добавить"])
     
