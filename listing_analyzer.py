@@ -4287,7 +4287,7 @@ def show_listing_admin_panel():
                    COUNT(la.id) as analysis_count,
                    MAX(la.analyzed_at) as last_analysis
             FROM users u
-            LEFT JOIN listing_analysis la ON la.analyzed_by = u.email
+            LEFT JOIN listing_analysis la ON la.analyzed_by IS NOT NULL AND la.analyzed_by = u.email
             GROUP BY u.id, u.email, u.name, u.role, u.is_active, u.created_at
             ORDER BY u.created_at DESC
         """)
