@@ -4282,6 +4282,13 @@ def show_listing_admin_panel():
         try:
             cur = conn.cursor()
             cur.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS analyzed_by TEXT DEFAULT ''")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS listing_user_asins (
+                       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                       asin TEXT NOT NULL,
+                       PRIMARY KEY (user_id, asin)
+                )
+            """)
             conn.commit()
             conn.close()
         except: pass
