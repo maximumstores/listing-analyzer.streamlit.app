@@ -2531,6 +2531,7 @@ def db_all_competitors():
             except: pass
         return result
     except: return []
+
 def page_history():
     st.title("📈 История анализов")
 
@@ -2730,6 +2731,7 @@ def page_history():
                     (f' &nbsp;·&nbsp; <span style="color:#22c55e">⬤ Gemini</span>' if (_a.get("model_used","")).startswith("Gemini") else
                      (f' &nbsp;·&nbsp; <span style="color:#a78bfa">⚡ Claude</span>' if (_a.get("model_used","")).startswith("Claude") else "")) +
                     (f' &nbsp;·&nbsp; <span style="color:#64748b">⏱ {_a["duration"]//60}м {_a["duration"]%60}с</span>' if _a.get("duration",0)>0 else "") +
+                    (f' &nbsp;·&nbsp; <span style="background:#312e81;color:#a5b4fc;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:600">👤 {_a["analyst"].split("@")[0]}</span>' if _a.get("analyst") else "") +
                     f'</div>' +
                     (f'<div style="font-size:0.72rem;color:#64748b;margin-top:2px">🏆 {len(_a["competitors"])} конкурента</div>' if _a.get("competitors") else "") +
                     f'</div>', unsafe_allow_html=True)
