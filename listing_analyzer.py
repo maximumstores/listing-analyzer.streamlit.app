@@ -4281,13 +4281,14 @@ def show_listing_admin_panel():
         if not conn: st.error("Нет БД"); return
         cur = conn.cursor()
         cur.execute("""
-            SELECT u.id, u.email, u.name, u.role, u.is_active, u.created_at, u.last_login,
+            SELECT u.id, u.email, u.name, u.role, u.is_active, u.created_at,
+                   NULL as last_login,
                    COUNT(DISTINCT la.asin) as asin_count,
                    COUNT(la.id) as analysis_count,
                    MAX(la.analyzed_at) as last_analysis
             FROM users u
             LEFT JOIN listing_analysis la ON la.analyzed_by = u.email
-            GROUP BY u.id, u.email, u.name, u.role, u.is_active, u.created_at, u.last_login
+            GROUP BY u.id, u.email, u.name, u.role, u.is_active, u.created_at
             ORDER BY u.created_at DESC
         """)
         users = cur.fetchall(); cur.close(); conn.close()
