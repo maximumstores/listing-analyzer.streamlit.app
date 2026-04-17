@@ -87,6 +87,8 @@ def db_init():
         conn.close()
     except Exception:
         pass
+
+
 def db_save(asin, result, vision_text, our_title):
     conn = get_db()
     if not conn: return False
@@ -146,7 +148,7 @@ def db_save(asin, result, vision_text, our_title):
               json.dumps(_imgs_to_save, ensure_ascii=False),
               json.dumps(_aplus_urls_save, ensure_ascii=False),
               _aplus_vision_save,
-              auth_current_user_email()
+              st.session_state.get("user", {}).get("email", "")))
         conn.commit()
         conn.close()
         return True
