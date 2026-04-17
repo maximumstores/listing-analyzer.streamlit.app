@@ -3139,7 +3139,7 @@ cd = st.session_state.get("comp_data_list", [])
 imgs = st.session_state.get("images", [])
 
 if page == "👑 Admin":
-    show_admin_panel()
+    show_listing_admin_panel()
     st.stop()
 
 if page == "📈 История": page_history(); st.stop()
