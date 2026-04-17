@@ -39,7 +39,7 @@ def get_db():
         return None
 
 def db_init():
-    auth_db_init()    
+    ensure_tables() 
     conn = get_db()
     if not conn: return
     try:
@@ -146,7 +146,7 @@ def db_save(asin, result, vision_text, our_title):
               json.dumps(_imgs_to_save, ensure_ascii=False),
               json.dumps(_aplus_urls_save, ensure_ascii=False),
               _aplus_vision_save,
-              auth_current_user_email()))   # ← NEW
+              auth_current_user_email()
         conn.commit()
         conn.close()
         return True
