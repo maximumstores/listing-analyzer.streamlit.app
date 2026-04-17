@@ -4273,6 +4273,161 @@ def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price
         st.session_state.pop("_listing_opportunity_raw", None)
         st.rerun()
 
+def show_listing_admin_panel():
+    st.title("👑 Admin — Listing Analyzer")
+    
+    tab_users, tab_create = st.tabs(["👥 Пользователи", "➕ Добавить"])
+    
+    with tab_users:
+        # Загружаем юзеров + их статистику
+        conn = get_db()
+        if not conn: st.error("Нет БД"); return
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT u.id, u.email, u.name, u.role, u.is_active, u.created_at, u.last_login,
+                   COUNT(DISTINCT la.asin) as asin_count,
+                   COUNT(la.id) as analysis_count,
+                   MAX(la.analyzed_at) as last_analysis
+            FROM users u
+            LEFT JOIN listing_analysis la ON la.analyzed_by = u.email
+            GROUP BY u.id, u.email, u.name, u.role, u.is_active, u.created_at, u.last_login
+            ORDER BY u.created_at DESC
+        """)
+        users = cur.fetchall(); cur.close(); conn.close()
+        
+        current_id = st.session_state.get("user",{}).get("id")
+        
+        for row in users:
+            uid, email, name, role, is_active, created_at, last_login, asin_count, analysis_count, last_analysis = row
+            is_self = uid == current_id
+            
+            _rc = "#22c55e" if is_active else "#94a3b8"
+            _last_str = last_login.strftime("%d.%m.%Y %H:%M") if last_login else "никогда"
+            _last_an = last_analysis.strftime("%d.%m.%Y %H:%M") if last_analysis else "—"
+            
+            with st.container(border=True):
+                c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 2])
+                with c1:
+                    _role_icon = "👑" if role=="admin" else "👤"
+                    st.markdown(f"**{_role_icon} {name or '—'}**{'  *(вы)*' if is_self else ''}")
+                    st.caption(email)
+                with c2:
+                    st.markdown(f"`{role.upper()}`")
+                    st.markdown("🟢 Активен" if is_active else "🔴 Отключён")
+                with c3:
+                    st.metric("ASINов", asin_count)
+                with c4:
+                    st.metric("Анализов", analysis_count)
+                with c5:
+                    st.caption(f"🕐 Вход: {_last_str}")
+                    st.caption(f"🔍 Анализ: {_last_an}")
+                
+                if not is_self:
+                    with st.expander(f"⚙️ {name or email}"):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            new_role = st.selectbox("Роль:", ["admin","viewer"],
+                                index=0 if role=="admin" else 1, key=f"la2_role_{uid}")
+                            if st.button("💾 Роль", key=f"la2_save_role_{uid}", use_container_width=True):
+                                _c = get_db(); _cur = _c.cursor()
+                                _cur.execute("UPDATE users SET role=%s WHERE id=%s", (new_role, uid))
+                                _c.commit(); _c.close(); st.success("✅"); st.rerun()
+                        with col2:
+                            btn_lbl = "🚫 Деактивировать" if is_active else "✅ Активировать"
+                            if st.button(btn_lbl, key=f"la2_act_{uid}", use_container_width=True):
+                                _c = get_db(); _cur = _c.cursor()
+                                _cur.execute("UPDATE users SET is_active=%s WHERE id=%s", (not is_active, uid))
+                                _c.commit(); _c.close(); st.rerun()
+                        with col3:
+                            if st.button("🗑 Удалить", key=f"la2_del_{uid}", use_container_width=True):
+                                _c = get_db(); _cur = _c.cursor()
+                                _cur.execute("DELETE FROM users WHERE id=%s", (uid,))
+                                _c.commit(); _c.close(); st.rerun()
+                        
+                        # Пароль
+                        st.markdown("---")
+                        new_pw = st.text_input("🔑 Новый пароль:", type="password", key=f"la2_pw_{uid}")
+                        if st.button("💾 Сменить пароль", key=f"la2_save_pw_{uid}", use_container_width=True):
+                            if new_pw and len(new_pw) >= 6:
+                                import bcrypt as _bc
+                                hashed = _bc.hashpw(new_pw.encode(), _bc.gensalt()).decode()
+                                _c = get_db(); _cur = _c.cursor()
+                                _cur.execute("UPDATE users SET password=%s WHERE id=%s", (hashed, uid))
+                                _c.commit(); _c.close(); st.success("✅ Пароль изменён!")
+                            else:
+                                st.error("Мин. 6 символов")
+                        
+                        # ASINы доступа (только для viewer)
+                        if role != "admin":
+                            st.markdown("---")
+                            st.markdown("**📦 Доступные ASINы** (пусто = все)")
+                            _c = get_db(); _cur = _c.cursor()
+                            _cur.execute("SELECT asin FROM listing_user_asins WHERE user_id=%s", (uid,))
+                            _allowed = {r[0] for r in _cur.fetchall()}; _c.close()
+                            asins_str = st.text_area("ASINы через запятую или новую строку:",
+                                value="\n".join(sorted(_allowed)), height=100, key=f"la2_asins_{uid}")
+                            if st.button("💾 Сохранить ASINы", key=f"la2_save_asins_{uid}",
+                                         use_container_width=True, type="primary"):
+                                new_asins = [a.strip().upper() for a in re.split(r"[,\n\s]+", asins_str) if a.strip()]
+                                _c = get_db(); _cur = _c.cursor()
+                                _cur.execute("DELETE FROM listing_user_asins WHERE user_id=%s", (uid,))
+                                for a in new_asins:
+                                    _cur.execute("INSERT INTO listing_user_asins (user_id, asin) VALUES (%s,%s) ON CONFLICT DO NOTHING", (uid, a))
+                                _c.commit(); _c.close()
+                                st.success(f"✅ {len(new_asins)} ASINов сохранено")
+                        
+                        # История анализов юзера
+                        if analysis_count > 0:
+                            st.markdown("---")
+                            st.markdown("**📊 Последние анализы:**")
+                            _c = get_db(); _cur = _c.cursor()
+                            _cur.execute("""
+                                SELECT asin, our_title, overall_score, analyzed_at
+                                FROM listing_analysis WHERE analyzed_by=%s
+                                ORDER BY analyzed_at DESC LIMIT 5
+                            """, (email,))
+                            _rows = _cur.fetchall(); _c.close()
+                            for _r in _rows:
+                                _sc = _r[2] or 0
+                                _sc_c = "#22c55e" if _sc>=75 else ("#f59e0b" if _sc>=50 else "#ef4444")
+                                st.markdown(
+                                    f'<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">'
+                                    f'<span style="font-size:0.8rem;color:#0f172a">{_r[0]} — {(_r[1] or "")[:40]}</span>'
+                                    f'<span style="font-size:0.8rem;font-weight:700;color:{_sc_c}">{_sc}%</span>'
+                                    f'<span style="font-size:0.72rem;color:#64748b">{_r[3].strftime("%d.%m.%Y") if _r[3] else ""}</span>'
+                                    f'</div>', unsafe_allow_html=True)
+
+    with tab_create:
+        st.markdown("### ➕ Новый пользователь")
+        with st.container(border=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                nc_email = st.text_input("📧 Email:", key="la2_nc_email")
+                nc_name  = st.text_input("👤 Имя:", key="la2_nc_name")
+            with c2:
+                nc_pass = st.text_input("🔑 Пароль:", type="password", key="la2_nc_pass")
+                nc_role = st.selectbox("Роль:", ["viewer","admin"], key="la2_nc_role")
+            
+            if st.button("✅ Создать", type="primary", use_container_width=True, key="la2_nc_create"):
+                if not nc_email or not nc_pass:
+                    st.error("Email и пароль обязательны")
+                elif len(nc_pass) < 6:
+                    st.error("Пароль мин. 6 символов")
+                else:
+                    try:
+                        import bcrypt as _bc
+                        hashed = _bc.hashpw(nc_pass.encode(), _bc.gensalt()).decode()
+                        _c = get_db(); _cur = _c.cursor()
+                        _cur.execute("""
+                            INSERT INTO users (email, password, name, role, is_active)
+                            VALUES (%s,%s,%s,%s,TRUE)
+                        """, (nc_email.strip().lower(), hashed, nc_name, nc_role))
+                        _c.commit(); _c.close()
+                        st.success(f"✅ Пользователь {nc_email} создан!")
+                        st.rerun()
+                    except Exception as _e:
+                        err = str(_e)
+                        st.error("Email уже существует" if "unique" in err.lower() else f"Ошибка: {err}")
 
 # ── Pages dispatch ────────────────────────────────────────────────────────────
 if page == "🏠 Обзор":
