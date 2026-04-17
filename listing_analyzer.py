@@ -4429,7 +4429,13 @@ def show_listing_admin_panel():
                         err = str(_e)
                         st.error("Email уже существует" if "unique" in err.lower() else f"Ошибка: {err}")
 
+
 # ── Pages dispatch ────────────────────────────────────────────────────────────
+
+if page == "👑 Admin":
+    show_listing_admin_panel()
+    st.stop()
+    
 if page == "🏠 Обзор":
     _rc1, _rc2 = st.columns([8,1])
     with _rc1: st.title("🏠 Обзор листинга")
