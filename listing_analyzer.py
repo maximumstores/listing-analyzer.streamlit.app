@@ -3138,9 +3138,6 @@ pi = od.get("product_information", {})
 cd = st.session_state.get("comp_data_list", [])
 imgs = st.session_state.get("images", [])
 
-if page == "👑 Admin":
-    show_listing_admin_panel()
-    st.stop()
 
 if page == "📈 История": page_history(); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
