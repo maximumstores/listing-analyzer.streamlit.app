@@ -231,7 +231,8 @@ def db_all_asins():
         cur = conn.cursor()
         cur.execute("""
             SELECT asin, our_title, overall_score, analyzed_at, listing_type,
-                   COALESCE(marketplace,'com') as marketplace, our_data_json, competitors_json
+                   COALESCE(marketplace,'com') as marketplace, our_data_json, competitors_json,
+                   COALESCE(analyzed_by,'') as analyzed_by
             FROM listing_analysis
             ORDER BY analyzed_at DESC
         """)
@@ -247,7 +248,6 @@ def db_all_asins():
                     if _imgs and isinstance(_imgs, list):
                         _img = next((u for u in _imgs if isinstance(u,str) and u.startswith("http") and "_SR" not in u and "_SS4" not in u), "")
                 except: pass
-            # Extract model used from our_data_json
             _model_used = ""; _duration = 0; _comp_names = []
             if r[6]:
                 try:
@@ -269,11 +269,19 @@ def db_all_asins():
                 except: pass
             result.append({"asin": r[0], "title": r[1], "score": r[2], "date": r[3],
                            "type": r[4], "marketplace": r[5], "img": _img, "model_used": _model_used,
-                           "duration": _duration, "competitors": _comp_names})
+                           "duration": _duration, "competitors": _comp_names,
+                           "analyst": r[8]})
+
+        # ── Фильтр по юзеру ──────────────────────────────────────────────
+        _user = st.session_state.get("user", {})
+        if _user.get("role") != "admin":
+            _my_email = _user.get("email", "")
+            result = [a for a in result if not a.get("analyst") or a.get("analyst") == _my_email]
+
         return result
     except Exception:
         return []
-
+        
 ANTHROPIC_URL          = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL        = "claude-sonnet-4-6"
 ANTHROPIC_MODEL_VISION = "claude-sonnet-4-6"
