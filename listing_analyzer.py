@@ -1910,8 +1910,17 @@ with st.sidebar:
             f'<div style="font-size:0.78rem;font-weight:700;color:#e2e8f0">{_role_icon} {_u.get("name","")}</div>'
             f'<div style="font-size:0.68rem;color:#64748b">{_u.get("email","")}</div>'
             f'</div>', unsafe_allow_html=True)
-        if st.button("🚪 Выйти", key="la_logout", use_container_width=True):
-            logout()
+        _cab_col, _out_col = st.columns(2)
+        _is_la_admin_badge = _u.get("listing_role") == "admin" or (_u.get("listing_role") is None and _u.get("role") == "admin")
+        if _is_la_admin_badge:
+            if _cab_col.button("⚙️ Кабинет", key="la_cabinet", use_container_width=True):
+                st.session_state["page"] = "⚙️ Кабинет"
+                st.rerun()
+            if _out_col.button("🚪 Выйти", key="la_logout", use_container_width=True):
+                logout()
+        else:
+            if st.button("🚪 Выйти", key="la_logout", use_container_width=True):
+                logout()
 
     st.divider()
     if st.session_state.get("_api_balance_error"):
@@ -2016,14 +2025,9 @@ with st.sidebar:
                  type="primary" if _cur3=="📋 Workflow" else "secondary"):
         st.session_state["page"] = "📋 Workflow"
         st.rerun()
-    # ── ADMIN ───────────────────────────────────────────────────────────────
+    # ── КАБИНЕТ (перенесено к кнопке Выйти в user-badge) ────────────────────
     _u = st.session_state.get("user", {})
     _is_la_admin = _u.get("listing_role") == "admin" or (_u.get("listing_role") is None and _u.get("role") == "admin")
-    if _is_la_admin:
-        if st.button("👑 Admin", key="nav_admin", use_container_width=True,
-                     type="primary" if _cur3=="👑 Admin" else "secondary"):
-            st.session_state["page"] = "👑 Admin"
-            st.rerun()
     if st.session_state.get("our_url_saved") and "result" in st.session_state:
         if st.button("🔄 Обновить анализ", use_container_width=True, key="sidebar_refresh"):
             st.session_state["_trigger_rerun"] = True
@@ -4276,7 +4280,8 @@ def _render_listing_opportunity_plan(plan, current_revenue, sessions, cvr, price
 
 
 def show_listing_admin_panel():
-    st.title("👑 Admin — Listing Analyzer")
+    st.title("⚙️ Кабинет — Listing Analyzer")
+    st.caption("Роли здесь влияют ТОЛЬКО на Listing Analyzer. У merino-bi свой кабинет со своими ролями.")
     
     conn = get_db()
     if conn:
@@ -4348,11 +4353,24 @@ def show_listing_admin_panel():
                     with st.expander(f"⚙️ {name or email}"):
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            new_role = st.selectbox("Роль:", ["admin","viewer"],
-                                index=0 if role=="admin" else 1, key=f"la2_role_{uid}")
+                            # Роль ЛИШЕ для listing-analyze (колонка listing_role).
+                            # Глобальна role і bi_role не чіпаємо — ними керує merino-bi кабінет.
+                            _c0 = get_db(); _cur0 = _c0.cursor()
+                            _cur0.execute("SELECT listing_role FROM users WHERE id=%s", (uid,))
+                            _lr_row = _cur0.fetchone(); _c0.close()
+                            _lr_cur = (_lr_row[0] if _lr_row else None)
+                            _opts = ["🔗 как глобальная", "👑 admin", "👤 viewer"]
+                            _to_db = {"🔗 как глобальная": None, "👑 admin": "admin", "👤 viewer": "viewer"}
+                            _from_db = {None: "🔗 как глобальная", "admin": "👑 admin", "viewer": "👤 viewer"}
+                            new_role_sel = st.selectbox(
+                                "Роль в Listing Analyzer:", _opts,
+                                index=_opts.index(_from_db.get(_lr_cur, _opts[0])),
+                                key=f"la2_role_{uid}",
+                                help="Впливає ТІЛЬКИ на Listing Analyzer. Не змінює роль у merino-bi."
+                            )
                             if st.button("💾 Роль", key=f"la2_save_role_{uid}", use_container_width=True):
                                 _c = get_db(); _cur = _c.cursor()
-                                _cur.execute("UPDATE users SET role=%s WHERE id=%s", (new_role, uid))
+                                _cur.execute("UPDATE users SET listing_role=%s WHERE id=%s", (_to_db[new_role_sel], uid))
                                 _c.commit(); _c.close(); st.success("✅"); st.rerun()
                         with col2:
                             btn_lbl = "🚫 Деактивировать" if is_active else "✅ Активировать"
@@ -4428,8 +4446,9 @@ def show_listing_admin_panel():
                 nc_name  = st.text_input("👤 Имя:", key="la2_nc_name")
             with c2:
                 nc_pass = st.text_input("🔑 Пароль:", type="password", key="la2_nc_pass")
-                nc_role = st.selectbox("Роль:", ["viewer","admin"], key="la2_nc_role")
-            
+                nc_role = st.selectbox("Роль в Listing Analyzer:", ["viewer","admin"], key="la2_nc_role",
+                                       help="Створює юзера з глобальною role=viewer та listing_role=обране. У merino-bi буде viewer.")
+
             if st.button("✅ Создать", type="primary", use_container_width=True, key="la2_nc_create"):
                 if not nc_email or not nc_pass:
                     st.error("Email и пароль обязательны")
@@ -4441,8 +4460,8 @@ def show_listing_admin_panel():
                         hashed = _bc.hashpw(nc_pass.encode(), _bc.gensalt()).decode()
                         _c = get_db(); _cur = _c.cursor()
                         _cur.execute("""
-                            INSERT INTO users (email, password, name, role, is_active)
-                            VALUES (%s,%s,%s,%s,TRUE)
+                            INSERT INTO users (email, password, name, role, listing_role, is_active)
+                            VALUES (%s,%s,%s,'viewer',%s,TRUE)
                         """, (nc_email.strip().lower(), hashed, nc_name, nc_role))
                         _c.commit(); _c.close()
                         st.success(f"✅ Пользователь {nc_email} создан!")
@@ -4454,7 +4473,7 @@ def show_listing_admin_panel():
 
 # ── Pages dispatch ────────────────────────────────────────────────────────────
 
-if page == "👑 Admin":
+if page in ("⚙️ Кабинет", "👑 Admin"):
     show_listing_admin_panel()
     st.stop()
     
