@@ -4430,35 +4430,61 @@ def show_listing_admin_panel():
                 
                 if not is_self:
                     with st.expander(f"⚙️ {name or email}"):
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            # Роль ЛИШЕ для listing-analyze (колонка listing_role).
-                            # Глобальна role і bi_role не чіпаємо — ними керує merino-bi кабінет.
-                            _c0 = get_db(); _cur0 = _c0.cursor()
-                            _cur0.execute("SELECT listing_role FROM users WHERE id=%s", (uid,))
-                            _lr_row = _cur0.fetchone(); _c0.close()
-                            _lr_cur = (_lr_row[0] if _lr_row else None)
-                            _opts = ["🔗 как глобальная", "👑 admin", "👤 viewer"]
-                            _to_db = {"🔗 как глобальная": None, "👑 admin": "admin", "👤 viewer": "viewer"}
-                            _from_db = {None: "🔗 как глобальная", "admin": "👑 admin", "viewer": "👤 viewer"}
-                            new_role_sel = st.selectbox(
-                                "Роль в Listing Analyzer:", _opts,
-                                index=_opts.index(_from_db.get(_lr_cur, _opts[0])),
+                        # ── Членство в приложениях (per-app роли) ──────────
+                        st.markdown("**🎛 Членство в приложениях**")
+                        st.caption("Роль = NULL («как глобальная») — юзер не считается членом этого приложения если нет активности")
+
+                        _opts = ["🔗 как глобальная", "👑 admin", "👤 viewer", "🚫 нет доступа"]
+                        _to_db = {
+                            "🔗 как глобальная": None,
+                            "👑 admin": "admin",
+                            "👤 viewer": "viewer",
+                            "🚫 нет доступа": "__NO_ACCESS__",  # спец-маркер — обнуляем и в role надо быть не-admin
+                        }
+                        def _from_db(_v):
+                            return {None: "🔗 как глобальная", "admin": "👑 admin", "viewer": "👤 viewer"}.get(_v, "🔗 как глобальная")
+
+                        _mc1, _mc2 = st.columns(2)
+                        with _mc1:
+                            _la_opts = _opts[:3]  # без "нет доступа" — Listing управляем через listing_role
+                            _la_cur_label = _from_db(listing_role_raw)
+                            new_listing_sel = st.selectbox(
+                                "🔵 Роль в Listing Analyzer:",
+                                _la_opts,
+                                index=_la_opts.index(_la_cur_label),
                                 key=f"la2_role_{uid}",
-                                help="Впливає ТІЛЬКИ на Listing Analyzer. Не змінює роль у merino-bi."
+                                help="Влияет только на Listing Analyzer."
                             )
-                            if st.button("💾 Роль", key=f"la2_save_role_{uid}", use_container_width=True):
+                        with _mc2:
+                            _bi_opts = _opts[:3]
+                            _bi_cur_label = _from_db(bi_role_raw)
+                            new_bi_sel = st.selectbox(
+                                "🟢 Роль в merino-bi:",
+                                _bi_opts,
+                                index=_bi_opts.index(_bi_cur_label),
+                                key=f"la2_bi_role_{uid}",
+                                help="Влияет только на merino-bi. Тут можно пригласить юзера в BI или убрать из него."
+                            )
+
+                        _save_col, _act_col, _del_col = st.columns(3)
+                        with _save_col:
+                            if st.button("💾 Сохранить роли", key=f"la2_save_roles_{uid}", use_container_width=True, type="primary"):
                                 _c = get_db(); _cur = _c.cursor()
-                                _cur.execute("UPDATE users SET listing_role=%s WHERE id=%s", (_to_db[new_role_sel], uid))
-                                _c.commit(); _c.close(); st.success("✅"); st.rerun()
-                        with col2:
+                                _cur.execute(
+                                    "UPDATE users SET listing_role=%s, bi_role=%s WHERE id=%s",
+                                    (_to_db[new_listing_sel], _to_db[new_bi_sel], uid)
+                                )
+                                _c.commit(); _c.close()
+                                st.success("✅ Роли обновлены")
+                                st.rerun()
+                        with _act_col:
                             btn_lbl = "🚫 Деактивировать" if is_active else "✅ Активировать"
                             if st.button(btn_lbl, key=f"la2_act_{uid}", use_container_width=True):
                                 _c = get_db(); _cur = _c.cursor()
                                 _cur.execute("UPDATE users SET is_active=%s WHERE id=%s", (not is_active, uid))
                                 _c.commit(); _c.close(); st.rerun()
-                        with col3:
-                            if st.button("🗑 Удалить", key=f"la2_del_{uid}", use_container_width=True):
+                        with _del_col:
+                            if st.button("🗑 Удалить юзера", key=f"la2_del_{uid}", use_container_width=True):
                                 _c = get_db(); _cur = _c.cursor()
                                 _cur.execute("DELETE FROM users WHERE id=%s", (uid,))
                                 _c.commit(); _c.close(); st.rerun()
