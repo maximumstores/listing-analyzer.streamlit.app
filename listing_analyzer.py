@@ -4350,6 +4350,47 @@ def show_listing_admin_panel():
         """)
         users = cur.fetchall(); cur.close(); conn.close()
 
+        # ── Расширенная статистика: avg score, 7d/30d, Claude/Gemini, маркетплейсы ──
+        _stats_by_email = {}
+        _mp_by_email = {}
+        try:
+            _cs = get_db()
+            if _cs:
+                _curs = _cs.cursor()
+                _curs.execute("""
+                    SELECT analyzed_by,
+                           COUNT(*) FILTER (WHERE overall_score > 0) as ok_count,
+                           ROUND(AVG(overall_score) FILTER (WHERE overall_score > 0)) as avg_score,
+                           MAX(overall_score) as max_score,
+                           MIN(overall_score) FILTER (WHERE overall_score > 0) as min_score,
+                           COUNT(*) FILTER (WHERE analyzed_at > NOW() - INTERVAL '7 days') as last_7d,
+                           COUNT(*) FILTER (WHERE analyzed_at > NOW() - INTERVAL '30 days') as last_30d,
+                           COUNT(*) FILTER (WHERE our_data_json::text ILIKE '%%Claude/%%') as claude_cnt,
+                           COUNT(*) FILTER (WHERE our_data_json::text ILIKE '%%Gemini/%%') as gemini_cnt
+                    FROM listing_analysis
+                    WHERE analyzed_by IS NOT NULL AND analyzed_by != ''
+                    GROUP BY analyzed_by
+                """)
+                for _r in _curs.fetchall():
+                    _stats_by_email[_r[0]] = {
+                        "ok": _r[1] or 0, "avg": _r[2] or 0,
+                        "max": _r[3] or 0, "min": _r[4] or 0,
+                        "d7": _r[5] or 0, "d30": _r[6] or 0,
+                        "claude": _r[7] or 0, "gemini": _r[8] or 0,
+                    }
+                _curs.execute("""
+                    SELECT analyzed_by, COALESCE(marketplace,'com') as mp, COUNT(*)
+                    FROM listing_analysis
+                    WHERE analyzed_by IS NOT NULL AND analyzed_by != ''
+                    GROUP BY analyzed_by, marketplace
+                """)
+                for _r in _curs.fetchall():
+                    _mp_by_email.setdefault(_r[0], {})[_r[1]] = _r[2]
+                _curs.close(); _cs.close()
+        except Exception: pass
+
+        _MP_FLAGS = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱","se":"🇸🇪","pl":"🇵🇱","com.au":"🇦🇺","com.mx":"🇲🇽"}
+
         current_id = st.session_state.get("user",{}).get("id")
 
         # Подсчитываем членство по приложениям
@@ -4427,6 +4468,56 @@ def show_listing_admin_panel():
                 with c5:
                     st.caption(f"🕐 Вход: {_last_str}")
                     st.caption(f"🔍 Анализ: {_last_an}")
+
+                # ── Extended stats strip (showing only if юзер что-то делал) ──
+                _st = _stats_by_email.get(email, {})
+                if (analysis_count or 0) > 0 or _st:
+                    _pills = []
+
+                    # 📊 Средний Score
+                    _avg = _st.get("avg", 0)
+                    if _avg:
+                        _avg_c = "#22c55e" if _avg >= 75 else ("#f59e0b" if _avg >= 50 else "#ef4444")
+                        _pills.append(
+                            f'<span style="background:#0f172a;border-left:3px solid {_avg_c};border-radius:4px;padding:3px 8px;font-size:0.72rem">'
+                            f'📊 Ср: <b style="color:{_avg_c}">{int(_avg)}%</b> '
+                            f'<span style="color:#64748b">· макс {_st.get("max",0)}% · мин {_st.get("min",0)}%</span></span>'
+                        )
+
+                    # 🔥 Активность за 7/30 дней
+                    _d7 = _st.get("d7", 0); _d30 = _st.get("d30", 0)
+                    if _d7 or _d30:
+                        _act_c = "#22c55e" if _d7 >= 3 else ("#f59e0b" if _d7 >= 1 else "#94a3b8")
+                        _pills.append(
+                            f'<span style="background:#0f172a;border-left:3px solid {_act_c};border-radius:4px;padding:3px 8px;font-size:0.72rem">'
+                            f'🔥 7д: <b style="color:{_act_c}">{_d7}</b> '
+                            f'<span style="color:#64748b">· 30д: {_d30}</span></span>'
+                        )
+
+                    # 💸 Claude vs Gemini
+                    _cl = _st.get("claude", 0); _gm = _st.get("gemini", 0)
+                    if _cl or _gm:
+                        _pills.append(
+                            f'<span style="background:#0f172a;border-radius:4px;padding:3px 8px;font-size:0.72rem">'
+                            f'<span style="color:#a78bfa">🟣 Claude: <b>{_cl}</b></span> '
+                            f'<span style="color:#64748b">·</span> '
+                            f'<span style="color:#22c55e">🟢 Gemini: <b>{_gm}</b></span></span>'
+                        )
+
+                    # 🌍 Маркетплейсы
+                    _mp_dict = _mp_by_email.get(email, {})
+                    if _mp_dict:
+                        _mp_parts = [f"{_MP_FLAGS.get(_mp,'🌍')} {_cnt}" for _mp, _cnt in sorted(_mp_dict.items(), key=lambda x: -x[1])[:4]]
+                        _pills.append(
+                            f'<span style="background:#0f172a;border-radius:4px;padding:3px 8px;font-size:0.72rem;color:#e2e8f0">'
+                            f'🌍 ' + ' · '.join(_mp_parts) + '</span>'
+                        )
+
+                    if _pills:
+                        st.markdown(
+                            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + ''.join(_pills) + '</div>',
+                            unsafe_allow_html=True
+                        )
                 
                 if not is_self:
                     with st.expander(f"⚙️ {name or email}"):
