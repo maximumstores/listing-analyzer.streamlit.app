@@ -4300,10 +4300,36 @@ def show_listing_admin_panel():
             conn.close()
         except: pass
     
+    # Гарантуємо, що колонка bi_role існує (merino-bi теж її додає через auth.ensure_tables)
+    try:
+        _cbi = get_db()
+        if _cbi:
+            _curbi = _cbi.cursor()
+            _curbi.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS bi_role TEXT")
+            _cbi.commit(); _cbi.close()
+    except Exception: pass
+
     tab_users, tab_create = st.tabs(["👥 Пользователи", "➕ Добавить"])
-    
+
     with tab_users:
-        # Загружаем юзеров + их статистику
+        # ── Фильтр: показывать только юзеров Listing Analyzer / всех из БД ──
+        _filter_col1, _filter_col2 = st.columns([3, 2])
+        with _filter_col1:
+            _la_filter = st.radio(
+                "Показать:",
+                [
+                    "👥 Только Listing Analyzer",
+                    "🌐 Всех из общей БД",
+                ],
+                horizontal=True, key="la2_user_filter", label_visibility="collapsed",
+                help=(
+                    "• Listing Analyzer = юзеры с listing_role или историей анализов\n"
+                    "• Все из БД = включая тех кто только в merino-bi (ты можешь назначить им listing_role чтобы добавить сюда)"
+                )
+            )
+        _only_la = _la_filter.startswith("👥")
+
+        # Загружаем юзеров + per-app роли + статистику по двум приложениям
         conn = get_db()
         if not conn: st.error("Нет БД"); return
         cur = conn.cursor()
@@ -4314,30 +4340,83 @@ def show_listing_admin_panel():
                    u.last_login,
                    COUNT(DISTINCT la.asin) as asin_count,
                    COUNT(la.id) as analysis_count,
-                   MAX(la.analyzed_at) as last_analysis
+                   MAX(la.analyzed_at) as last_analysis,
+                   u.listing_role, u.bi_role, u.role as global_role,
+                   COALESCE((SELECT COUNT(*) FROM user_permissions up WHERE up.user_id = u.id), 0) as bi_perms_count
             FROM users u
             LEFT JOIN listing_analysis la ON la.analyzed_by = u.email
-            GROUP BY u.id, u.email, u.name, u.role, u.listing_role, u.is_active, u.created_at, u.last_login
+            GROUP BY u.id, u.email, u.name, u.role, u.listing_role, u.bi_role, u.is_active, u.created_at, u.last_login
             ORDER BY u.created_at DESC
         """)
         users = cur.fetchall(); cur.close(); conn.close()
-        
+
         current_id = st.session_state.get("user",{}).get("id")
-        
-        for row in users:
-            uid, email, name, role, is_active, created_at, last_login, asin_count, analysis_count, last_analysis = row
+
+        # Подсчитываем членство по приложениям
+        _total_all = len(users)
+        _la_members = [
+            u for u in users
+            if (u[10] is not None)                 # listing_role задан
+            or (u[8] or 0) > 0                     # делали анализы в listing
+            or (u[12] == "admin" and u[10] is None)  # глобальный admin с ненастроенной listing_role тоже видится
+        ]
+        _bi_only = [
+            u for u in users
+            if u not in _la_members
+            and ((u[11] is not None) or (u[13] or 0) > 0)
+        ]
+
+        _display_users = _la_members if _only_la else users
+
+        st.caption(
+            f"🔵 Listing: **{len(_la_members)}** · "
+            f"🟢 Только merino-bi: **{len(_bi_only)}** · "
+            f"Всего в БД: **{_total_all}**"
+        )
+
+        if _only_la and len(_la_members) < _total_all:
+            st.info(
+                f"💡 {_total_all - len(_la_members)} юзер(ов) работают только в merino-bi — "
+                "переключи фильтр «🌐 Всех из БД» и назначь им роль в Listing Analyzer чтобы добавить сюда."
+            )
+
+        if not _display_users:
+            st.info("Юзеров не найдено под этот фильтр")
+            return
+
+        for row in _display_users:
+            uid, email, name, role, is_active, created_at, last_login, asin_count, analysis_count, last_analysis, \
+                listing_role_raw, bi_role_raw, global_role, bi_perms_count = row
             is_self = uid == current_id
-            
+
             _rc = "#22c55e" if is_active else "#94a3b8"
             _last_str = last_login.strftime("%d.%m.%Y %H:%M") if last_login else "никогда"
             _last_an = last_analysis.strftime("%d.%m.%Y %H:%M") if last_analysis else "—"
-            
+
+            _is_la_member = (listing_role_raw is not None) or (analysis_count or 0) > 0 \
+                or (global_role == "admin" and listing_role_raw is None)
+            _is_bi_member = (bi_role_raw is not None) or (bi_perms_count or 0) > 0 \
+                or (global_role == "admin" and bi_role_raw is None)
+            _is_global_admin = (global_role == "admin")
+
+            # Строим бейджи приложений
+            _badges = []
+            if _is_global_admin:
+                _badges.append('<span style="background:#7c2d12;color:#fbbf24;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:700">👑 GLOBAL</span>')
+            if _is_la_member:
+                _badges.append('<span style="background:#1e3a5f;color:#93c5fd;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:700">🔵 LISTING</span>')
+            if _is_bi_member:
+                _badges.append('<span style="background:#064e3b;color:#6ee7b7;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:700">🟢 BI</span>')
+            if not _badges:
+                _badges.append('<span style="background:#1e293b;color:#64748b;border-radius:4px;padding:1px 6px;font-size:0.68rem">⚪ только в БД</span>')
+
             with st.container(border=True):
                 c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 2])
                 with c1:
                     _role_icon = "👑" if role=="admin" else "👤"
                     st.markdown(f"**{_role_icon} {name or '—'}**{'  *(вы)*' if is_self else ''}")
                     st.caption(email)
+                    st.markdown(" ".join(_badges), unsafe_allow_html=True)
                 with c2:
                     st.markdown(f"`{role.upper()}`")
                     st.markdown("🟢 Активен" if is_active else "🔴 Отключён")
