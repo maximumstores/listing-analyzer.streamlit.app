@@ -1945,7 +1945,7 @@ with st.sidebar:
 
     NAV_ITEMS = [
         ("🏠", "Обзор"),
-        ("📸", "Фото"),
+        ("📸", "Фото + видео"),
         ("🎨", "A+ Контент"),
         ("📝", "Контент"),
         ("🏆", "Benchmark"),
@@ -5011,7 +5011,7 @@ Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else '
 
 
 # ══ Фото ══════════════════════════════════════════════════════════════════════
-elif page == "📸 Фото":
+elif page == "📸 Фото + видео":
     _rc1, _rc2 = st.columns([8,1])
     with _rc1: st.title("📸 Vision анализ фотографий")
     with _rc2:
@@ -5450,13 +5450,32 @@ SCORE: [0-100]%
 
     if not imgs and blocks:
         st.info("📅 История: показан текстовый анализ Vision (фото сохраняются только в новых анализах)")
-        for i, text in enumerate(blocks): _render_photo_block(None, text, i)
-        st.stop()
-    if not imgs:
+        for i, text in enumerate(blocks):
+            _render_photo_block(None, text, i)
+    elif not imgs:
         st.info("👁️ Vision фото был отключён — запусти повторно с включённым чекбоксом")
-        st.stop()
-    for i, img in enumerate(imgs):
-        _render_photo_block(img, blocks[i] if i < len(blocks) else "", i)
+    else:
+        for i, img in enumerate(imgs):
+            _render_photo_block(img, blocks[i] if i < len(blocks) else "", i)
+
+    # ── Video Intelligence (Argon) ────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("🎬 Видео анализ (AI)")
+    st.caption("Argon Video Intelligence — анализ видео через Gemini 2.5 Flash")
+
+    if render_video_intelligence is None:
+        st.caption("ℹ️ Модуль argon_video не установлен")
+    else:
+        try:
+            _video_asin = get_asin_from_data(od) if ('od' in locals() and od) else ""
+            if not _video_asin:
+                _video_asin = st.session_state.get("our_data", {}).get("_input_asin", "")
+            if _video_asin:
+                render_video_intelligence(asin=_video_asin)
+            else:
+                st.caption("⚠️ ASIN не определён — сначала проанализируй листинг")
+        except Exception as e:
+            st.warning(f"Video Intelligence недоступен: {e}")
 
 # ══ A+ Контент ════════════════════════════════════════════════════════════════
 elif page == "🎨 A+ Контент":
@@ -6202,32 +6221,11 @@ SCORE: [0-100]%
         st.markdown('<div style="background:#1e3a1e;border-left:4px solid #22c55e;border-radius:8px;padding:10px 14px;margin:4px 0"><span style="color:#22c55e;font-weight:700">✅ Скрыто A+ контентом — это нормально</span><br><span style="color:#94a3b8;font-size:0.82rem">Amazon показывает A+ вместо описания. Описание не видит покупатель, но индексируется поиском — заполни для SEO.</span></div>', unsafe_allow_html=True)
     else: _sec("Description", "description_score", raw_text=str(our_desc)[:400] if our_desc else "")
     st.divider(); _sec("A+", "aplus_score"); st.divider(); _sec("Фото", "images_score")
-
-    # ── 📸🎬 Визуальный анализ (Фото + Видео) ──
-    # Видео всегда через Gemini Vertex AI (argon_video), независимо от выбора AI для основного анализа
-    _tab_photos, _tab_videos = st.tabs(["📸 Фото", "🎬 Видео (AI)"])
-
-    with _tab_photos:
-        ib = r.get("images_breakdown", {})
-        if ib:
-            st.subheader("📸 Детализация фото")
-            for k, v2 in ib.items():
-                st.markdown(f"**{k}:** {v2}")
-        else:
-            st.caption("Нет детализации фото в результате анализа.")
-
-    with _tab_videos:
-        if render_video_intelligence is not None:
-            try:
-                _video_asin = get_asin_from_data(od) or ""
-                if _video_asin:
-                    render_video_intelligence(asin=_video_asin)
-                else:
-                    st.caption("ASIN не определён — видео-анализ недоступен.")
-            except Exception as e:
-                st.warning(f"Video Intelligence недоступен: {e}")
-        else:
-            st.caption("Модуль `argon_video` не установлен — видео-анализ недоступен.")
+    ib = r.get("images_breakdown", {})
+    if ib:
+        st.subheader("📸 Детализация фото")
+        for k, v2 in ib.items():
+            st.markdown(f"**{k}:** {v2}")
     if r.get("tech_params"):
         st.divider(); st.subheader("⚙️ Технические параметры")
         for p2 in r["tech_params"]:
