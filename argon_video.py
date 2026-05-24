@@ -107,25 +107,47 @@ def _get_gemini_sa_path() -> str:
         import base64
         try:
             raw = base64.b64decode(st.secrets["VERTEX_SA_JSON_B64"])
-            sa_dict = json.loads(raw.decode("utf-8"))
+            # Write raw bytes directly — preserves real newlines in private_key
+            tmp = tempfile.NamedTemporaryFile(mode='wb', suffix='.json', delete=False)
+            tmp.write(raw)
+            tmp.close()
+            
+            # Sanity check: ensure it parses as JSON
+            with open(tmp.name) as f:
+                json.load(f)
+            return tmp.name
         except Exception as e:
             raise RuntimeError(f"Failed to decode VERTEX_SA_JSON_B64: {e}")
+    
     # ─── Format 2: TOML section (legacy) ───
     elif "vertex_sa_json" in st.secrets:
         sa_dict = dict(st.secrets["vertex_sa_json"])
         if "private_key" in sa_dict:
             sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
+        
+        # CRITICAL: write with json.dump but ensure_ascii=False is NOT enough.
+        # We need to write the raw string. Use direct file write to preserve newlines.
+        json_str = json.dumps(sa_dict)
+        # json.dumps escapes \n inside strings — we need them as real \n in file
+        # because PEM parser reads file content and expects real newlines.
+        # Solution: write JSON with literal newlines inside private_key value.
+        # Simplest: serialize, then replace escaped \n with real \n only inside 
+        # the private_key value.
+        # Actually: json.dump always escapes \n. The READER (google-auth) reads the
+        # JSON correctly — it will unescape \n back to real newlines when parsing.
+        # So this is fine. The issue was only in the base64 branch where we 
+        # double-encoded.
+        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        tmp.write(json_str)
+        tmp.close()
+        return tmp.name
+    
     else:
         raise RuntimeError(
             "Missing Vertex AI credentials. Add to Streamlit Secrets:\n"
             "  Option A (preferred): VERTEX_SA_JSON_B64 = \"<base64 of full SA JSON>\"\n"
             "  Option B: [vertex_sa_json] section with full service account fields"
         )
-    
-    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-    json.dump(sa_dict, tmp)
-    tmp.close()
-    return tmp.name
 
 
 @st.cache_resource(show_spinner=False)
@@ -240,48 +262,77 @@ def download_video(m3u8_url: str, dest_path: str) -> int:
 # GEMINI VIDEO ANALYSIS
 # ============================================================
 
-VIDEO_ANALYSIS_PROMPT = """
+VIDEO_ANALYSIS_PROMPT_TEMPLATE = """
 You are an Amazon listing intelligence analyst. Analyze this product video carefully.
+
+CRITICAL: Write all human-readable text fields in {language}. This includes:
+  - "summary"
+  - "people_description"  
+  - "setting"
+  - "target_audience_inferred"
+  - "improvement_suggestions" (each string)
+  - "key_claims" (each string — translate the meaning into {language})
+  - "use_cases_shown" (each string in {language})
+
+Keep these fields as-is (original language from video — DO NOT translate):
+  - "voiceover_transcript" (keep verbatim in original speaker's language)
+  - "on_screen_text" (keep verbatim as shown on screen)
+  - "voiceover_language" (language code: "en", "ru", "uk", "de", etc.)
 
 Return ONLY valid JSON (no markdown, no preamble) matching this schema:
 
-{
+{{
   "duration_seconds": <int>,
   "production_quality": "professional" | "semi_pro" | "amateur",
   "has_voiceover": <bool>,
   "voiceover_language": <string or null>,
-  "voiceover_transcript": <string or null>,
-  "on_screen_text": [<all text shown on screen>],
-  "key_claims": [<benefits/features stated or shown>],
-  "use_cases_shown": [<e.g. "skiing", "hiking">],
+  "voiceover_transcript": <string or null — VERBATIM in original language>,
+  "on_screen_text": [<all text shown on screen — VERBATIM>],
+  "key_claims": [<benefits/features in {language}>],
+  "use_cases_shown": [<in {language}, e.g. "лыжи", "поход">],
   "lifestyle_vs_studio": "lifestyle" | "studio" | "mixed",
   "people_count": <int>,
-  "people_description": <string>,
-  "setting": <string>,
+  "people_description": <string in {language}>,
+  "setting": <string in {language}>,
   "branded_intro": <bool>,
   "branded_outro": <bool>,
   "shows_product_demo": <bool>,
   "shows_product_closeup": <bool>,
   "music_present": <bool>,
-  "competitive_signals": {
+  "competitive_signals": {{
     "shows_comparison": <bool>,
     "mentions_competitors_by_name": [<strings>]
-  },
-  "target_audience_inferred": <string>,
-  "summary": <2-3 sentences>,
+  }},
+  "target_audience_inferred": <string in {language}>,
+  "summary": <2-3 sentences in {language}>,
   "listing_quality_score": <int 1-10>,
-  "improvement_suggestions": [<strings>]
-}
+  "improvement_suggestions": [<strings in {language}>]
+}}
 
 Be precise. Use null/false/empty array if absent. Do NOT hallucinate.
 """.strip()
 
 
-def analyze_video_with_gemini(mp4_path: str, model: str = DEFAULT_MODEL) -> dict:
+# Default language for analysis output (human-readable fields)
+DEFAULT_LANGUAGE = "Russian"
+
+
+def _build_prompt(language: str = DEFAULT_LANGUAGE) -> str:
+    """Build the analysis prompt with the specified output language."""
+    return VIDEO_ANALYSIS_PROMPT_TEMPLATE.format(language=language)
+
+
+def analyze_video_with_gemini(
+    mp4_path: str,
+    model: str = DEFAULT_MODEL,
+    language: str = DEFAULT_LANGUAGE,
+) -> dict:
     """Send local MP4 to Gemini Vision, return structured JSON."""
     client = _get_gemini_client()
     file_size = os.path.getsize(mp4_path)
     started = time.time()
+    
+    prompt = _build_prompt(language=language)
     
     if file_size < INLINE_SIZE_THRESHOLD:
         with open(mp4_path, "rb") as f:
@@ -290,7 +341,7 @@ def analyze_video_with_gemini(mp4_path: str, model: str = DEFAULT_MODEL) -> dict
             model=model,
             contents=[
                 types.Part(inline_data=types.Blob(mime_type="video/mp4", data=video_bytes)),
-                VIDEO_ANALYSIS_PROMPT,
+                prompt,
             ],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -307,7 +358,7 @@ def analyze_video_with_gemini(mp4_path: str, model: str = DEFAULT_MODEL) -> dict
         try:
             response = client.models.generate_content(
                 model=model,
-                contents=[video_file, VIDEO_ANALYSIS_PROMPT],
+                contents=[video_file, prompt],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.1,
@@ -351,17 +402,22 @@ def _cached_fetch_videos(asin: str, country: str = "us") -> list[dict]:
 
 
 @st.cache_data(ttl=60 * 60 * 24 * 7, show_spinner=False)  # 7 days
-def _cached_analyze_video(asin: str, video_url: str, model: str = DEFAULT_MODEL) -> dict:
+def _cached_analyze_video(
+    asin: str,
+    video_url: str,
+    model: str = DEFAULT_MODEL,
+    language: str = DEFAULT_LANGUAGE,
+) -> dict:
     """
     Layer 2: expensive — full AI analysis.
     Cost: ~$0.005 per call (download + Gemini).
-    Cached by (asin, video_url) tuple — won't re-run for same input.
+    Cached by (asin, video_url, model, language) tuple.
     """
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
         tmp_path = tf.name
     try:
         download_video(video_url, tmp_path)
-        return analyze_video_with_gemini(tmp_path, model=model)
+        return analyze_video_with_gemini(tmp_path, model=model, language=language)
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -375,18 +431,24 @@ def _render_ai_analysis(ai: dict, video_idx: int) -> None:
     """Render the rich AI analysis card (metrics + tabs)."""
     # Quality signals row
     sig = st.columns(4)
-    sig[0].metric("Quality", f"{ai.get('listing_quality_score', 0)}/10")
-    sig[1].metric("Style", ai.get('lifestyle_vs_studio', '—').title())
-    sig[2].metric("Voiceover", "✅ Yes" if ai.get('has_voiceover') else "❌ No")
-    sig[3].metric("Music", "🎵 Yes" if ai.get('music_present') else "🔇 No")
+    sig[0].metric("Качество", f"{ai.get('listing_quality_score', 0)}/10")
+    sig[1].metric("Стиль", ai.get('lifestyle_vs_studio', '—').title())
+    sig[2].metric("Озвучка", "✅ Есть" if ai.get('has_voiceover') else "❌ Нет")
+    sig[3].metric("Музыка", "🎵 Есть" if ai.get('music_present') else "🔇 Нет")
     
     # Summary
-    st.markdown(f"**Summary:** {ai.get('summary', '—')}")
-    st.markdown(f"**Setting:** {ai.get('setting', '—')}")
-    st.markdown(f"**People:** {ai.get('people_count', 0)} — {ai.get('people_description', '—')}")
+    st.markdown(f"**Резюме:** {ai.get('summary', '—')}")
+    st.markdown(f"**Локация:** {ai.get('setting', '—')}")
+    st.markdown(f"**Люди:** {ai.get('people_count', 0)} — {ai.get('people_description', '—')}")
     
     # Tabs
-    tabs = st.tabs(["📝 Claims", "🎯 Use Cases", "📺 On-Screen Text", "💡 Improvements", "🔧 Raw JSON"])
+    tabs = st.tabs([
+        "📝 Заявления",
+        "🎯 Use Cases",
+        "📺 Текст на экране",
+        "💡 Рекомендации",
+        "🔧 Raw JSON",
+    ])
     
     with tabs[0]:
         claims = ai.get("key_claims", [])
@@ -394,11 +456,12 @@ def _render_ai_analysis(ai: dict, video_idx: int) -> None:
             for c in claims:
                 st.markdown(f"• {c}")
         else:
-            st.caption("No claims detected.")
+            st.caption("Заявлений не выявлено.")
         
         transcript = ai.get("voiceover_transcript")
         if transcript:
-            st.markdown("**Voiceover transcript:**")
+            lang = ai.get("voiceover_language") or "оригинал"
+            st.markdown(f"**Транскрипт озвучки ({lang}):**")
             st.info(transcript)
     
     with tabs[1]:
@@ -406,8 +469,8 @@ def _render_ai_analysis(ai: dict, video_idx: int) -> None:
         if uses:
             st.markdown(" ".join(f"`{u}`" for u in uses))
         else:
-            st.caption("No specific use cases shown.")
-        st.markdown(f"**Target audience:** {ai.get('target_audience_inferred', '—')}")
+            st.caption("Use cases не показаны.")
+        st.markdown(f"**Целевая аудитория:** {ai.get('target_audience_inferred', '—')}")
     
     with tabs[2]:
         text = ai.get("on_screen_text", [])
@@ -415,7 +478,7 @@ def _render_ai_analysis(ai: dict, video_idx: int) -> None:
             for t in text:
                 st.markdown(f"• `{t}`")
         else:
-            st.caption("No on-screen text detected.")
+            st.caption("Текста на экране не обнаружено.")
     
     with tabs[3]:
         tips = ai.get("improvement_suggestions", [])
@@ -423,7 +486,7 @@ def _render_ai_analysis(ai: dict, video_idx: int) -> None:
             for t in tips:
                 st.markdown(f"💡 {t}")
         else:
-            st.caption("No improvement suggestions.")
+            st.caption("Рекомендаций по улучшению нет.")
     
     with tabs[4]:
         st.json(ai)
@@ -442,9 +505,20 @@ def _render_ai_analysis(ai: dict, video_idx: int) -> None:
 # MAIN ENTRY POINT
 # ============================================================
 
-def render_video_intelligence(asin: str, country: str = "us", **kwargs) -> None:
+def render_video_intelligence(
+    asin: str,
+    country: str = "us",
+    language: str = DEFAULT_LANGUAGE,
+    **kwargs,
+) -> None:
     """
     Render Video Intelligence section for the given ASIN.
+    
+    Args:
+      asin: Amazon ASIN
+      country: ISO country code ("us", "uk", "de", ...)
+      language: Output language for human-readable fields 
+                ("Russian", "English", "Ukrainian", "German", ...)
     
     Flow:
       1. Auto-fetch video list (fast, cached 7d)
@@ -459,13 +533,38 @@ def render_video_intelligence(asin: str, country: str = "us", **kwargs) -> None:
     st.markdown("### 🎬 Video Intelligence")
     st.caption(f"AI-powered analysis of product videos for `{asin}` (Gemini 2.5 Flash via Vertex AI)")
     
-    # Refresh button (top right)
-    col_title, col_refresh = st.columns([5, 1])
+    # Refresh + Language selector row
+    col_lang, col_refresh = st.columns([3, 1])
+    with col_lang:
+        language_options = {
+            "🇷🇺 Russian": "Russian",
+            "🇺🇦 Ukrainian": "Ukrainian",
+            "🇬🇧 English": "English",
+            "🇩🇪 German": "German",
+            "🇪🇸 Spanish": "Spanish",
+            "🇫🇷 French": "French",
+        }
+        # Find default option matching language param
+        default_idx = 0
+        for i, (label, lang) in enumerate(language_options.items()):
+            if lang == language:
+                default_idx = i
+                break
+        selected_label = st.selectbox(
+            "Язык анализа",
+            options=list(language_options.keys()),
+            index=default_idx,
+            key=f"argon_lang_{asin}",
+            help="Язык, на котором AI напишет резюме, инсайты и рекомендации. "
+                 "Транскрипт голоса и текст на экране — всегда в оригинале.",
+        )
+        selected_language = language_options[selected_label]
+    
     with col_refresh:
+        st.markdown("###")  # vertical spacer
         if st.button("🔄 Refresh", key=f"argon_refresh_{asin}", help="Clear cache and refetch"):
             _cached_fetch_videos.clear()
             _cached_analyze_video.clear()
-            # Clear all "AI started" flags for this ASIN
             for k in list(st.session_state.keys()):
                 if k.startswith(f"argon_ai_started_{asin}_"):
                     del st.session_state[k]
@@ -528,7 +627,7 @@ def render_video_intelligence(asin: str, country: str = "us", **kwargs) -> None:
             if st.session_state.get(ai_started_key):
                 with st.spinner(f"🎬 ffmpeg → 🤖 Gemini analyzing video {idx+1}..."):
                     try:
-                        ai = _cached_analyze_video(asin, m3u8)
+                        ai = _cached_analyze_video(asin, m3u8, language=selected_language)
                     except Exception as e:
                         st.error(f"AI analysis failed: {e}")
                         st.session_state[ai_started_key] = False
