@@ -95,14 +95,32 @@ def _get_vertex_location() -> str:
 
 @st.cache_resource(show_spinner=False)
 def _get_gemini_sa_path() -> str:
-    """Build SA JSON file on disk from st.secrets, cached per session."""
-    if "vertex_sa_json" not in st.secrets:
+    """
+    Build SA JSON file on disk from st.secrets, cached per session.
+    
+    Supports TWO secret formats (in priority order):
+      1. VERTEX_SA_JSON_B64 — base64-encoded full JSON (RECOMMENDED — no TOML escaping issues)
+      2. [vertex_sa_json] section — TOML structured (legacy, fragile with PEM keys)
+    """
+    # ─── Format 1: base64 (preferred) ───
+    if "VERTEX_SA_JSON_B64" in st.secrets:
+        import base64
+        try:
+            raw = base64.b64decode(st.secrets["VERTEX_SA_JSON_B64"])
+            sa_dict = json.loads(raw.decode("utf-8"))
+        except Exception as e:
+            raise RuntimeError(f"Failed to decode VERTEX_SA_JSON_B64: {e}")
+    # ─── Format 2: TOML section (legacy) ───
+    elif "vertex_sa_json" in st.secrets:
+        sa_dict = dict(st.secrets["vertex_sa_json"])
+        if "private_key" in sa_dict:
+            sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
+    else:
         raise RuntimeError(
-            "Missing [vertex_sa_json] in secrets.toml — add Vertex AI service account JSON."
+            "Missing Vertex AI credentials. Add to Streamlit Secrets:\n"
+            "  Option A (preferred): VERTEX_SA_JSON_B64 = \"<base64 of full SA JSON>\"\n"
+            "  Option B: [vertex_sa_json] section with full service account fields"
         )
-    sa_dict = dict(st.secrets["vertex_sa_json"])
-    if "private_key" in sa_dict:
-        sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
     
     tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
     json.dump(sa_dict, tmp)
