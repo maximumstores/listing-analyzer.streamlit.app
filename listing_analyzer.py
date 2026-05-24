@@ -784,76 +784,117 @@ def get_best_gemini_model(key, prefer_pro=False):
     return preferred[-1]  # hardcoded fallback
 
 
+def _get_gemini_client_with_fallback():
+    """Vertex AI (через argon_video) → fallback на Gemini Developer API key.
+
+    Returns: (client, is_vertex: bool)
+    - is_vertex=True  → genai.Client(vertexai=True, project=..., location=..., credentials=SA)
+    - is_vertex=False → genai.Client(api_key=GEMINI_API_KEY)
+    """
+    try:
+        from argon_video import _get_gemini_client  # cached @st.cache_resource в argon_video
+        return _get_gemini_client(), True
+    except Exception:
+        from google import genai as _genai
+        _key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("GOOGLE_API_KEY","")
+        if not _key:
+            raise Exception("Vertex (argon_video) недоступен і GEMINI_API_KEY не задан в Secrets")
+        return _genai.Client(api_key=_key), False
+
+
+def _pick_gemini_model(is_vertex, prefer_pro=False):
+    """Vertex us-central1 надёжно поддерживает 2.5-pro / 2.5-flash.
+    Для dev-key — используем существующий dynamic resolver."""
+    if is_vertex:
+        return "gemini-2.5-pro" if prefer_pro else "gemini-2.5-flash"
+    _key = st.secrets.get("GEMINI_API_KEY","") or st.secrets.get("GOOGLE_API_KEY","")
+    try:
+        return get_best_gemini_model(_key, prefer_pro=prefer_pro)
+    except Exception:
+        return "gemini-2.5-pro" if prefer_pro else "gemini-2.5-flash"
+
+
 def gemini_call(prompt, max_tokens=3000):
     import time
-    key = st.secrets.get("GEMINI_API_KEY","")
-    if not key: raise Exception("GEMINI_API_KEY не задан в Secrets")
+    from google.genai import types as _gtypes
+    _client, _is_vertex = _get_gemini_client_with_fallback()
     _prefer_pro = "pro" in st.session_state.get("gemini_model","")
-    _gmodel = get_best_gemini_model(key, prefer_pro=_prefer_pro)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
-    payload = {"contents":[{"parts":[{"text":prompt}]}],
-               "generationConfig":{
-                   "maxOutputTokens": max_tokens,
-                   "temperature": 0.2,      # низкая = стабильные результаты
-                   "topP": 0.8,
-                   "topK": 40
-               }}
+    _gmodel = _pick_gemini_model(_is_vertex, prefer_pro=_prefer_pro)
+    _config = _gtypes.GenerateContentConfig(
+        max_output_tokens=max_tokens,
+        temperature=0.2,      # низкая = стабильные результаты
+        top_p=0.8,
+        top_k=40,
+    )
     for attempt in range(3):
-        r = requests.post(url, json=payload, timeout=120)
-        if r.ok:
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        if r.status_code in (429, 503, 500):
-            wait = 60*(attempt+1)
-            st.toast(f"⏳ Gemini лимит, жду {wait}с... ({attempt+1}/3)")
-            import time; time.sleep(wait); continue
-        raise Exception(f"Gemini {r.status_code}: {r.text[:200]}")
+        try:
+            resp = _client.models.generate_content(
+                model=_gmodel, contents=prompt, config=_config,
+            )
+            return resp.text
+        except Exception as e:
+            _msg = str(e)
+            if "429" in _msg or "RESOURCE_EXHAUSTED" in _msg:
+                wait = 60*(attempt+1)
+                st.toast(f"⏳ Gemini лимит, жду {wait}с... ({attempt+1}/3)")
+                time.sleep(wait); continue
+            if "500" in _msg or "503" in _msg or "UNAVAILABLE" in _msg or "INTERNAL" in _msg:
+                wait = 60*(attempt+1)
+                time.sleep(wait); continue
+            raise Exception(f"Gemini: {_msg[:300]}")
     raise Exception("Gemini перегружен — попробуй через 2 мин")
+
 
 def gemini_vision_call(prompt, image_urls=None, image_b64_list=None, max_tokens=8000):
     import time
-    key = st.secrets.get("GEMINI_API_KEY","")
-    if not key: raise Exception("GEMINI_API_KEY не задан")
+    import base64 as _b64
+    from google.genai import types as _gtypes
+    _client, _is_vertex = _get_gemini_client_with_fallback()
     _prefer_pro = "про" in st.session_state.get("gemini_model","") or "pro" in st.session_state.get("gemini_model","")
-    _gmodel = get_best_gemini_model(key, prefer_pro=_prefer_pro)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gmodel}:generateContent?key={key}"
+    _gmodel = _pick_gemini_model(_is_vertex, prefer_pro=_prefer_pro)
+
     parts = []
     if image_urls:
         for img_url in image_urls:
             try:
                 r_img = requests.get(img_url, timeout=15)
                 if r_img.ok:
-                    import base64 as _b64
-                    parts.append({"inline_data": {"mime_type": "image/jpeg",
-                        "data": _b64.b64encode(r_img.content).decode()}})
+                    parts.append(_gtypes.Part.from_bytes(
+                        data=r_img.content, mime_type="image/jpeg"
+                    ))
             except: pass
     if image_b64_list:
         for b64, mime in image_b64_list:
-            parts.append({"inline_data": {"mime_type": mime or "image/jpeg", "data": b64}})
-    parts.append({"text": prompt})
-    payload = {"contents": [{"parts": parts}],
-               "generationConfig": {
-                   "maxOutputTokens": max_tokens,
-                   "temperature": 0.2,
-                   "topP": 0.8,
-                   "topK": 40
-               }}
-    import time as _time
-    _last_err = ""
+            parts.append(_gtypes.Part.from_bytes(
+                data=_b64.b64decode(b64), mime_type=mime or "image/jpeg"
+            ))
+    parts.append(_gtypes.Part.from_text(text=prompt))
+
+    _config = _gtypes.GenerateContentConfig(
+        max_output_tokens=max_tokens,
+        temperature=0.2,
+        top_p=0.8,
+        top_k=40,
+    )
+
     _waits = [15, 30, 60]  # короткие паузы для бесплатного tier
     for attempt in range(4):
-        r = requests.post(url, json=payload, timeout=120)
-        _last_err = f"{r.status_code}: {r.text[:200]}"
-        if r.ok:
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        if r.status_code == 429:
-            wait = _waits[min(attempt, len(_waits)-1)]
-            st.toast(f"⏳ Gemini лимит, пауза {wait}с (попытка {attempt+1}/4)...")
-            _time.sleep(wait)
-            continue
-        if r.status_code in (503, 500):
-            _time.sleep(10)
-            continue
-        raise Exception(f"Gemini Vision ошибка: {_last_err}")
+        try:
+            resp = _client.models.generate_content(
+                model=_gmodel,
+                contents=[_gtypes.Content(role="user", parts=parts)],
+                config=_config,
+            )
+            return resp.text
+        except Exception as e:
+            _msg = str(e)
+            if "429" in _msg or "RESOURCE_EXHAUSTED" in _msg:
+                wait = _waits[min(attempt, len(_waits)-1)]
+                st.toast(f"⏳ Gemini лимит, пауза {wait}с (попытка {attempt+1}/4)...")
+                time.sleep(wait); continue
+            if "500" in _msg or "503" in _msg or "UNAVAILABLE" in _msg or "INTERNAL" in _msg:
+                time.sleep(10); continue
+            raise Exception(f"Gemini Vision ошибка: {_msg[:300]}")
     raise Exception(f"Gemini Vision: превышен лимит запросов. Попробуй через минуту или переключись на Claude.")
 
 
