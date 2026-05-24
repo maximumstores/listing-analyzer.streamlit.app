@@ -7,6 +7,10 @@ from auth import (
     show_login, logout, show_admin_panel,
     ensure_tables, create_admin_if_not_exists
 )
+try:
+    from argon_video import render_video_intelligence
+except ImportError:
+    render_video_intelligence = None
 # После st.set_page_config
 ensure_tables()
 create_admin_if_not_exists()
@@ -6202,6 +6206,13 @@ SCORE: [0-100]%
     if ib:
         st.subheader("📸 Детализация фото")
         for k,v2 in ib.items(): st.markdown(f"**{k}:** {v2}")
+
+    # ── 🎬 Video Intelligence (argon_video) ──
+    if render_video_intelligence is not None:
+        _video_asin = get_asin_from_data(od)
+        if _video_asin:
+            st.divider()
+            render_video_intelligence(asin=_video_asin)
     if r.get("tech_params"):
         st.divider(); st.subheader("⚙️ Технические параметры")
         for p2 in r["tech_params"]:
@@ -8924,4 +8935,4 @@ v  = st.session_state.get("vision", "")
 od = st.session_state.get("our_data", {})
 pi = od.get("product_information", {})
 cd = st.session_state.get("comp_data_list", [])
-imgs = st.session_state.get("images", [])  
+imgs = st.session_state.get("images", []) 
