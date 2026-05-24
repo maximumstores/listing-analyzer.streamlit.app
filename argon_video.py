@@ -3,44 +3,39 @@ argon_video.py
 ==============
 Argon Video Intelligence module for Amazon Listing Analyzer v2.
 
-USAGE in listing_analyzer.py (one-line integration):
+UX FLOW:
+  1. On page load → ScrapingDog fetches video list (~3 sec, ~$0.0007)
+  2. Show thumbnails + titles immediately
+  3. User clicks "AI анализ" on a specific video → run Gemini (~17 sec, ~$0.005)
+  4. Both layers cached 7 days per ASIN
 
+USAGE in listing_analyzer.py:
     from argon_video import render_video_intelligence
-
-    # ...somewhere after ASIN is obtained and analyzed (e.g. after photos analysis):
     render_video_intelligence(asin=current_asin)
-
-That's it. The module handles:
-  - Reading credentials from st.secrets
-  - Calling ScrapingDog to get video URLs
-  - Downloading MP4 via ffmpeg (HLS fallback)
-  - Sending to Gemini 2.5 Flash via Vertex AI
-  - Rendering a beautiful card with AI analysis
-  - Caching results in st.session_state (no re-analysis on rerun)
 
 SECRETS (.streamlit/secrets.toml or Streamlit Cloud Settings → Secrets):
 
-    SCRAPINGDOG_API_KEY = "6952393076cf50f3a0d69d81"
+    SCRAPINGDOG_API_KEY = "..."
     VERTEX_LOCATION = "us-central1"
 
     [vertex_sa_json]
     type = "service_account"
-    project_id = "topsale-vertex"
+    project_id = "..."
     private_key_id = "..."
-    private_key = '''-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n'''
-    client_email = "vertex-ai-runner@topsale-vertex.iam.gserviceaccount.com"
+    private_key = '''-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n'''
+    client_email = "..."
     client_id = "..."
     auth_uri = "https://accounts.google.com/o/oauth2/auth"
     token_uri = "https://oauth2.googleapis.com/token"
     auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
     client_x509_cert_url = "..."
 
-DEPENDENCIES (add to requirements.txt):
-    google-genai>=1.0.0
-    google-cloud-aiplatform>=1.70.0
+DEPENDENCIES (requirements.txt):
+    google-genai
+    google-cloud-aiplatform
     requests
 
-SYSTEM (add to packages.txt for Streamlit Cloud):
+SYSTEM (packages.txt for Streamlit Cloud):
     ffmpeg
 """
 
@@ -52,7 +47,6 @@ import shutil
 import logging
 import tempfile
 import subprocess
-from pathlib import Path
 from typing import Optional
 
 import requests
@@ -70,7 +64,7 @@ if not log.handlers:
     log.setLevel(logging.INFO)
 
 # ============================================================
-# CONFIG (from Streamlit secrets, with safe fallbacks)
+# CONFIG
 # ============================================================
 
 DEFAULT_MODEL = "gemini-2.5-flash"
@@ -88,7 +82,7 @@ COUNTRY_TO_DOMAIN = {
 }
 
 # ============================================================
-# CREDENTIALS HELPERS
+# CREDENTIALS
 # ============================================================
 
 def _get_scrapingdog_key() -> str:
@@ -101,17 +95,12 @@ def _get_vertex_location() -> str:
 
 @st.cache_resource(show_spinner=False)
 def _get_gemini_sa_path() -> str:
-    """
-    Build a service account JSON file on disk from st.secrets["vertex_sa_json"].
-    Cached across reruns so we only write it once per Streamlit session.
-    """
+    """Build SA JSON file on disk from st.secrets, cached per session."""
     if "vertex_sa_json" not in st.secrets:
         raise RuntimeError(
-            "Missing [vertex_sa_json] section in secrets.toml. "
-            "Add the service account JSON content there."
+            "Missing [vertex_sa_json] in secrets.toml — add Vertex AI service account JSON."
         )
     sa_dict = dict(st.secrets["vertex_sa_json"])
-    # Normalize keys & escaped newlines in private_key
     if "private_key" in sa_dict:
         sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
     
@@ -123,19 +112,21 @@ def _get_gemini_sa_path() -> str:
 
 @st.cache_resource(show_spinner=False)
 def _get_gemini_client() -> genai.Client:
-    """Init Vertex AI Gemini client, cached for the whole Streamlit session."""
+    """Init Vertex AI client, cached per session."""
     sa_path = _get_gemini_sa_path()
     with open(sa_path) as f:
         sa = json.load(f)
-    project_id = sa["project_id"]
-    location = _get_vertex_location()
     
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = sa_path
-    return genai.Client(vertexai=True, project=project_id, location=location)
+    return genai.Client(
+        vertexai=True,
+        project=sa["project_id"],
+        location=_get_vertex_location(),
+    )
 
 
 # ============================================================
-# STEP 1: SCRAPINGDOG
+# SCRAPINGDOG
 # ============================================================
 
 def fetch_asin_videos(asin: str, country: str = "us") -> list[dict]:
@@ -162,7 +153,7 @@ def fetch_asin_videos(asin: str, country: str = "us") -> list[dict]:
 
 
 # ============================================================
-# STEP 2: HLS → MP4
+# HLS → MP4
 # ============================================================
 
 def hls_to_mp4_url(m3u8_url: str) -> str:
@@ -183,11 +174,11 @@ def _check_ffmpeg() -> bool:
 
 
 def download_via_ffmpeg(m3u8_url: str, dest_path: str) -> int:
-    """Download HLS stream → MP4 using ffmpeg. Bulletproof Amazon path."""
+    """Download HLS → MP4 via ffmpeg. Bulletproof for Amazon."""
     if not _check_ffmpeg():
         raise RuntimeError(
-            "ffmpeg not found. Add 'ffmpeg' to packages.txt for Streamlit Cloud, "
-            "or install with: brew install ffmpeg (local)"
+            "ffmpeg not found. Add 'ffmpeg' to packages.txt (Streamlit Cloud) "
+            "or run: brew install ffmpeg (local)"
         )
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
@@ -228,7 +219,7 @@ def download_video(m3u8_url: str, dest_path: str) -> int:
 
 
 # ============================================================
-# STEP 3: GEMINI ANALYSIS
+# GEMINI VIDEO ANALYSIS
 # ============================================================
 
 VIDEO_ANALYSIS_PROMPT = """
@@ -269,6 +260,7 @@ Be precise. Use null/false/empty array if absent. Do NOT hallucinate.
 
 
 def analyze_video_with_gemini(mp4_path: str, model: str = DEFAULT_MODEL) -> dict:
+    """Send local MP4 to Gemini Vision, return structured JSON."""
     client = _get_gemini_client()
     file_size = os.path.getsize(mp4_path)
     started = time.time()
@@ -328,62 +320,120 @@ def analyze_video_with_gemini(mp4_path: str, model: str = DEFAULT_MODEL) -> dict
 
 
 # ============================================================
-# STEP 4: HIGH-LEVEL API (for use in listing_analyzer.py)
+# CACHED LAYERS (Streamlit-level)
 # ============================================================
 
-@st.cache_data(ttl=60 * 60 * 24 * 7, show_spinner=False)  # cache 7 days
-def analyze_asin_videos(asin: str, country: str = "us", model: str = DEFAULT_MODEL) -> dict:
+@st.cache_data(ttl=60 * 60 * 24 * 7, show_spinner=False)  # 7 days
+def _cached_fetch_videos(asin: str, country: str = "us") -> list[dict]:
     """
-    Full pipeline cached for 7 days per ASIN.
-    Returns: {"asin": str, "video_count": int, "videos": [...]}
+    Layer 1: cheap & fast — get video list metadata.
+    Cost: ~$0.0007 per call (1 ScrapingDog credit).
     """
-    videos = fetch_asin_videos(asin, country=country)
-    if not videos:
-        return {"asin": asin, "video_count": 0, "videos": []}
-    
-    results = []
-    for idx, v in enumerate(videos):
-        m3u8 = v.get("link", "")
-        if not m3u8:
-            continue
-        
-        mp4_url = hls_to_mp4_url(m3u8)
-        video_id = extract_video_id(m3u8)
-        
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
-            tmp_path = tf.name
-        try:
-            download_video(m3u8, tmp_path)
-            analysis = analyze_video_with_gemini(tmp_path, model=model)
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-        
-        results.append({
-            "asin": asin,
-            "video_id": video_id,
-            "title": v.get("title", ""),
-            "thumbnail_url": v.get("thumbnail", ""),
-            "m3u8_url": m3u8,
-            "mp4_url": mp4_url,
-            "ai_analysis": analysis,
-            "analyzed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-    
-    return {"asin": asin, "video_count": len(results), "videos": results}
+    return fetch_asin_videos(asin, country=country)
+
+
+@st.cache_data(ttl=60 * 60 * 24 * 7, show_spinner=False)  # 7 days
+def _cached_analyze_video(asin: str, video_url: str, model: str = DEFAULT_MODEL) -> dict:
+    """
+    Layer 2: expensive — full AI analysis.
+    Cost: ~$0.005 per call (download + Gemini).
+    Cached by (asin, video_url) tuple — won't re-run for same input.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+        tmp_path = tf.name
+    try:
+        download_video(video_url, tmp_path)
+        return analyze_video_with_gemini(tmp_path, model=model)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ============================================================
-# STEP 5: STREAMLIT UI RENDERER
+# UI HELPERS
 # ============================================================
 
-def render_video_intelligence(asin: str, country: str = "us", expanded: bool = False) -> None:
-    """
-    Renders a Video Intelligence card for the given ASIN.
+def _render_ai_analysis(ai: dict, video_idx: int) -> None:
+    """Render the rich AI analysis card (metrics + tabs)."""
+    # Quality signals row
+    sig = st.columns(4)
+    sig[0].metric("Quality", f"{ai.get('listing_quality_score', 0)}/10")
+    sig[1].metric("Style", ai.get('lifestyle_vs_studio', '—').title())
+    sig[2].metric("Voiceover", "✅ Yes" if ai.get('has_voiceover') else "❌ No")
+    sig[3].metric("Music", "🎵 Yes" if ai.get('music_present') else "🔇 No")
     
-    Call this anywhere in your Streamlit app after you have the ASIN:
-        from argon_video import render_video_intelligence
-        render_video_intelligence(asin="B08D113DXR")
+    # Summary
+    st.markdown(f"**Summary:** {ai.get('summary', '—')}")
+    st.markdown(f"**Setting:** {ai.get('setting', '—')}")
+    st.markdown(f"**People:** {ai.get('people_count', 0)} — {ai.get('people_description', '—')}")
+    
+    # Tabs
+    tabs = st.tabs(["📝 Claims", "🎯 Use Cases", "📺 On-Screen Text", "💡 Improvements", "🔧 Raw JSON"])
+    
+    with tabs[0]:
+        claims = ai.get("key_claims", [])
+        if claims:
+            for c in claims:
+                st.markdown(f"• {c}")
+        else:
+            st.caption("No claims detected.")
+        
+        transcript = ai.get("voiceover_transcript")
+        if transcript:
+            st.markdown("**Voiceover transcript:**")
+            st.info(transcript)
+    
+    with tabs[1]:
+        uses = ai.get("use_cases_shown", [])
+        if uses:
+            st.markdown(" ".join(f"`{u}`" for u in uses))
+        else:
+            st.caption("No specific use cases shown.")
+        st.markdown(f"**Target audience:** {ai.get('target_audience_inferred', '—')}")
+    
+    with tabs[2]:
+        text = ai.get("on_screen_text", [])
+        if text:
+            for t in text:
+                st.markdown(f"• `{t}`")
+        else:
+            st.caption("No on-screen text detected.")
+    
+    with tabs[3]:
+        tips = ai.get("improvement_suggestions", [])
+        if tips:
+            for t in tips:
+                st.markdown(f"💡 {t}")
+        else:
+            st.caption("No improvement suggestions.")
+    
+    with tabs[4]:
+        st.json(ai)
+        meta = ai.get("_meta", {})
+        if "cost_usd" in meta:
+            st.caption(
+                f"⚡ {meta.get('elapsed_seconds')}s • "
+                f"💰 ${meta.get('cost_usd')} • "
+                f"📦 {meta.get('file_size_mb')}MB • "
+                f"🔤 {meta.get('tokens', {}).get('input', 0)}+"
+                f"{meta.get('tokens', {}).get('output', 0)} tokens"
+            )
+
+
+# ============================================================
+# MAIN ENTRY POINT
+# ============================================================
+
+def render_video_intelligence(asin: str, country: str = "us", **kwargs) -> None:
+    """
+    Render Video Intelligence section for the given ASIN.
+    
+    Flow:
+      1. Auto-fetch video list (fast, cached 7d)
+      2. Show thumbnails + metadata immediately
+      3. Per-video "AI анализ" button → run Gemini on click
+    
+    Cost: ~$0.0007 per page load (list), +$0.005 per AI analysis click.
     """
     if not asin:
         return
@@ -391,110 +441,80 @@ def render_video_intelligence(asin: str, country: str = "us", expanded: bool = F
     st.markdown("### 🎬 Video Intelligence")
     st.caption(f"AI-powered analysis of product videos for `{asin}` (Gemini 2.5 Flash via Vertex AI)")
     
-    # Action button — analyze only on user click (saves API costs)
-    cols = st.columns([1, 1, 4])
-    do_analyze = cols[0].button("🔍 Analyze videos", key=f"argon_analyze_{asin}")
-    force_refresh = cols[1].button("🔄 Refresh", key=f"argon_refresh_{asin}")
+    # Refresh button (top right)
+    col_title, col_refresh = st.columns([5, 1])
+    with col_refresh:
+        if st.button("🔄 Refresh", key=f"argon_refresh_{asin}", help="Clear cache and refetch"):
+            _cached_fetch_videos.clear()
+            _cached_analyze_video.clear()
+            # Clear all "AI started" flags for this ASIN
+            for k in list(st.session_state.keys()):
+                if k.startswith(f"argon_ai_started_{asin}_"):
+                    del st.session_state[k]
+            st.rerun()
     
-    if force_refresh:
-        analyze_asin_videos.clear()
-        st.rerun()
-    
-    if not do_analyze and f"argon_videos_{asin}" not in st.session_state:
-        st.info("Click 'Analyze videos' to run AI analysis on this ASIN's videos.")
-        return
-    
-    # Run pipeline
+    # ─── Step 1: Fetch list (always, cached) ─────────────────────
     try:
-        with st.spinner("🐕 ScrapingDog → 🎬 ffmpeg → 🤖 Gemini..."):
-            result = analyze_asin_videos(asin, country=country)
-        st.session_state[f"argon_videos_{asin}"] = result
+        with st.spinner("🐕 Loading video list..."):
+            videos = _cached_fetch_videos(asin, country)
     except Exception as e:
-        st.error(f"Analysis failed: {e}")
+        st.error(f"Failed to fetch videos: {e}")
         return
     
-    if result["video_count"] == 0:
-        st.warning(f"No videos found for {asin} on amazon.{COUNTRY_TO_DOMAIN.get(country, 'com')}")
+    if not videos:
+        st.info(f"🎬 У этого ASIN ({asin}) нет видео на Amazon.")
         return
     
-    st.success(f"✅ Analyzed {result['video_count']} video(s)")
+    st.success(f"✅ Найдено {len(videos)} видео")
     
-    for idx, v in enumerate(result["videos"]):
-        ai = v["ai_analysis"]
-        with st.expander(
-            f"🎥 Video {idx+1}: {v['title'] or 'Untitled'}  •  Score {ai.get('listing_quality_score', '?')}/10",
-            expanded=expanded or idx == 0,
-        ):
-            # Top row: thumbnail + summary
-            col_thumb, col_summary = st.columns([1, 2])
+    # ─── Step 2: Render each video card ──────────────────────────
+    for idx, v in enumerate(videos):
+        m3u8 = v.get("link", "")
+        if not m3u8:
+            continue
+        
+        video_id = extract_video_id(m3u8) or "unknown"
+        title = v.get("title", "Untitled")
+        thumbnail = v.get("thumbnail", "")
+        mp4_url = hls_to_mp4_url(m3u8)
+        
+        ai_started_key = f"argon_ai_started_{asin}_{idx}"
+        
+        with st.container(border=True):
+            col_thumb, col_info, col_btn = st.columns([1, 3, 1.2])
+            
             with col_thumb:
-                if v.get("thumbnail_url"):
-                    st.image(v["thumbnail_url"], use_container_width=True)
-                st.caption(f"`{v.get('video_id', '')[:8]}...`")
-                st.caption(f"⏱ {ai.get('duration_seconds', '?')}s • 🎬 {ai.get('production_quality', '?')}")
-            with col_summary:
-                st.markdown(f"**Summary:** {ai.get('summary', '—')}")
-                st.markdown(f"**Setting:** {ai.get('setting', '—')}")
-                st.markdown(f"**People:** {ai.get('people_count', 0)} — {ai.get('people_description', '—')}")
-            
-            # Quality signals row
-            st.markdown("---")
-            sig = st.columns(4)
-            sig[0].metric("Quality", f"{ai.get('listing_quality_score', 0)}/10")
-            sig[1].metric("Style", ai.get('lifestyle_vs_studio', '—').title())
-            sig[2].metric("Voiceover", "✅ Yes" if ai.get('has_voiceover') else "❌ No")
-            sig[3].metric("Music", "🎵 Yes" if ai.get('music_present') else "🔇 No")
-            
-            # Tabs for deep dive
-            tabs = st.tabs(["📝 Claims", "🎯 Use Cases", "📺 On-Screen Text", "💡 Improvements", "🔧 Raw JSON"])
-            
-            with tabs[0]:
-                claims = ai.get("key_claims", [])
-                if claims:
-                    for c in claims:
-                        st.markdown(f"• {c}")
+                if thumbnail:
+                    st.image(thumbnail, use_container_width=True)
                 else:
-                    st.caption("No claims detected.")
+                    st.caption("(no thumb)")
+            
+            with col_info:
+                st.markdown(f"**🎥 Видео {idx+1}:** {title}")
+                st.caption(f"🆔 `{video_id[:13]}...`")
+                st.markdown(
+                    f"🔗 [HLS stream]({m3u8}) • "
+                    f"📥 [Direct MP4]({mp4_url})"
+                )
+            
+            with col_btn:
+                if st.button(
+                    "🤖 AI анализ",
+                    key=f"btn_{ai_started_key}",
+                    help="Запустить Gemini Vision (~17 сек, ~$0.005)",
+                    use_container_width=True,
+                ):
+                    st.session_state[ai_started_key] = True
+            
+            # ─── Step 3: Run AI analysis if button clicked ───────
+            if st.session_state.get(ai_started_key):
+                with st.spinner(f"🎬 ffmpeg → 🤖 Gemini analyzing video {idx+1}..."):
+                    try:
+                        ai = _cached_analyze_video(asin, m3u8)
+                    except Exception as e:
+                        st.error(f"AI analysis failed: {e}")
+                        st.session_state[ai_started_key] = False
+                        continue
                 
-                transcript = ai.get("voiceover_transcript")
-                if transcript:
-                    st.markdown("**Voiceover transcript:**")
-                    st.info(transcript)
-            
-            with tabs[1]:
-                uses = ai.get("use_cases_shown", [])
-                if uses:
-                    st.markdown(" ".join(f"`{u}`" for u in uses))
-                else:
-                    st.caption("No specific use cases shown.")
-                st.markdown(f"**Target audience:** {ai.get('target_audience_inferred', '—')}")
-            
-            with tabs[2]:
-                text = ai.get("on_screen_text", [])
-                if text:
-                    for t in text:
-                        st.markdown(f"• `{t}`")
-                else:
-                    st.caption("No on-screen text detected.")
-            
-            with tabs[3]:
-                tips = ai.get("improvement_suggestions", [])
-                if tips:
-                    for t in tips:
-                        st.markdown(f"💡 {t}")
-                else:
-                    st.caption("No improvement suggestions.")
-            
-            with tabs[4]:
-                st.json(ai)
-                meta = ai.get("_meta", {})
-                if "cost_usd" in meta:
-                    st.caption(
-                        f"⚡ {meta.get('elapsed_seconds')}s • "
-                        f"💰 ${meta.get('cost_usd')} • "
-                        f"📦 {meta.get('file_size_mb')}MB • "
-                        f"🔤 {meta.get('tokens', {}).get('input', 0)}+{meta.get('tokens', {}).get('output', 0)} tokens"
-                    )
-            
-            # Direct video link (for download)
-            st.markdown(f"🔗 [Direct video file (HLS)]({v['m3u8_url']})")
+                st.markdown("---")
+                _render_ai_analysis(ai, idx)
