@@ -4637,21 +4637,22 @@ def show_listing_admin_panel():
                             _c0.close()
                         except Exception:
                             _cur_plain = None
-                        if _cur_plain:
-                            st.text_input(
-                                "🔑 Старый пароль (текущий, видно):", value=_cur_plain,
-                                key=f"la2_oldpw_{uid}", disabled=True,
-                                help="Пароль, который стоит сейчас. Только для просмотра.",
-                            )
-                        else:
-                            st.caption("🔒 Старый пароль неизвестен (задан до включения хранения "
-                                       "или через регистрацию) — задай новый ниже, и дальше он будет виден.")
                         new_pw = st.text_input(
                             "🔑 Новый пароль:", value="",
                             type="password", key=f"la2_pw_{uid}",
                             placeholder="пусто = не менять",
-                            help="Впиши новый пароль и нажми «Сменить». После сохранения он покажется в «Старый пароль».",
+                            help="Впиши новый пароль и нажми «Сменить».",
                         )
+                        # Старый (текущий) пароль — ниже, видно при нажатии 👁
+                        st.text_input(
+                            "🔑 Старый пароль (нажми 👁 чтобы увидеть):",
+                            value=(_cur_plain or ""),
+                            type="password", key=f"la2_oldpw_{uid}", disabled=True,
+                            help="Текущий пароль. Виден только если он задавался через эту админку.",
+                        )
+                        if not _cur_plain:
+                            st.caption("🔒 пусто — старый пароль неизвестен (задан до включения хранения "
+                                       "или через регистрацию). Задай новый выше и сохрани — дальше будет виден тут.")
                         if st.button("💾 Сменить пароль", key=f"la2_save_pw_{uid}", use_container_width=True):
                             if new_pw and len(new_pw) >= 6:
                                 import bcrypt as _bc
