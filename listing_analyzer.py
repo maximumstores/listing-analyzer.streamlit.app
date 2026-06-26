@@ -4334,6 +4334,7 @@ def show_listing_admin_panel():
             cur = conn.cursor()
             cur.execute("ALTER TABLE listing_analysis ADD COLUMN IF NOT EXISTS analyzed_by TEXT DEFAULT ''")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS listing_role TEXT DEFAULT NULL")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_plain TEXT")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS listing_user_asins (
                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -4625,16 +4626,34 @@ def show_listing_admin_panel():
                                 _cur.execute("DELETE FROM users WHERE id=%s", (uid,))
                                 _c.commit(); _c.close(); st.rerun()
                         
-                        # Пароль
+                        # Пароль — поле сразу подставлено текущим (видно через 👁), можно оставить или изменить
                         st.markdown("---")
-                        new_pw = st.text_input("🔑 Новый пароль:", type="password", key=f"la2_pw_{uid}")
+                        _cur_plain = None
+                        try:
+                            _c0 = get_db(); _cur0 = _c0.cursor()
+                            _cur0.execute("SELECT password_plain FROM users WHERE id=%s", (uid,))
+                            _pp = _cur0.fetchone()
+                            _cur_plain = _pp[0] if _pp else None
+                            _c0.close()
+                        except Exception:
+                            _cur_plain = None
+                        new_pw = st.text_input(
+                            "🔑 Новый пароль:", value=(_cur_plain or ""),
+                            type="password", key=f"la2_pw_{uid}",
+                            help="Нажми 👁 чтобы увидеть текущий. Оставь как есть или впиши новый — и сохрани.",
+                        )
+                        if not _cur_plain:
+                            st.caption("🔒 Текущий пароль неизвестен (задан до включения хранения "
+                                       "или через регистрацию) — задай новый.")
                         if st.button("💾 Сменить пароль", key=f"la2_save_pw_{uid}", use_container_width=True):
                             if new_pw and len(new_pw) >= 6:
                                 import bcrypt as _bc
                                 hashed = _bc.hashpw(new_pw.encode(), _bc.gensalt()).decode()
                                 _c = get_db(); _cur = _c.cursor()
-                                _cur.execute("UPDATE users SET password=%s WHERE id=%s", (hashed, uid))
-                                _c.commit(); _c.close(); st.success("✅ Пароль изменён!")
+                                _cur.execute("UPDATE users SET password=%s, password_plain=%s WHERE id=%s",
+                                             (hashed, new_pw, uid))
+                                _c.commit(); _c.close(); st.success("✅ Пароль сохранён!")
+                                st.rerun()
                             else:
                                 st.error("Мин. 6 символов")
                         
@@ -4701,9 +4720,9 @@ def show_listing_admin_panel():
                         hashed = _bc.hashpw(nc_pass.encode(), _bc.gensalt()).decode()
                         _c = get_db(); _cur = _c.cursor()
                         _cur.execute("""
-                            INSERT INTO users (email, password, name, role, listing_role, is_active)
-                            VALUES (%s,%s,%s,'viewer',%s,TRUE)
-                        """, (nc_email.strip().lower(), hashed, nc_name, nc_role))
+                            INSERT INTO users (email, password, password_plain, name, role, listing_role, is_active)
+                            VALUES (%s,%s,%s,%s,'viewer',%s,TRUE)
+                        """, (nc_email.strip().lower(), hashed, nc_pass, nc_name, nc_role))
                         _c.commit(); _c.close()
                         st.success(f"✅ Пользователь {nc_email} создан!")
                         st.rerun()
