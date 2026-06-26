@@ -4626,7 +4626,7 @@ def show_listing_admin_panel():
                                 _cur.execute("DELETE FROM users WHERE id=%s", (uid,))
                                 _c.commit(); _c.close(); st.rerun()
                         
-                        # Пароль — поле сразу подставлено текущим (видно через 👁), можно оставить или изменить
+                        # Пароль: «Старый» — текущий (видно), «Новый» — для смены
                         st.markdown("---")
                         _cur_plain = None
                         try:
@@ -4637,14 +4637,21 @@ def show_listing_admin_panel():
                             _c0.close()
                         except Exception:
                             _cur_plain = None
+                        if _cur_plain:
+                            st.text_input(
+                                "🔑 Старый пароль (текущий, видно):", value=_cur_plain,
+                                key=f"la2_oldpw_{uid}", disabled=True,
+                                help="Пароль, который стоит сейчас. Только для просмотра.",
+                            )
+                        else:
+                            st.caption("🔒 Старый пароль неизвестен (задан до включения хранения "
+                                       "или через регистрацию) — задай новый ниже, и дальше он будет виден.")
                         new_pw = st.text_input(
-                            "🔑 Новый пароль:", value=(_cur_plain or ""),
+                            "🔑 Новый пароль:", value="",
                             type="password", key=f"la2_pw_{uid}",
-                            help="Нажми 👁 чтобы увидеть текущий. Оставь как есть или впиши новый — и сохрани.",
+                            placeholder="пусто = не менять",
+                            help="Впиши новый пароль и нажми «Сменить». После сохранения он покажется в «Старый пароль».",
                         )
-                        if not _cur_plain:
-                            st.caption("🔒 Текущий пароль неизвестен (задан до включения хранения "
-                                       "или через регистрацию) — задай новый.")
                         if st.button("💾 Сменить пароль", key=f"la2_save_pw_{uid}", use_container_width=True):
                             if new_pw and len(new_pw) >= 6:
                                 import bcrypt as _bc
