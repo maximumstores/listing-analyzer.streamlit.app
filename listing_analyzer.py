@@ -11,6 +11,13 @@ try:
     from argon_video import render_video_intelligence
 except ImportError:
     render_video_intelligence = None
+
+# ── Amazon listing field limits (change effective 2026-07-27) ───────────────────
+# Mobile search title shrinks ~200 → 75 chars; new "Item Highlights" field = 125.
+# Single source of truth: reference these instead of hardcoding limits.
+TITLE_LIMIT = 75          # max chars for the product title
+HIGHLIGHTS_LIMIT = 125    # max chars for the new Item Highlights field
+
 # После st.set_page_config
 ensure_tables()
 create_admin_if_not_exists()
@@ -1290,8 +1297,8 @@ def analyze_text(our_data, competitor_data_list, vision_result, asin, log, lang=
     _bullet_bytes = [len(b.encode()) for b in _bullets]
     _facts = f"""
 FACTUAL STATS (do NOT contradict these):
-- Title length: {_title_len} characters (limit: 125)
-- Title is {'OVER limit' if _title_len > 125 else 'within limit'}
+- Title length: {_title_len} characters (limit: {TITLE_LIMIT})
+- Title is {'OVER limit' if _title_len > TITLE_LIMIT else 'within limit'}
 - Number of bullets: {len(_bullets)}
 - Bullet byte lengths: {_bullet_bytes}
 - Any bullet over 250 bytes: {'YES - ' + str([i+1 for i,x in enumerate(_bullet_bytes) if x>250]) if any(x>250 for x in _bullet_bytes) else 'NO'}
@@ -1410,11 +1417,11 @@ Analyze the listing above and score each component. Use ONLY real data from the 
 
 ## SCORING CRITERIA
 
-### TITLE — ≤125 chars, [Material][Gender][Type][Feature][Use case] format, top keywords, readable
+### TITLE — ≤{TITLE_LIMIT} chars, [Material][Gender][Type][Feature][Use case] format, top keywords, readable
 - NOTE: Brand name is shown separately above title by Amazon — do NOT penalize for missing brand in title
-- 90-100%: ≤125 chars, has material+type+gender+key feature, no keyword stuffing, readable
+- 90-100%: ≤{TITLE_LIMIT} chars, has material+type+gender+key feature, no keyword stuffing, readable
 - 70-89%: Minor issues (missing 1 element, slightly keyword-heavy)
-- 50-69%: Too long (>125), poor structure, or unreadable
+- 50-69%: Too long (>{TITLE_LIMIT}), poor structure, or unreadable
 - 0-49%: Broken, all caps spam, or completely irrelevant
 
 ### BULLETS — 5 bullets, ≤250 chars each, "Feature: Details. Benefit." format
@@ -2486,44 +2493,6 @@ with st.expander("📎 Листинги", expanded=("result" not in st.session_s
 
 
 def db_all_competitors():
-    """Extract all unique competitors from competitors_json field"""
-    conn = get_db()
-    if not conn: return []
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT asin, competitors_json, analyzed_at, our_title
-            FROM listing_analysis
-            WHERE competitors_json IS NOT NULL AND competitors_json != '[]'
-            ORDER BY analyzed_at DESC
-            LIMIT 50
-        """)
-        rows = cur.fetchall()
-        conn.close()
-        seen = {}
-        for asin, comp_json, date, our_title in rows:
-            try:
-                comps = json.loads(comp_json) if comp_json else []
-                for c in comps:
-                    casin = c.get("asin","")
-                    if not casin or casin in seen: continue
-                    seen[casin] = {
-                        "asin": casin,
-                        "title": c.get("title",""),
-                        "score": c.get("overall",0),
-                        "price": c.get("price",""),
-                        "rating": c.get("rating",""),
-                        "reviews": c.get("reviews",""),
-                        "analyzed_with": asin,
-                        "our_title": our_title,
-                        "date": date,
-                    }
-            except: pass
-        return list(seen.values())
-    except Exception as e:
-        return []
-
-def db_all_competitors():
     conn = get_db()
     if not conn: return []
     try:
@@ -3537,7 +3506,7 @@ def health_card():
         except:
             _rat_val = 0.0
         _rat_c = "#22c55e" if _rat_val >= 4.4 else ("#f59e0b" if _rat_val >= 4.3 else "#ef4444")
-        _title_c = "#fca5a5" if tlen > 125 else "#86efac"
+        _title_c = "#fca5a5" if tlen > TITLE_LIMIT else "#86efac"
         st.markdown(f"""<div style="background:linear-gradient(135deg,#1e293b,#334155);border-radius:16px;padding:24px;color:white;margin-bottom:16px">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
     <div>
@@ -4978,12 +4947,17 @@ if page == "🏠 Обзор":
     with _tool_cols[0]:
         if st.button("✍️ Переписать листинг", use_container_width=True, key="btn_rewriter", help="AI перепишет Title + 5 Bullets с учётом COSMO, JTBD и VPC gaps. ~10 сек."):
             with st.spinner("✍️ AI пишет title + 5 буллетов..."):
-                _rw_prompt = f"""Rewrite this Amazon listing. Product: {od.get('title','')}
+                _rw_prompt = f"""Rewrite this Amazon listing for the NEW July 27 format (title/highlights split).
+Product: {od.get('title','')}
 VPC gaps: {r.get('vpc_analysis',{}).get('pain_relievers_missing',[])}
 JTBD: {r.get('jtbd_analysis',{}).get('job_story','')}
 Title gaps: {r.get('title_gaps',[])}
 Bullets gaps: {r.get('bullets_gaps',[])}
-Write: 1. TITLE (max 125 chars) 2. BULLET 1-5 (max 200 chars each, "Feature: Benefit.")
+Write:
+1. TITLE (max {TITLE_LIMIT} chars INCLUDING spaces): brand + primary keyword + 1 differentiator + size/count. Use numerals (2 not two), abbreviate units, no claim words, never cut a word mid-way. Show exact char count.
+2. ITEM HIGHLIGHTS (max {HIGHLIGHTS_LIMIT} chars): materials + use cases, keywords that didn't fit the title, must read human-written, no keyword stuffing, plain text no bullets. Show exact char count.
+3. BULLET 1-5 (max 200 chars each, "Feature: Benefit.")
+4. DROPPED KEYWORDS: list every keyword removed from the original title so a human can judge if any ranking term is lost.
 NO stop words. Respond in {'Russian' if st.session_state.get('analysis_lang','ru')=='ru' else 'English'}."""
                 st.session_state["_ai_rewrite"] = ai_call("Amazon listing copywriter.", _rw_prompt, max_tokens=1500)
 
@@ -5907,7 +5881,7 @@ elif page == "📝 Контент":
         st.markdown("""
 **Stop Words** (вверху) — 🚫 красные = мгновенная suppression листинга Amazon. Убирай немедленно!
 
-**Title:** ≤125 символов. Формат: [Материал][Гендер][Тип][Фича][Использование]
+**Title:** ≤75 символов (моб. формат Amazon с 27.07). Формат: [Материал][Гендер][Тип][Фича][Использование]
 
 **Bullets:** 5 штук, ≤250 байт каждый. Формат: "Фича: Польза. Контекст."
 
@@ -5915,7 +5889,7 @@ elif page == "📝 Контент":
 
 **Что делать:**
 1. Убери все 🚫 Stop Words
-2. Исправь Title если >125 симв.
+2. Исправь Title если >75 симв.
 3. Добавь ❌ ключевые слова из Keyword Ideas
 """)
 
@@ -6278,7 +6252,16 @@ SCORE: [0-100]%
         st.caption("✅ = уже есть в Title/Bullets | ❌ = отсутствует — добавить!")
     st.divider()
 
-    _sec("Title", "title_score", raw_text=our_title, char_limit=125)
+    _sec("Title", "title_score", raw_text=our_title, char_limit=TITLE_LIMIT)
+    st.divider()
+    _highlights_text = od.get("item_highlights","") or od.get("highlights","")
+    st.markdown("**Item Highlights** <span style='font-size:0.72rem;color:#64748b'>(новое поле с 27.07, searchable, ≤{} симв.)</span>".format(HIGHLIGHTS_LIMIT), unsafe_allow_html=True)
+    if _highlights_text:
+        _hl_len = len(_highlights_text)
+        st.markdown(f"<small style='color:{'red' if _hl_len>HIGHLIGHTS_LIMIT else 'gray'}'>📝 {_hl_len} / {HIGHLIGHTS_LIMIT}</small>", unsafe_allow_html=True)
+        st.markdown(f"> {_highlights_text}")
+    else:
+        st.markdown('<div style="background:#1a1a0a;border-left:3px solid #f59e0b;border-radius:6px;padding:8px 12px"><span style="color:#fbbf24;font-size:0.82rem">⚠️ Item Highlights не заполнены — после 27.07 это бесплатные 125 searchable-символов. Сгенерируй через ✍️ Переписать листинг.</span></div>', unsafe_allow_html=True)
     st.divider()
     _sec("Bullets", "bullets_score", raw_text="\n".join([f"• {b}" for b in our_bullets]) if our_bullets else "")
     st.divider()
@@ -6319,7 +6302,7 @@ elif page == "🏆 Benchmark":
         colors2=len([c for c in d.get("customization_options",{}).get("color",[]) if c.get("asin") and c.get("asin")!="undefined"])
         sizes2=len(d.get("customization_options",{}).get("size",[]))
         if "one size" in str(pi2.get("Size","")).lower(): sizes2=3
-        ts=min(10,max(0,(1.5 if len(title2)<=125 else 0)+(3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",title2) else 0)+1))
+        ts=min(10,max(0,(1.5 if len(title2)<=TITLE_LIMIT else 0)+(3.5 if any(k in title2.lower() for k in ["merino","wool","shirt","base layer","tank"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",title2) else 0)+1))
         bs=min(10,max(0,(1.5 if len(bul2)<=5 else 0)+(2.5 if any(":"in b for b in bul2) else 1)+min(4,len(bul2))+1+1))
         ds=0 if not desc2 else min(10,4+(3 if len(desc2)>200 else 1))
         ps=min(10,max(0,(4 if len(imgs2)>=6 else len(imgs2)*0.6)+(2 if has_vid else 0)+(4 if len(imgs2)>=6 else 0)))
@@ -7414,7 +7397,7 @@ elif _is_competitor_page:
     # BSR can be string or dict
     _bsr_raw = cpi.get("Best Sellers Rank","") or c.get("bestseller_rank","") or c.get("bsr","")
     cbsr_s = str(_bsr_raw)[:60] if _bsr_raw else ""
-    _ts=min(10,max(0,(1.5 if tlen<=125 else 0)+(3.5 if any(k in _t2.lower() for k in ["merino","wool","tank","shirt","base layer"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",_t2) else 0)+1))
+    _ts=min(10,max(0,(1.5 if tlen<=TITLE_LIMIT else 0)+(3.5 if any(k in _t2.lower() for k in ["merino","wool","tank","shirt","base layer"]) else 1.5)+3+(1 if not re.search(r"[!$?{}]",_t2) else 0)+1))
     _bs=min(10,max(0,(1.5 if len(_b2)<=5 else 0)+(2.5 if any(":"in b for b in _b2) else 1)+min(4,len(_b2))+1+1))
     _ds=0 if not _d2 else min(10,4+(3 if len(_d2)>200 else 1))
     _ps=min(10,max(0,(4 if len(_i2)>=6 else len(_i2)*0.6)+(2 if _vid2 else 0)+(4 if len(_i2)>=6 else 0)))
@@ -7451,7 +7434,7 @@ elif _is_competitor_page:
 
     _cmp_saved = st.session_state.get("_marketplace","com")
     _crat_c = "#22c55e" if _rat2>=4.4 else ("#f59e0b" if _rat2>=4.3 else "#ef4444")
-    _ctlen_c = "#fca5a5" if tlen>125 else "#86efac"
+    _ctlen_c = "#fca5a5" if tlen>TITLE_LIMIT else "#86efac"
     _cbsr_s2 = str(cpi.get("Best Sellers Rank","") or c.get("bestseller_rank","") or "")[:50]
     _cmp_saved = st.session_state.get("_marketplace","com")
 
@@ -8487,7 +8470,12 @@ SCORE: [0-100]%
         st.caption("Так покупатель видит твой товар в поиске Amazon")
 
         _title_search = _title[:80] + ("…" if _tlen > 80 else "")
-        _title_search_c = "#ef4444" if _tlen > 80 else "#22c55e"
+        if _tlen > 80:
+            _title_search_c, _title_search_note = "#ef4444", f"⚠️ {_tlen} симв. — обрезается на экране И над лимитом {TITLE_LIMIT}"
+        elif _tlen > TITLE_LIMIT:
+            _title_search_c, _title_search_note = "#f59e0b", f"🟡 {_tlen} симв. — влезает на экран, но >{TITLE_LIMIT} (Amazon перепишет после 27.07)"
+        else:
+            _title_search_c, _title_search_note = "#22c55e", f"✅ {_tlen} симв. — OK"
         _main_img_html = ""
         if _imgs:
             try:
@@ -8503,7 +8491,7 @@ SCORE: [0-100]%
   <div style="margin-top:8px">
     <div style="font-size:0.78rem;color:#0f1111;line-height:1.3;font-weight:500">{_title_search}</div>
     <div style="margin-top:4px">
-      <span style="color:{_title_search_c};font-size:0.65rem">{"⚠️ " + str(_tlen) + " симв. — обрезается" if _tlen>80 else "✅ " + str(_tlen) + " симв. — OK"}</span>
+      <span style="color:{_title_search_c};font-size:0.65rem">{_title_search_note}</span>
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
       <span style="color:#f59e0b;font-size:0.8rem">{("★" * min(5,int(float(str(_rating or "0").split()[0]) + 0.5))) if str(_rating or "0").split()[0].replace(".","").isdigit() else "★★★★"}</span>
@@ -8519,7 +8507,12 @@ SCORE: [0-100]%
         st.caption("Первый экран без скролла — решает 80% покупок")
 
         _title_pdp = _title[:120] + ("…" if _tlen > 120 else "")
-        _title_pdp_c = "#ef4444" if _tlen > 120 else "#22c55e"
+        if _tlen > 120:
+            _title_pdp_c, _title_pdp_note = "#ef4444", "⚠️ обрезается на экране И над лимитом"
+        elif _tlen > TITLE_LIMIT:
+            _title_pdp_c, _title_pdp_note = "#f59e0b", f"🟡 виден полностью, но >{TITLE_LIMIT} (перепишет Amazon)"
+        else:
+            _title_pdp_c, _title_pdp_note = "#22c55e", "✅ полный title"
         _b1 = _bullets[0][:90] + "…" if _bullets and len(_bullets[0])>90 else (_bullets[0] if _bullets else "")
         _b2 = _bullets[1][:90] + "…" if len(_bullets)>1 and len(_bullets[1])>90 else (_bullets[1] if len(_bullets)>1 else "")
         _b3 = _bullets[2][:90] + "…" if len(_bullets)>2 and len(_bullets[2])>90 else (_bullets[2] if len(_bullets)>2 else "")
@@ -8529,7 +8522,7 @@ SCORE: [0-100]%
   {_main_img_html if _imgs else ""}
   <div style="margin-top:8px">
     <div style="font-size:0.75rem;color:#0f1111;line-height:1.3;font-weight:500">{_title_pdp}</div>
-    <div style="font-size:0.62rem;color:{_title_pdp_c};margin-top:2px">{"⚠️ обрезается" if _tlen>120 else "✅ полный title"}</div>
+    <div style="font-size:0.62rem;color:{_title_pdp_c};margin-top:2px">{_title_pdp_note}</div>
     <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
       <span style="color:#f59e0b;font-size:0.75rem">★ {_rating}</span>
       <span style="font-size:0.68rem;color:#007185">{_reviews} отзывов</span>
@@ -8550,13 +8543,13 @@ SCORE: [0-100]%
 
     _mob_issues = []
 
-    if _tlen > 80:
+    if _tlen > TITLE_LIMIT:
         _mob_issues.append({
             "severity": "HIGH",
             "icon": "🔴",
-            "title": f"Title обрезается в поиске ({_tlen} симв., лимит ~80)",
+            "title": f"Title не влезает в новый лимит / обрезается в поиске ({_tlen} симв., лимит {TITLE_LIMIT})",
             "impact": "Покупатель не видит ключевые слова → теряет интерес до клика",
-            "fix": f"Перенеси самые важные слова в первые 80 символов. Сейчас виден только: '{_title[:80]}...'"
+            "fix": f"Перенеси самые важные слова в первые {TITLE_LIMIT} символов. Сейчас виден только: '{_title[:TITLE_LIMIT]}...'"
         })
     if _tlen > 120:
         _mob_issues.append({
