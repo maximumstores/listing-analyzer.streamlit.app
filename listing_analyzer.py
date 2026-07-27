@@ -95,6 +95,27 @@ def db_init():
                 conn.commit()
             except Exception:
                 pass
+        # ── Мониторинг контента: последний результат проверки по каждому ASIN ──
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS listing_content_checks (
+                    asin TEXT NOT NULL,
+                    marketplace TEXT DEFAULT 'com',
+                    status TEXT DEFAULT 'ok',          -- ok | warn | broken | error
+                    gallery_count INT DEFAULT 0,
+                    gallery_broken INT DEFAULT 0,
+                    has_aplus BOOLEAN DEFAULT FALSE,
+                    aplus_count INT DEFAULT 0,
+                    aplus_broken INT DEFAULT 0,
+                    issues_json TEXT,
+                    checked_at TIMESTAMP DEFAULT NOW(),
+                    checked_by TEXT,
+                    PRIMARY KEY (asin, marketplace)
+                )
+            """)
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
     except Exception:
         pass
@@ -2077,6 +2098,10 @@ with st.sidebar:
                  type="primary" if _cur3=="📋 Workflow" else "secondary"):
         st.session_state["page"] = "📋 Workflow"
         st.rerun()
+    if st.button("🚨  Мониторинг", key="nav_monitor", use_container_width=True,
+                 type="primary" if _cur3=="🚨 Мониторинг" else "secondary"):
+        st.session_state["page"] = "🚨 Мониторинг"
+        st.rerun()
     # ── КАБИНЕТ (перенесено к кнопке Выйти в user-badge) ────────────────────
     _u = st.session_state.get("user", {})
     _is_la_admin = _u.get("listing_role") == "admin" or (_u.get("listing_role") is None and _u.get("role") == "admin")
@@ -3151,6 +3176,329 @@ def page_history():
 <div style="font-weight:600;color:#1e293b;margin-top:4px;white-space:pre-line">{_fname}</div>
 </div>''', unsafe_allow_html=True)
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 🚨 CONTENT MONITOR — чекер актуальности контента (галерея + A+)
+# ══════════════════════════════════════════════════════════════════════════════
+
+MONITOR_MIN_GALLERY = 5          # ниже этого без baseline — warning
+_PLACEHOLDER_MARKS = ("grey-pixel", "transparent-pixel", "no-image", "noimage",
+                      "placeholder", "spacer")
+
+def check_image_url(url, timeout=10):
+    """Проверяет что ссылка на фото реально отдаёт картинку.
+    Возвращает (ok: bool, reason: str). Ловит suppressed/удалённые изображения."""
+    if not url or not isinstance(url, str) or not url.startswith("http"):
+        return False, "нет URL"
+    if any(m in url.lower() for m in _PLACEHOLDER_MARKS):
+        return False, "заглушка Amazon"
+    try:
+        r = requests.head(url, timeout=timeout, allow_redirects=True,
+                          headers={"User-Agent": "Mozilla/5.0"})
+        # часть CDN не поддерживает HEAD корректно → добираем GET
+        if r.status_code in (403, 405) or (r.status_code == 200 and not r.headers.get("Content-Type")):
+            r = requests.get(url, timeout=timeout, stream=True,
+                             headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return False, f"HTTP {r.status_code}"
+        _ct = (r.headers.get("Content-Type") or "").lower()
+        if _ct and "image" not in _ct and "octet-stream" not in _ct:
+            return False, f"не картинка ({_ct})"
+        _cl = r.headers.get("Content-Length")
+        if _cl and _cl.isdigit() and int(_cl) < 1000:
+            return False, "пустое изображение"
+        return True, "ok"
+    except Exception as e:
+        return False, f"ошибка сети: {str(e)[:40]}"
+
+
+def db_content_baseline(asin):
+    """Эталон из последнего анализа: сколько фото и был ли A+.
+    Возвращает {'gallery': int, 'aplus': bool, 'date': ...} или None."""
+    conn = get_db()
+    if not conn or not asin:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT our_data_json, aplus_img_urls_json, analyzed_at
+            FROM listing_analysis
+            WHERE (asin = %s OR our_data_json::text ILIKE %s)
+              AND listing_type = 'наш' AND overall_score > 0
+            ORDER BY analyzed_at DESC LIMIT 1
+        """, (asin, f'%{asin}%'))
+        row = cur.fetchone(); conn.close()
+        if not row:
+            return None
+        _gallery = 0; _aplus = False
+        if row[0]:
+            try:
+                _od = json.loads(row[0])
+                _imgs = _od.get("images_of_specified_asin", _od.get("images", []))
+                if isinstance(_imgs, list):
+                    _gallery = len([u for u in _imgs if isinstance(u, str) and u.startswith("http")])
+                _aplus = bool(_od.get("aplus") or _od.get("aplus_content") or _od.get("aplus_image_urls"))
+            except Exception:
+                pass
+        if not _aplus and row[1]:
+            try:
+                _aplus = len(json.loads(row[1])) > 0
+            except Exception:
+                pass
+        return {"gallery": _gallery, "aplus": _aplus, "date": row[2]}
+    except Exception:
+        return None
+
+
+def check_listing_content(asin, domain="com", log=None):
+    """Тянет текущий листинг, проверяет галерею и A+ на битые ссылки
+    и сверяет с baseline из истории. Возвращает dict с вердиктом."""
+    from concurrent.futures import ThreadPoolExecutor
+    _log = log or (lambda m: None)
+    result = {"asin": asin, "marketplace": domain, "status": "ok",
+              "gallery_count": 0, "gallery_broken": 0, "has_aplus": False,
+              "aplus_count": 0, "aplus_broken": 0, "issues": []}
+
+    data, gallery_urls = scrapingdog_product(asin, _log, domain=domain)
+    if not data:
+        result["status"] = "error"
+        result["issues"].append({"sev": "error", "text": "ScrapingDog не вернул данные листинга (проверь ASIN/баланс)"})
+        return result
+
+    # A+ баннеры
+    aplus_urls = data.get("aplus_image_urls", data.get("aplus_images", []))
+    aplus_urls = [u for u in aplus_urls if isinstance(u, str) and u.startswith("http")]
+    has_aplus = bool(data.get("aplus") or aplus_urls or data.get("aplus_content"))
+
+    result["gallery_count"] = len(gallery_urls)
+    result["aplus_count"] = len(aplus_urls)
+    result["has_aplus"] = has_aplus
+
+    # Проверяем ссылки параллельно
+    def _probe(pair):
+        _kind, _u = pair
+        _ok, _why = check_image_url(_u)
+        return (_kind, _u, _ok, _why)
+
+    _to_check = [("gallery", u) for u in gallery_urls[:7]] + [("aplus", u) for u in aplus_urls[:8]]
+    _broken_gallery, _broken_aplus = [], []
+    if _to_check:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for _kind, _u, _ok, _why in ex.map(_probe, _to_check):
+                if not _ok:
+                    (_broken_gallery if _kind == "gallery" else _broken_aplus).append((_u, _why))
+    result["gallery_broken"] = len(_broken_gallery)
+    result["aplus_broken"] = len(_broken_aplus)
+
+    # baseline
+    base = db_content_baseline(asin)
+
+    issues = []
+    # --- Галерея ---
+    if result["gallery_count"] == 0:
+        issues.append({"sev": "broken", "text": "🖼️ Галерея пустая — фото не отдаются вообще"})
+    if _broken_gallery:
+        for _u, _why in _broken_gallery:
+            issues.append({"sev": "broken", "text": f"🖼️ Битое фото галереи ({_why}): {_u[:70]}"})
+    if base and base.get("gallery", 0) > 0 and result["gallery_count"] < base["gallery"]:
+        _drop = base["gallery"] - result["gallery_count"]
+        issues.append({"sev": "broken" if _drop >= 2 else "warn",
+                       "text": f"🖼️ Фото стало меньше: было {base['gallery']}, сейчас {result['gallery_count']} (−{_drop})"})
+    elif not base and 0 < result["gallery_count"] < MONITOR_MIN_GALLERY:
+        issues.append({"sev": "warn", "text": f"🖼️ Мало фото: {result['gallery_count']} (минимум {MONITOR_MIN_GALLERY})"})
+
+    # --- A+ ---
+    if _broken_aplus:
+        for _u, _why in _broken_aplus:
+            issues.append({"sev": "broken", "text": f"🎨 Битый A+ баннер ({_why}): {_u[:70]}"})
+    if base and base.get("aplus") and not has_aplus:
+        issues.append({"sev": "broken", "text": "🎨 A+ контент ИСЧЕЗ — раньше был, сейчас отсутствует"})
+    elif not has_aplus:
+        issues.append({"sev": "warn", "text": "🎨 A+ контент отсутствует"})
+
+    # финальный статус
+    if any(i["sev"] == "broken" for i in issues):
+        result["status"] = "broken"
+    elif any(i["sev"] == "warn" for i in issues):
+        result["status"] = "warn"
+    else:
+        result["status"] = "ok"
+    result["issues"] = issues
+    result["baseline"] = base
+    return result
+
+
+def db_save_content_check(res, checked_by=""):
+    conn = get_db()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO listing_content_checks
+              (asin, marketplace, status, gallery_count, gallery_broken,
+               has_aplus, aplus_count, aplus_broken, issues_json, checked_at, checked_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s)
+            ON CONFLICT (asin, marketplace) DO UPDATE SET
+              status=EXCLUDED.status, gallery_count=EXCLUDED.gallery_count,
+              gallery_broken=EXCLUDED.gallery_broken, has_aplus=EXCLUDED.has_aplus,
+              aplus_count=EXCLUDED.aplus_count, aplus_broken=EXCLUDED.aplus_broken,
+              issues_json=EXCLUDED.issues_json, checked_at=NOW(), checked_by=EXCLUDED.checked_by
+        """, (res["asin"], res.get("marketplace", "com"), res["status"],
+              res["gallery_count"], res["gallery_broken"], res["has_aplus"],
+              res["aplus_count"], res["aplus_broken"],
+              json.dumps(res["issues"], ensure_ascii=False), checked_by))
+        conn.commit(); conn.close()
+        return True
+    except Exception as _e:
+        st.session_state["_monitor_save_err"] = str(_e)
+        return False
+
+
+def db_get_content_checks():
+    conn = get_db()
+    if not conn:
+        return {}
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT asin, marketplace, status, gallery_count, gallery_broken,
+                   has_aplus, aplus_count, aplus_broken, issues_json, checked_at
+            FROM listing_content_checks
+        """)
+        rows = cur.fetchall(); conn.close()
+        out = {}
+        for r in rows:
+            _iss = []
+            if r[8]:
+                try: _iss = json.loads(r[8])
+                except: pass
+            out[r[0]] = {"asin": r[0], "marketplace": r[1], "status": r[2],
+                         "gallery_count": r[3], "gallery_broken": r[4],
+                         "has_aplus": r[5], "aplus_count": r[6], "aplus_broken": r[7],
+                         "issues": _iss, "checked_at": r[9]}
+        return out
+    except Exception:
+        return {}
+
+
+def page_content_monitor():
+    st.title("🚨 Мониторинг контента листингов")
+    st.caption("Проверка что галерея и A+ на месте и не сломаны. Каждая проверка тратит "
+               "1 запрос ScrapingDog на ASIN + бесплатно дёргает ссылки на фото.")
+
+    db_init()
+    _all = db_all_asins()
+    # уникальные НАШИ ASINы
+    _our = []
+    _seen = set()
+    for a in _all:
+        if a.get("type") != "наш":
+            continue
+        if a["asin"] in _seen:
+            continue
+        _seen.add(a["asin"])
+        _our.append(a)
+
+    if not _our:
+        st.info("Нет наших листингов в истории — сначала проанализируй хотя бы один листинг.")
+        return
+
+    _saved = db_get_content_checks()
+
+    # ── Сводка ────────────────────────────────────────────────────────────
+    _broken = [a for a in _our if _saved.get(a["asin"], {}).get("status") == "broken"]
+    _warn   = [a for a in _our if _saved.get(a["asin"], {}).get("status") == "warn"]
+    _ok     = [a for a in _our if _saved.get(a["asin"], {}).get("status") == "ok"]
+    _never  = [a for a in _our if a["asin"] not in _saved]
+
+    _s1, _s2, _s3, _s4 = st.columns(4)
+    _s1.markdown(f'<div style="background:#1e293b;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #ef4444"><div style="font-size:2rem;font-weight:800;color:#ef4444">{len(_broken)}</div><div style="font-size:0.7rem;color:#64748b">🔴 Поломки</div></div>', unsafe_allow_html=True)
+    _s2.markdown(f'<div style="background:#1e293b;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #f59e0b"><div style="font-size:2rem;font-weight:800;color:#f59e0b">{len(_warn)}</div><div style="font-size:0.7rem;color:#64748b">🟡 Внимание</div></div>', unsafe_allow_html=True)
+    _s3.markdown(f'<div style="background:#1e293b;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #22c55e"><div style="font-size:2rem;font-weight:800;color:#22c55e">{len(_ok)}</div><div style="font-size:0.7rem;color:#64748b">🟢 OK</div></div>', unsafe_allow_html=True)
+    _s4.markdown(f'<div style="background:#1e293b;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #64748b"><div style="font-size:2rem;font-weight:800;color:#94a3b8">{len(_never)}</div><div style="font-size:0.7rem;color:#64748b">⚪ Не проверялись</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    _rc1, _rc2 = st.columns([2, 5])
+    with _rc1:
+        _run_all = st.button(f"🔍 Проверить все ({len(_our)})", type="primary", use_container_width=True)
+    with _rc2:
+        st.caption(f"Тратит ~{len(_our)} кредитов ScrapingDog. Для точности поломок нужен хотя бы один прошлый анализ (baseline).")
+
+    if _run_all:
+        _prog = st.progress(0, text="Запускаю проверку...")
+        _log_ph = st.empty()
+        _by = st.session_state.get("user", {}).get("email", "")
+        for _i, a in enumerate(_our):
+            _prog.progress(int((_i) / len(_our) * 100), text=f"🔍 {a['asin']} ({_i+1}/{len(_our)})...")
+            try:
+                _res = check_listing_content(a["asin"], domain=a.get("marketplace", "com"),
+                                             log=lambda m: _log_ph.caption(m))
+                db_save_content_check(_res, checked_by=_by)
+            except Exception as _e:
+                _log_ph.caption(f"⚠️ {a['asin']}: {_e}")
+        _prog.progress(100, text="✅ Готово!")
+        st.rerun()
+
+    st.divider()
+
+    # ── Список листингов, сначала сломанные ───────────────────────────────
+    _order = {"broken": 0, "warn": 1, "error": 2, "ok": 3}
+    _our_sorted = sorted(_our, key=lambda a: _order.get(_saved.get(a["asin"], {}).get("status", "zzz"), 4))
+
+    for a in _our_sorted:
+        _asin = a["asin"]
+        _mp = a.get("marketplace", "com")
+        _chk = _saved.get(_asin)
+        _status = _chk["status"] if _chk else "never"
+        _cfg = {
+            "broken": ("#ef4444", "🔴 ПОЛОМКА"),
+            "warn":   ("#f59e0b", "🟡 ВНИМАНИЕ"),
+            "ok":     ("#22c55e", "🟢 OK"),
+            "error":  ("#a855f7", "🟣 ОШИБКА ПРОВЕРКИ"),
+            "never":  ("#64748b", "⚪ НЕ ПРОВЕРЯЛСЯ"),
+        }.get(_status, ("#64748b", "⚪"))
+        _color, _label = _cfg
+
+        with st.container(border=True):
+            _c1, _c2, _c3 = st.columns([5, 2, 1.2])
+            with _c1:
+                _mp_flag = {"com":"🇺🇸","de":"🇩🇪","co.uk":"🇬🇧","ca":"🇨🇦","fr":"🇫🇷","it":"🇮🇹","es":"🇪🇸","nl":"🇳🇱"}.get(_mp, "🌍")
+                st.markdown(
+                    f'<div style="font-size:0.9rem;font-weight:600;color:#e2e8f0">{(a.get("title") or "")[:55]}</div>'
+                    f'<div style="font-size:0.75rem;color:#64748b;margin-top:2px">{_mp_flag} '
+                    f'<a href="https://www.amazon.{_mp}/dp/{_asin}" target="_blank" style="color:#3b82f6">{_asin} ↗</a>'
+                    + (f' · проверен {_chk["checked_at"].strftime("%d.%m %H:%M")}' if _chk and _chk.get("checked_at") else "")
+                    + '</div>',
+                    unsafe_allow_html=True)
+            with _c2:
+                if _chk:
+                    _gc = "#ef4444" if _chk["gallery_broken"] else "#94a3b8"
+                    _ac = "#22c55e" if _chk["has_aplus"] else "#ef4444"
+                    st.markdown(
+                        f'<div style="font-size:0.75rem;color:{_gc}">🖼️ Фото: {_chk["gallery_count"]}'
+                        + (f' (битых {_chk["gallery_broken"]})' if _chk["gallery_broken"] else "") + '</div>'
+                        f'<div style="font-size:0.75rem;color:{_ac}">🎨 A+: {"есть" if _chk["has_aplus"] else "нет"}'
+                        + (f' (битых {_chk["aplus_broken"]})' if _chk["aplus_broken"] else "") + '</div>',
+                        unsafe_allow_html=True)
+            with _c3:
+                st.markdown(f'<div style="text-align:center;color:{_color};font-weight:800;font-size:0.85rem;padding-top:6px">{_label}</div>', unsafe_allow_html=True)
+                if st.button("🔍", key=f"mon_check_{_asin}_{_mp}", help="Проверить сейчас", use_container_width=True):
+                    with st.spinner(f"Проверяю {_asin}..."):
+                        _res = check_listing_content(_asin, domain=_mp, log=lambda m: None)
+                        db_save_content_check(_res, checked_by=st.session_state.get("user", {}).get("email", ""))
+                    st.rerun()
+
+            if _chk and _chk.get("issues"):
+                for _iss in _chk["issues"]:
+                    _isev = _iss.get("sev", "warn")
+                    if _isev == "broken":
+                        st.error(_iss["text"])
+                    elif _isev == "warn":
+                        st.warning(_iss["text"])
+                    else:
+                        st.info(_iss["text"])
+
+
 # ── Pages ─────────────────────────────────────────────────────────────────────
 page = st.session_state.get("page", "🏠 Обзор")
 r  = st.session_state.get("result", {})
@@ -3162,6 +3510,7 @@ imgs = st.session_state.get("images", [])
 
 
 if page == "📈 История": page_history(); st.stop()
+if page == "🚨 Мониторинг": page_content_monitor(); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
 if "result" not in st.session_state and page not in ["🔥 Топ ниши", "📱 Mobile Score", "ℹ️ О инструменте", "📖 Документация"]:
     # ── Onboarding для новых пользователей ──────────────────────────────────
@@ -9009,4 +9358,4 @@ v  = st.session_state.get("vision", "")
 od = st.session_state.get("our_data", {})
 pi = od.get("product_information", {})
 cd = st.session_state.get("comp_data_list", [])
-imgs = st.session_state.get("images", [])   
+imgs = st.session_state.get("images", [])  
