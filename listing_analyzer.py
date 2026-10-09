@@ -5,8 +5,10 @@ import io
 from datetime import datetime
 from auth import (
     show_login, logout, show_admin_panel,
-    ensure_tables, create_admin_if_not_exists
+    ensure_tables, create_admin_if_not_exists,
+    google_enabled, google_sign_in
 )
+import usage
 try:
     from argon_video import render_video_intelligence
 except ImportError:
@@ -22,8 +24,13 @@ HIGHLIGHTS_LIMIT = 125    # max chars for the new Item Highlights field
 ensure_tables()
 create_admin_if_not_exists()
 if "user" not in st.session_state:
-    show_login()
-    st.stop()
+    if google_enabled():
+        google_sign_in()        # вход через Google (@maximumstores.online)
+    else:
+        show_login()            # пока нет [auth] в Secrets — старый вход по паролю
+        st.stop()
+if google_enabled():
+    usage.log_login(st.secrets.get("DATABASE_URL", ""), st.session_state.get("user", {}).get("email", ""))
 # ── PostgreSQL history ─────────────────────────────────────────────────────────
 def safe_float_rating(val):
     """Safely convert rating string like '4.5 out of 5 stars' to float"""
@@ -2102,6 +2109,10 @@ with st.sidebar:
                  type="primary" if _cur3=="🚨 Мониторинг" else "secondary"):
         st.session_state["page"] = "🚨 Мониторинг"
         st.rerun()
+    if st.button("📈  Активность дашборда", key="nav_activity", use_container_width=True,
+                 type="primary" if _cur3=="📈 Активность дашборда" else "secondary"):
+        st.session_state["page"] = "📈 Активность дашборда"
+        st.rerun()
     # ── КАБИНЕТ (перенесено к кнопке Выйти в user-badge) ────────────────────
     _u = st.session_state.get("user", {})
     _is_la_admin = _u.get("listing_role") == "admin" or (_u.get("listing_role") is None and _u.get("role") == "admin")
@@ -3511,6 +3522,7 @@ imgs = st.session_state.get("images", [])
 
 if page == "📈 История": page_history(); st.stop()
 if page == "🚨 Мониторинг": page_content_monitor(); st.stop()
+if page == "📈 Активность дашборда": usage.render_activity_page(st.secrets.get("DATABASE_URL", "")); st.stop()
 _is_competitor_page = page.startswith("🔴 Конкурент")
 if "result" not in st.session_state and page not in ["🔥 Топ ниши", "📱 Mobile Score", "ℹ️ О инструменте", "📖 Документация"]:
     # ── Onboarding для новых пользователей ──────────────────────────────────

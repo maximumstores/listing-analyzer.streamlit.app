@@ -274,9 +274,92 @@ def show_login():
 
 def logout():
     """Вихід з системи."""
-    for key in ["user", "permissions"]:
+    for key in ["user", "permissions", "_login_logged"]:
         st.session_state.pop(key, None)
+    if google_enabled():
+        try:
+            if st.user.get("is_logged_in", False):
+                st.logout()   # сам перезапускает страницу
+                return
+        except Exception:
+            pass
     st.rerun()
+
+
+# ─── GOOGLE LOGIN ─────────────────────────────────────────────────────────────
+
+EMPLOYEE_DOMAIN = "maximumstores.online"
+
+
+def google_enabled() -> bool:
+    """Вход через Google включён, когда в Secrets есть секция [auth] с client_id.
+    Пока её нет, работает старый вход по паролю (сайт не остаётся открытым)."""
+    try:
+        return bool(st.secrets.get("auth", {}).get("client_id"))
+    except Exception:
+        return False
+
+
+def _gate_screen(message: str, button: str, on_click):
+    try:
+        st.set_page_config(page_title="Listing Analyzer", layout="wide")
+    except Exception:
+        pass
+    st.markdown(
+        "<div style='max-width:420px;margin:12vh auto 0;text-align:center'>"
+        "<img src='https://merino.tech/cdn/shop/files/MT_logo_1.png?v=1685099753&width=260' style='max-width:200px'>"
+        "<h2 style='margin:12px 0 4px'>Listing Analyzer</h2>"
+        f"<p style='color:#6e6e73;margin:0 0 18px'>{message}</p></div>", unsafe_allow_html=True)
+    _, mid, _ = st.columns([1, 1, 1])
+    mid.button(button, type="primary", on_click=on_click, use_container_width=True)
+    st.stop()
+
+
+def _user_for_email(email: str, name: str):
+    """Находит строку в users по email Google-аккаунта (роли и права сохраняются).
+    Нового сотрудника домена создаёт как viewer. Возвращает dict или None, если доступ отключён."""
+    import secrets as _sec
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, email, name, role, is_active FROM users WHERE email = %s", (email,))
+        row = cur.fetchone()
+        if row is None:
+            hashed = bcrypt.hashpw(_sec.token_urlsafe(24).encode(), bcrypt.gensalt()).decode()
+            cur.execute(
+                "INSERT INTO users (email, password, name, role, is_active) "
+                "VALUES (%s, %s, %s, 'viewer', TRUE) RETURNING id, email, name, role, is_active",
+                (email, hashed, name or email.split("@")[0]))
+            row = cur.fetchone()
+        uid, em, nm, role, active = row
+        if not active:
+            conn.commit()
+            return None
+        cur.execute("UPDATE users SET last_login = NOW() WHERE id = %s", (uid,))
+        conn.commit()
+        return {"id": uid, "email": em, "name": nm or em.split("@")[0], "role": role}
+    finally:
+        cur.close(); conn.close()
+
+
+def google_sign_in():
+    """Пускает только @maximumstores.online. Кладёт st.session_state.user как раньше делал пароль."""
+    u = st.user
+    if not u.get("is_logged_in", False):
+        _gate_screen(f"Доступ только для сотрудников @{EMPLOYEE_DOMAIN}", "Войти через Google", st.login)
+    email = str(u.get("email") or "").strip().lower()
+    if not (email.endswith("@" + EMPLOYEE_DOMAIN) and u.get("email_verified", True)):
+        _gate_screen(f"Вы вошли как {email or 'неизвестный аккаунт'}. Нужен рабочий аккаунт @{EMPLOYEE_DOMAIN}.",
+                     "Выйти", st.logout)
+    try:
+        user = _user_for_email(email, str(u.get("name") or ""))
+    except Exception as e:
+        st.error(f"DB error: {e}")
+        st.stop()
+    if user is None:
+        _gate_screen("Доступ отключён администратором.", "Выйти", st.logout)
+    st.session_state.user = user
+    st.session_state.permissions = (
+        set(ALL_REPORTS) if user["role"] == "admin" else get_user_permissions(user["id"]))
 
 
 # ─── ADMIN PANEL ─────────────────────────────────────────────────────────────

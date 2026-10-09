@@ -1,4 +1,5 @@
-streamlit
+streamlit>=1.42
+Authlib>=1.3
 google-generativeai
 anthropic
 requests
