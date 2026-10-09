@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import closing
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -48,7 +49,7 @@ def log_login(dsn: str, email: str) -> None:
         return
     st.session_state["_login_logged"] = True
     try:
-        with psycopg2.connect(dsn, sslmode=SSLMODE, connect_timeout=10) as conn, conn.cursor() as cur:
+        with closing(psycopg2.connect(dsn, sslmode=SSLMODE, connect_timeout=10)) as conn, conn, conn.cursor() as cur:
             _ensure(cur)
             cur.execute(f"INSERT INTO {SCHEMA}.login_log (email) VALUES (%s);", (email,))
     except Exception as exc:  # noqa: BLE001
@@ -56,7 +57,7 @@ def log_login(dsn: str, email: str) -> None:
 
 
 def load_logins(dsn: str) -> list[dict]:
-    with psycopg2.connect(dsn, sslmode=SSLMODE, connect_timeout=10) as conn, conn.cursor() as cur:
+    with closing(psycopg2.connect(dsn, sslmode=SSLMODE, connect_timeout=10)) as conn, conn, conn.cursor() as cur:
         _ensure(cur)
         cur.execute(f"SELECT email, logged_in_at FROM {SCHEMA}.login_log ORDER BY logged_in_at DESC LIMIT 200000;")
         return [{"email": e, "logged_in_at": t} for e, t in cur.fetchall()]
